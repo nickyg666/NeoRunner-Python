@@ -9,18 +9,29 @@ As always, big shout-out to
 
 
 Here is the idea behind the project:
+
 run script, it handles a lot of stuff so you don't have to.
+
 you don't have to know a ton about minecraft modding to get started.
+
 you run the script, you enable RCON (so it can tell your clients what they need when they try to connect), and set other configs.
+
 it runs in a tmux for persistence, optionally will autostart. It will get all the things it needs on first run. It will prompt for authentication when it needs to install software.
 
 
 You put your mods in the mods folder, don't worry if they aren't supposed to go on the server. script will read the mod manifest and sort it out for you!
+
 You try to connect, it offers modloader for client if none detected, if detected compares mods folders between client -> server, provides download link from server. (you have to open mc server, RCON, http server ports for WAN configurations)
+
 client can save to %appdata%/.minecraft/mods or whatever mod dir. 
+
 
 restart minecraft -> sees new mods -> connect to server and have fun! Or find a reason to do more work like me haha!
 
 
 
-I vibe coded this for max efficiency in getting started, then manually tweaked it to actually work. Used ChatGPT, logs attached.
+## I vibe coded this for max time efficiency in getting started, then manually tweaked it to actually work. Used ChatGPT, logs attached.
+
+workflow is generally -> workshop ideas on chatGPT/any free LLM -> turn into starter script -> manually improve -> development enters support mode (we are here right now - 02.16.2026) || feed to more advanced coding AI like claude haiku 4.5 + github copilot + opencode.ai ide -> finished product
+
+This workflow maximizes the bang for my buck on the copilot token usage - I don't waste any precious paid tokens on prototyping!

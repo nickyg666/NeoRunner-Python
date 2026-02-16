@@ -1,8 +1,11 @@
 # NeoRunner-Python
-Built for a linux host, this program will download/run the latest neoforged server (others supported as well) and try to sync mods it finds into client side to sidestep modloader swaps and client/server upgrades. I am a huge fan of the automodpack mod for what it's worth, and ## shout-out to skidam for making that mod and giving me the idea. 
+Built for a linux host, this program will download/run the latest neoforged server (others supported as well) and try to sync mods it finds into client side to sidestep modloader swaps and client/server upgrades. I am a huge fan of the automodpack mod for what it's worth, and 
+## shout-out to skidam for making that mod and giving me the idea. 
 
 
-As always, big shout-out to # My wife Sage, who understands that after I get home from work all I really want to do is more work. I love her more than trees love carbon dioxide. and to my son, who is the whole reason I would ever touch minecraft in the first place, let alone get this involved with it.
+As always, big shout-out to 
+# My wife Sage, who understands that after I get home from work all I really want to do is more work. I love her more than trees love carbon dioxide.
+# To my son, Lorenzo, who is the whole reason I would ever touch minecraft in the first place, let alone get this involved with it.
 
 
 Here is the idea behind the project:

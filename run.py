@@ -1413,19 +1413,24 @@ def main():
             # Check if first run and offer curator
             first_run_marker = os.path.join(CWD, ".curator_first_run")
             if not os.path.exists(first_run_marker) and cfg.get("run_curator_on_startup", False):
-                print("\n" + "="*70)
-                print("FIRST RUN: MOD CURATOR SETUP")
-                print("="*70)
-                print("\nWould you like to discover and add the top 100 mods")
-                print(f"for {cfg['loader']} {cfg['mc_version']} right now?")
-                print("\nThis will fetch mods from Modrinth and let you select")
-                print("which ones to add to your server.\n")
-                
-                response = input("Run mod curator now? [y/n]: ").strip().lower()
-                if response == "y":
-                    print("\nLaunching curator...")
-                    curator_command(cfg)
-                    print("\n✓ Curator complete! Starting server...\n")
+                # Only prompt if running interactively (not in systemd)
+                if sys.stdin.isatty():
+                    print("\n" + "="*70)
+                    print("FIRST RUN: MOD CURATOR SETUP")
+                    print("="*70)
+                    print("\nWould you like to discover and add the top 100 mods")
+                    print(f"for {cfg['loader']} {cfg['mc_version']} right now?")
+                    print("\nThis will fetch mods from Modrinth and let you select")
+                    print("which ones to add to your server.\n")
+                    
+                    response = input("Run mod curator now? [y/n]: ").strip().lower()
+                    if response == "y":
+                        print("\nLaunching curator...")
+                        curator_command(cfg)
+                        print("\n✓ Curator complete! Starting server...\n")
+                else:
+                    # Running as systemd service - skip interactive prompt
+                    log_event("BOOT", "Skipping interactive curator setup (running as service)")
                 
                 # Mark that we've run curator setup
                 with open(first_run_marker, "w") as f:

@@ -471,7 +471,20 @@ def run_server(cfg):
     """Start Minecraft server in tmux"""
     log_event("SERVER_START", "Starting server")
     
-    result = run(f"cd {CWD} && tmux new-session -d -s MC 'java -jar {cfg['server_jar']} nogui'")
+    loader = cfg.get("loader", "neoforge").lower()
+    
+    # Build appropriate startup command based on loader
+    if loader == "neoforge":
+        # NeoForge uses special args files from the installer
+        java_cmd = f"java @user_jvm_args.txt @libraries/net/neoforged/neoforge/21.11.38-beta/unix_args.txt nogui"
+    elif loader == "forge":
+        # Forge typically uses server jar
+        java_cmd = f"java -jar {cfg['server_jar']} nogui"
+    else:
+        # Fabric and others
+        java_cmd = f"java -jar {cfg['server_jar']} nogui"
+    
+    result = run(f"cd {CWD} && tmux new-session -d -s MC '{java_cmd}'")
     if result.returncode != 0:
         log_event("SERVER_ERROR", result.stderr)
         return False

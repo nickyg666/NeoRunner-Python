@@ -922,6 +922,9 @@ def is_library(mod_name, required_dep=False):
     """
     Check if mod is a library (not a user-facing mod)
     
+    ONLY Fabric API and core dependencies should be fetched on-demand.
+    All other libs/APIs are filtered out completely.
+    
     Args:
         mod_name: name of the mod
         required_dep: if True, don't filter (required deps override library status)
@@ -929,16 +932,21 @@ def is_library(mod_name, required_dep=False):
     Returns:
         True if should be filtered (is a library), False if user-facing
     """
-    if required_dep:
-        # Don't filter required dependencies
-        return False
+    # Only allow Fabric API/JAR - everything else gets filtered
+    fabric_whitelist = ["fabric", "fabric-api", "fabric-loader"]
+    name_lower = mod_name.lower()
     
+    # Always include whitelisted fabric mods
+    for allowed in fabric_whitelist:
+        if allowed in name_lower:
+            return False  # Don't filter - this is allowed
+    
+    # Filter ALL other libs
     lib_keywords = [
         "lib", "library", "api", "core", "base",
         "framework", "utils", "utility", "helper",
         "compat", "compatibility", "config", "registrar"
     ]
-    name_lower = mod_name.lower()
     return any(lib in name_lower for lib in lib_keywords)
 
 def resolve_mod_dependencies_modrinth(mod_id, mc_version, loader, resolved=None, optional_deps=None, depth=0, max_depth=3):
@@ -1279,73 +1287,169 @@ def download_mod_from_modrinth(mod_data, mods_dir, mc_version, loader):
         log_event("CURATOR", f"Error downloading {mod_name}: {e}")
         return False
 
-def curator_command(cfg, limit=None, show_optional_audit=True):
+def curator_command(cfg, limit=None, show_optional_audit=False):
     """
-    Main curator command - fetches and presents mods via RCON
+    Main curator command - smart dependency management
+    
+    Flow:
+    1. Fetch top N mods
+    2. Filter OUT all libs/APIs (except Fabric API if explicitly needed)
+    3. Show user-facing mods list for selection
+    4. User picks which mods they want
+    5. System auto-downloads selected mods + their required dependencies
+    6. Dependencies fetched silently in background
     
     Args:
         cfg: configuration dict
         limit: max mods to fetch (default 100, None = use config)
-        show_optional_audit: show optional deps audit report
+        show_optional_audit: show optional deps audit report (disabled by default)
     """
     mc_version = cfg.get("mc_version", "1.21.11")
     loader = cfg.get("loader", "neoforge")
     if limit is None:
         limit = cfg.get("curator_limit", 100)
     
-    print(f"\nFetching top {limit} mods for {loader} {mc_version}...")
+    print(f"\n{'='*70}")
+    print(f"MOD CURATOR - {loader.upper()} {mc_version}")
+    print(f"{'='*70}\n")
     
-    # Try cache first
-    curated, optional_deps = load_curator_cache(mc_version, loader)
+    print(f"Fetching top {limit} mods...")
+    mods = fetch_modrinth_mods(mc_version, loader, limit=limit)
+    if not mods:
+        print("Error: Could not fetch mods from Modrinth")
+        return
     
-    if not curated:
-        mods = fetch_modrinth_mods(mc_version, loader, limit=limit)
-        if not mods:
-            print("Error: Could not fetch mods from Modrinth")
-            return
-        
-        curated, optional_deps, req_deps_count = curate_mod_list(mods, mc_version, loader)
-        save_curator_cache(curated, optional_deps, mc_version, loader)
-        print(f"✓ Fetched {len(curated)} mods ({req_deps_count} auto-required deps)")
+    # Filter to ONLY user-facing mods (NO libs/APIs)
+    user_facing_mods = {}
+    for mod in mods:
+        mod_id = mod.get("id")
+        mod_name = mod.get("name")
+        if not is_library(mod_name):
+            user_facing_mods[mod_id] = {
+                "id": mod_id,
+                "name": mod_name,
+                "downloads": mod.get("downloads", 0),
+                "description": mod.get("description", "No description")
+            }
     
-    # Show optional dependencies audit if requested
-    if show_optional_audit and optional_deps:
-        print_optional_deps_audit(optional_deps, curated)
+    print(f"\n✓ Found {len(user_facing_mods)} user-facing mods (filtered out {len(mods) - len(user_facing_mods)} libs/APIs)\n")
     
-    # Launch interactive menu
+    # Display the list informally
+    print(f"{'='*70}")
+    print("AVAILABLE MODS FOR SELECTION")
+    print(f"{'='*70}\n")
+    
+    sorted_mods = sorted(user_facing_mods.items(), key=lambda x: x[1]['downloads'], reverse=True)
+    for idx, (mod_id, mod_data) in enumerate(sorted_mods, 1):
+        print(f"{idx:3}. {mod_data['name']:<40} ({mod_data['downloads']:>12,} downloads)")
+    
+    print(f"\n{len(user_facing_mods)} total mods available for selection")
+    
+    # Ask user if they want all or custom selection
+    print(f"\n{'='*70}")
+    print("SELECT MODS TO DOWNLOAD")
+    print(f"{'='*70}\n")
+    
     try:
-        send_rcon_command(cfg, "say Mod selection menu opened! Check console.")
-    except:
-        pass  # RCON may not be available
+        response = input("Download all mods? [y/n/custom]: ").strip().lower()
+    except EOFError:
+        # Running in systemd - skip and exit
+        print("(Skipping interactive selection when running as service)")
+        return
     
-    selected_mods = rcon_interactive_mod_menu(cfg, curated)
+    selected_mods_list = []
     
-    if selected_mods:
-        print(f"\nDownloading {len(selected_mods)} selected mods...")
-        mods_dir = cfg.get("mods_dir", "mods")
-        
-        downloaded_count = 0
-        for mod in selected_mods:
-            if download_mod_from_modrinth(mod, mods_dir, mc_version, loader):
-                downloaded_count += 1
-                try:
-                    send_rcon_command(cfg, f"say Downloaded: {mod['name']}")
-                except:
-                    pass
-        
-        print(f"\n✓ Downloaded {downloaded_count}/{len(selected_mods)} mods")
-        
-        # Regenerate mod ZIP
-        print("\nRegenerating mod ZIP...")
-        sort_mods_by_type(mods_dir)
-        create_mod_zip(mods_dir)
-        
+    if response == "y":
+        # Select all
+        selected_mods_list = list(user_facing_mods.values())
+        print(f"\n✓ Selected all {len(selected_mods_list)} mods")
+    
+    elif response == "custom":
+        # Custom selection
+        print("\nEnter mod numbers to select (comma-separated, e.g. 1,5,10 or 1-10):")
         try:
-            send_rcon_command(cfg, "say Mods updated! Restart client to download latest.")
+            selection_input = input("Mods to download: ").strip()
+            selected_indices = []
+            
+            # Parse range and individual numbers
+            for part in selection_input.split(","):
+                part = part.strip()
+                if "-" in part:
+                    start, end = map(int, part.split("-"))
+                    selected_indices.extend(range(start-1, end))
+                else:
+                    selected_indices.append(int(part) - 1)
+            
+            for idx in sorted(set(selected_indices)):
+                if 0 <= idx < len(sorted_mods):
+                    selected_mods_list.append(sorted_mods[idx][1])
+            
+            print(f"\n✓ Selected {len(selected_mods_list)} mods")
+        except ValueError:
+            print("Invalid selection format")
+            return
+    else:
+        print("Cancelled")
+        return
+    
+    if not selected_mods_list:
+        print("No mods selected")
+        return
+    
+    # Now download selected mods + their dependencies
+    print(f"\n{'='*70}")
+    print("DOWNLOADING MODS & DEPENDENCIES")
+    print(f"{'='*70}\n")
+    
+    mods_dir = cfg.get("mods_dir", "mods")
+    os.makedirs(mods_dir, exist_ok=True)
+    
+    # Track what we download
+    downloaded_mods = []
+    all_deps_to_download = set()
+    
+    # Resolve dependencies for all selected mods
+    print("Resolving dependencies...")
+    for mod in selected_mods_list:
+        deps = resolve_mod_dependencies_modrinth(mod['id'], mc_version, loader)
+        all_deps_to_download.update(deps.get("required", {}).keys())
+    
+    print(f"  -> Found {len(all_deps_to_download)} required dependencies\n")
+    
+    # Download selected mods
+    print("Downloading selected mods:")
+    for mod in selected_mods_list:
+        if download_mod_from_modrinth(mod, mods_dir, mc_version, loader):
+            downloaded_mods.append(mod['name'])
+            print(f"  ✓ {mod['name']}")
+        else:
+            print(f"  ✗ {mod['name']} (failed)")
+    
+    # Download dependencies silently in background
+    print("\nDownloading dependencies (background):")
+    deps_downloaded = 0
+    for dep_mod_id in all_deps_to_download:
+        # Fetch minimal info about the dependency
+        try:
+            dep_info = {"id": dep_mod_id, "name": dep_mod_id}
+            if download_mod_from_modrinth(dep_info, mods_dir, mc_version, loader):
+                deps_downloaded += 1
+                print(f"  ✓ {dep_mod_id}")
         except:
             pass
     
-    print("\nCurator complete!")
+    print(f"\n{'='*70}")
+    print(f"DOWNLOAD COMPLETE")
+    print(f"{'='*70}")
+    print(f"  Mods: {len(downloaded_mods)} downloaded")
+    print(f"  Dependencies: {deps_downloaded} downloaded")
+    print(f"  Total: {len(downloaded_mods) + deps_downloaded} files\n")
+    
+    # Regenerate mod ZIP
+    print("Updating mod distribution package...")
+    sort_mods_by_type(mods_dir)
+    create_mod_zip(mods_dir)
+    print("✓ Ready for distribution on port 8000\n")
 
 def create_systemd_service(cfg):
     """Generate systemd service file for auto-start"""

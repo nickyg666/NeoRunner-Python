@@ -922,8 +922,8 @@ def is_library(mod_name, required_dep=False):
     """
     Check if mod is a library (not a user-facing mod)
     
-    ONLY Fabric API and core dependencies should be fetched on-demand.
-    All other libs/APIs are filtered out completely.
+    ONLY user-facing mods are shown. Dependencies are fetched on-demand.
+    Fabric API/Loader are allowed if explicitly required.
     
     Args:
         mod_name: name of the mod
@@ -932,22 +932,43 @@ def is_library(mod_name, required_dep=False):
     Returns:
         True if should be filtered (is a library), False if user-facing
     """
-    # Only allow Fabric API/JAR - everything else gets filtered
-    fabric_whitelist = ["fabric", "fabric-api", "fabric-loader"]
+    if not mod_name:
+        return True  # Filter out mods with no name
+    
     name_lower = mod_name.lower()
     
-    # Always include whitelisted fabric mods
+    # Always allow Fabric core loaders/APIs
+    fabric_whitelist = ["fabric api", "fabric-api", "fabric loader", "fabric-loader"]
     for allowed in fabric_whitelist:
         if allowed in name_lower:
             return False  # Don't filter - this is allowed
     
-    # Filter ALL other libs
-    lib_keywords = [
-        "lib", "library", "api", "core", "base",
-        "framework", "utils", "utility", "helper",
-        "compat", "compatibility", "config", "registrar"
+    # Specific libraries to filter out (from our identified list)
+    # These are known dependency-only mods
+    lib_name_patterns = [
+        "cloth config",
+        "ferrite",
+        "yacl", "yet another config",
+        "architectury",
+        "geckolib",
+        "puzzles lib",
+        "forge config api",
+        "creative",  # CreativeCore
+        "libipn",
+        "resourceful",
+        "supermartijn", # Config libs
+        "fzzy config",
+        "midnight",  # MidnightLib
+        "kotlin for forge",
+        "lib ",  # "lib " prefix
+        " lib",  # " lib" suffix
     ]
-    return any(lib in name_lower for lib in lib_keywords)
+    
+    for pattern in lib_name_patterns:
+        if pattern in name_lower:
+            return True  # This is a library
+    
+    return False  # User-facing mod
 
 def resolve_mod_dependencies_modrinth(mod_id, mc_version, loader, resolved=None, optional_deps=None, depth=0, max_depth=3):
     """
@@ -1322,8 +1343,8 @@ def curator_command(cfg, limit=None, show_optional_audit=False):
     # Filter to ONLY user-facing mods (NO libs/APIs)
     user_facing_mods = {}
     for mod in mods:
-        mod_id = mod.get("id")
-        mod_name = mod.get("name")
+        mod_id = mod.get("project_id")
+        mod_name = mod.get("title")
         if not is_library(mod_name):
             user_facing_mods[mod_id] = {
                 "id": mod_id,

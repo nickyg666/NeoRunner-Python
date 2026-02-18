@@ -82,24 +82,37 @@ class ForgeLoader(LoaderBase):
     def detect_crash_reason(self, log_output):
         """Parse Forge crash logs"""
         log_text = log_output.lower() if isinstance(log_output, str) else ""
+        MOD_ID = r'[\w.\-]+'
         
         # Missing mod dependency
-        if "requires" in log_text and "not found" in log_text:
-            match = re.search(r"(\w+)\s+requires?\s+(\w+)", log_text)
+        missing_patterns = [
+            (r"requires?\s+(" + MOD_ID + r")\s+(?:but|not\s+found|[0-9.])", 1),
+            (r"missing\s+(?:mandatory\s+)?dependenc(?:y|ies)[:\s]+(" + MOD_ID + r")", 1),
+            (r"could\s+not\s+find\s+(?:required\s+mod[:\s]+)?(" + MOD_ID + r")", 1),
+        ]
+        
+        for pattern, dep_group in missing_patterns:
+            match = re.search(pattern, log_text)
             if match:
                 return {
                     "type": "missing_dep",
-                    "dep": match.group(2),
-                    "message": log_text[:200]
+                    "dep": match.group(dep_group),
+                    "message": log_text[:500]
                 }
         
-        if "error" in log_text:
+        if "version" in log_text and ("mismatch" in log_text or "incompatible" in log_text):
+            return {
+                "type": "version_mismatch",
+                "message": log_text[:500]
+            }
+        
+        if "error" in log_text and any(kw in log_text for kw in ["fml", "forge", "modloading"]):
             return {
                 "type": "mod_error",
-                "message": log_text[:200]
+                "message": log_text[:500]
             }
         
         return {
             "type": "unknown",
-            "message": log_text[:200]
+            "message": log_text[:500]
         }

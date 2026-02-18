@@ -75,23 +75,42 @@ class FabricLoader(LoaderBase):
     def detect_crash_reason(self, log_output):
         """Parse Fabric crash logs"""
         log_text = log_output.lower() if isinstance(log_output, str) else ""
+        MOD_ID = r'[\w.\-]+'
         
-        if "missing" in log_text:
-            match = re.search(r"(\w+)(?:\s+mod|\s+dependency)?", log_text)
+        # Fabric-specific missing dependency patterns
+        missing_patterns = [
+            # "Mod X requires Y" / "requires any version of Y"
+            (r"requires?\s+(?:any\s+version\s+of\s+)?(" + MOD_ID + r")", 1),
+            # "Unmet dependency: X"
+            (r"unmet\s+dependency[:\s]+(" + MOD_ID + r")", 1),
+            # "missing mod: X" / "missing dependency: X"
+            (r"missing\s+(?:mod|dependency)[:\s]+(" + MOD_ID + r")", 1),
+            # Fabric loader: "Resolution failed for X"
+            (r"resolution\s+failed\s+for\s+(" + MOD_ID + r")", 1),
+        ]
+        
+        for pattern, dep_group in missing_patterns:
+            match = re.search(pattern, log_text)
             if match:
                 return {
                     "type": "missing_dep",
-                    "dep": match.group(1),
-                    "message": log_text[:200]
+                    "dep": match.group(dep_group),
+                    "message": log_text[:500]
                 }
         
-        if "error" in log_text:
+        if "version" in log_text and ("mismatch" in log_text or "incompatible" in log_text):
+            return {
+                "type": "version_mismatch",
+                "message": log_text[:500]
+            }
+        
+        if "error" in log_text and any(kw in log_text for kw in ["fabric", "loader", "modloading"]):
             return {
                 "type": "mod_error",
-                "message": log_text[:200]
+                "message": log_text[:500]
             }
         
         return {
             "type": "unknown",
-            "message": log_text[:200]
+            "message": log_text[:500]
         }

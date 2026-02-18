@@ -16,6 +16,25 @@ from pathlib import Path
 from urllib.parse import urljoin
 from ferium_manager import FeriumManager, setup_ferium_wizard
 
+# Loader abstraction classes
+from loaders.neoforge import NeoForgeLoader
+from loaders.forge import ForgeLoader
+from loaders.fabric import FabricLoader
+
+LOADER_CLASSES = {
+    "neoforge": NeoForgeLoader,
+    "forge": ForgeLoader,
+    "fabric": FabricLoader,
+}
+
+def get_loader(cfg):
+    """Factory: return the right loader instance for this config"""
+    loader_name = cfg.get("loader", "neoforge").lower()
+    cls = LOADER_CLASSES.get(loader_name)
+    if cls is None:
+        raise ValueError(f"Unknown loader: {loader_name}")
+    return cls(cfg, cwd=CWD)
+
 try:
     from flask import Flask
     FLASK_AVAILABLE = True
@@ -894,7 +913,7 @@ def http_server(port, mods_dir):
         mod_server.serve_forever()
 
 def _get_neoforge_version():
-    """Get NeoForge version from installed libraries"""
+    """Get NeoForge version from installed libraries (legacy helper, prefer loader class)"""
     lib_path = os.path.join(CWD, "libraries/net/neoforged/neoforge")
     if os.path.exists(lib_path):
         versions = [d for d in os.listdir(lib_path) if os.path.isdir(os.path.join(lib_path, d))]
@@ -902,44 +921,201 @@ def _get_neoforge_version():
             return sorted(versions)[-1]
     return "21.11.38-beta"  # Fallback
 
-def run_server(cfg):
-    """Start Minecraft server in tmux"""
-    loader = cfg.get("loader", "neoforge").lower()
-    mc_version = cfg.get("mc_version", "1.21.11")
-    log_event("SERVER_START", f"Starting {loader} server (MC {mc_version})")
+def _read_recent_log(lines=200):
+    """Read the last N lines from the server log file"""
+    try:
+        if not os.path.exists(LOG_FILE):
+            return ""
+        with open(LOG_FILE, "r") as f:
+            all_lines = f.readlines()
+            return "".join(all_lines[-lines:])
+    except Exception:
+        return ""
+
+def _try_self_heal(loader_instance, crash_info, cfg):
+    """Attempt to fix a crash by fetching missing dependency from Modrinth.
+    Returns True if a fix was applied and a restart should be attempted."""
+    crash_type = crash_info.get("type", "unknown")
     
-    # Build appropriate startup command based on loader
-    if loader == "neoforge":
-        nf_version = _get_neoforge_version()
-        java_cmd = f"java @user_jvm_args.txt @libraries/net/neoforged/neoforge/{nf_version}/unix_args.txt nogui"
-        log_event("SERVER_START", f"NeoForge version: {nf_version}")
-    elif loader in ["fabric", "forge"]:
-        server_jar = cfg.get("server_jar", f"{loader}-server.jar")
-        if not server_jar:
-            log_event("SERVER_ERROR", f"No server JAR configured for {loader}")
+    if crash_type == "missing_dep":
+        dep_name = crash_info.get("dep", "")
+        if not dep_name or dep_name == "unknown":
+            log_event("SELF_HEAL", "Missing dependency detected but name unknown, cannot auto-fix")
             return False
-        java_cmd = f"java -jar {server_jar} nogui"
+        
+        log_event("SELF_HEAL", f"Attempting to fetch missing dependency: {dep_name}")
+        mc_version = cfg.get("mc_version", "1.21.11")
+        loader_name = cfg.get("loader", "neoforge")
+        mods_dir = os.path.join(CWD, cfg.get("mods_dir", "mods"))
+        
+        # Search Modrinth for the mod by name
+        try:
+            search_url = f"https://api.modrinth.com/v2/search?query={dep_name}&facets=[[\"versions:{mc_version}\"],[\"categories:{loader_name}\"]]]&limit=5"
+            req = urllib.request.Request(search_url, headers={"User-Agent": "NeoRunner/1.0"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                results = json.loads(resp.read().decode())
+            
+            hits = results.get("hits", [])
+            if not hits:
+                log_event("SELF_HEAL", f"No Modrinth results for '{dep_name}'")
+                return False
+            
+            # Pick best match (exact slug match first, then first result)
+            best = None
+            for h in hits:
+                if h.get("slug", "").lower() == dep_name.lower():
+                    best = h
+                    break
+            if not best:
+                best = hits[0]
+            
+            mod_data = {"id": best["project_id"], "name": best.get("title", dep_name)}
+            if download_mod_from_modrinth(mod_data, mods_dir, mc_version, loader_name):
+                log_event("SELF_HEAL", f"Successfully downloaded {mod_data['name']} - will restart")
+                return True
+            else:
+                log_event("SELF_HEAL", f"Failed to download {dep_name}")
+                return False
+        except Exception as e:
+            log_event("SELF_HEAL", f"Error searching Modrinth for {dep_name}: {e}")
+            return False
+    
+    elif crash_type == "mod_error":
+        log_event("SELF_HEAL", f"Mod error detected: {crash_info.get('message', '')[:100]}")
+        log_event("SELF_HEAL", "Cannot auto-fix mod errors. Check logs and remove the broken mod.")
+        return False
+    
+    elif crash_type == "version_mismatch":
+        log_event("SELF_HEAL", f"Version mismatch: {crash_info.get('message', '')[:100]}")
+        log_event("SELF_HEAL", "Cannot auto-fix version mismatches. Check mod compatibility.")
+        return False
+    
     else:
-        log_event("SERVER_ERROR", f"Unknown loader: {loader}")
+        log_event("SELF_HEAL", f"Unknown crash type, no auto-fix available")
+        return False
+
+def run_server(cfg):
+    """Start Minecraft server in tmux with crash detection and self-healing.
+    
+    Uses loader abstraction classes for:
+    - build_java_command() — loader-specific JVM args
+    - detect_crash_reason() — parse crash logs
+    
+    Self-healing loop:
+    1. Start server
+    2. Monitor tmux session
+    3. If session dies, read crash log
+    4. If crash is a missing dep, try to fetch it from Modrinth
+    5. Restart (up to MAX_RESTART_ATTEMPTS)
+    """
+    MAX_RESTART_ATTEMPTS = 3
+    RESTART_COOLDOWN = 30  # seconds between restart attempts
+    
+    loader_name = cfg.get("loader", "neoforge").lower()
+    mc_version = cfg.get("mc_version", "1.21.11")
+    
+    # Get loader instance
+    try:
+        loader_instance = get_loader(cfg)
+    except ValueError as e:
+        log_event("SERVER_ERROR", str(e))
         return False
     
-    result = run(f"cd {CWD} && tmux new-session -d -s MC '{java_cmd}'")
-    if result.returncode != 0:
-        log_event("SERVER_ERROR", result.stderr)
-        return False
+    # Build Java command from the loader class
+    java_cmd_parts = loader_instance.build_java_command()
+    java_cmd = " ".join(java_cmd_parts)
     
-    run(f"tmux pipe-pane -o -t MC 'cat >> {LOG_FILE}'")
-    log_event("SERVER_RUNNING", "Server started in tmux session 'MC'")
+    log_event("SERVER_START", f"Starting {loader_instance.get_loader_display_name()} server (MC {mc_version})")
+    log_event("SERVER_START", f"Java command: {java_cmd}")
     
-    # Keep running until server stops (systemd will restart if needed)
-    while True:
-        result = run("tmux has-session -t MC 2>/dev/null")
+    restart_count = 0
+    
+    while restart_count <= MAX_RESTART_ATTEMPTS:
+        # Check if tmux session already exists (leftover from previous run)
+        existing = run("tmux has-session -t MC 2>/dev/null")
+        if existing.returncode == 0:
+            log_event("SERVER_START", "Existing tmux session 'MC' found, killing it first")
+            run("tmux kill-session -t MC 2>/dev/null")
+            time.sleep(2)
+        
+        # Record log position before start so we can read just the new output
+        log_size_before = 0
+        try:
+            if os.path.exists(LOG_FILE):
+                log_size_before = os.path.getsize(LOG_FILE)
+        except Exception:
+            pass
+        
+        # Launch in tmux
+        # Use stdbuf to disable buffering so pipe-pane gets output immediately
+        tmux_cmd = f"cd '{CWD}' && stdbuf -oL -eL {java_cmd}"
+        result = run(f"tmux new-session -d -s MC \"{tmux_cmd}\"")
         if result.returncode != 0:
-            log_event("SERVER_STOPPED", "Server process ended")
-            break
-        time.sleep(5)
+            log_event("SERVER_ERROR", f"Failed to start tmux session: {result.stderr}")
+            return False
+        
+        run(f"tmux pipe-pane -o -t MC 'cat >> {LOG_FILE}'")
+        
+        if restart_count == 0:
+            log_event("SERVER_RUNNING", f"Server started in tmux session 'MC'")
+        else:
+            log_event("SERVER_RUNNING", f"Server restarted (attempt {restart_count}/{MAX_RESTART_ATTEMPTS})")
+        
+        # Monitor loop — wait for server to stop
+        while True:
+            check = run("tmux has-session -t MC 2>/dev/null")
+            if check.returncode != 0:
+                break
+            time.sleep(5)
+        
+        log_event("SERVER_STOPPED", "Server process ended, analyzing crash...")
+        time.sleep(2)  # Let log flush
+        
+        # Read log output since we started
+        new_log = ""
+        try:
+            if os.path.exists(LOG_FILE):
+                with open(LOG_FILE, "r") as f:
+                    f.seek(log_size_before)
+                    new_log = f.read()
+        except Exception:
+            new_log = _read_recent_log(300)
+        
+        # Check for clean shutdown (not a crash)
+        if "Stopping the server" in new_log or "Server stopped" in new_log:
+            log_event("SERVER_STOPPED", "Clean shutdown detected, not restarting")
+            return True
+        
+        # Analyze crash
+        crash_info = loader_instance.detect_crash_reason(new_log)
+        crash_type = crash_info.get("type", "unknown")
+        log_event("CRASH_DETECT", f"Crash type: {crash_type}")
+        if crash_info.get("message"):
+            log_event("CRASH_DETECT", f"Details: {crash_info['message'][:200]}")
+        
+        # Attempt self-healing
+        if restart_count < MAX_RESTART_ATTEMPTS:
+            healed = _try_self_heal(loader_instance, crash_info, cfg)
+            if healed:
+                restart_count += 1
+                log_event("SELF_HEAL", f"Fix applied, restarting in {RESTART_COOLDOWN}s...")
+                time.sleep(RESTART_COOLDOWN)
+                continue
+            elif crash_type == "unknown":
+                # Unknown crash — still restart, but don't try to fix
+                restart_count += 1
+                log_event("SELF_HEAL", f"Unknown crash, restarting in {RESTART_COOLDOWN}s (attempt {restart_count}/{MAX_RESTART_ATTEMPTS})")
+                time.sleep(RESTART_COOLDOWN)
+                continue
+            else:
+                # Known crash type but can't auto-fix
+                log_event("SELF_HEAL", "Cannot auto-fix this crash type. Server will not restart.")
+                return False
+        else:
+            log_event("SELF_HEAL", f"Max restart attempts ({MAX_RESTART_ATTEMPTS}) reached. Server will not restart.")
+            return False
     
-    return True
+    return False
 
 def send_server_command(cmd):
     """Send command to tmux MC session"""

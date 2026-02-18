@@ -2,6 +2,7 @@
 from abc import ABC, abstractmethod
 import os
 import json
+from typing import List, Dict, Optional
 
 
 class LoaderBase(ABC):
@@ -15,27 +16,27 @@ class LoaderBase(ABC):
         self.mods_dir = os.path.join(cwd, cfg.get("mods_dir", "mods"))
         
     @abstractmethod
-    def prepare_environment(self):
+    def prepare_environment(self) -> None:
         """Setup server environment (EULA, server.properties, @args files, etc)"""
-        pass
+        ...
     
     @abstractmethod
-    def build_java_command(self):
-        """Build Java command to launch server
+    def build_java_command(self) -> List[str]:
+        """Build Java command to launch server.
         Returns: list like ['java', '@user_jvm_args.txt', '@loader_args.txt', 'nogui']
         """
-        pass
+        ...
     
     @abstractmethod
-    def detect_crash_reason(self, log_output):
-        """Parse server output/error to detect crash cause
+    def detect_crash_reason(self, log_output: str) -> Dict[str, str]:
+        """Parse server output/error to detect crash cause.
         Returns: {
             'type': 'missing_dep' | 'mod_error' | 'version_mismatch' | 'unknown',
             'dep': 'modname' (if type=missing_dep),
             'message': 'full error message'
         }
         """
-        pass
+        ...
     
     def log_message(self, tag, msg):
         """Consistent logging format"""

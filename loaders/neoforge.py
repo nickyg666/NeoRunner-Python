@@ -59,8 +59,8 @@ class NeoForgeLoader(LoaderBase):
         }
         
         # Read existing if present
+        existing = {}
         if os.path.exists(props_file):
-            existing = {}
             try:
                 with open(props_file, 'r') as f:
                     for line in f:
@@ -116,38 +116,48 @@ class NeoForgeLoader(LoaderBase):
         log_text = log_output.lower() if isinstance(log_output, str) else ""
         
         # Check for missing mod dependency
+        # NeoForge/FML patterns: mod names can contain hyphens, underscores, dots
+        MOD_ID = r'[\w.\-]+'
         missing_patterns = [
-            r"mod\s+(\w+)\s+requires?\s+(\w+)\s+([0-9.]+)\s+or\s+above",
-            r"(\w+)\s+requires?\s+(\w+)\s+([0-9.]+)",
-            r"missing\s+dependency:\s+(\w+)",
-            r"could not find\s+(\w+)"
+            # "mod X requires Y Z or above"
+            (r"mod\s+(" + MOD_ID + r")\s+requires?\s+(" + MOD_ID + r")", 2),
+            # "missing or unsupported mandatory dependencies: X"
+            (r"missing\s+(?:or\s+unsupported\s+)?(?:mandatory\s+)?dependenc(?:y|ies)[:\s]+(" + MOD_ID + r")", 1),
+            # "Mod X requires Y"
+            (r"requires?\s+(" + MOD_ID + r")\s+(?:[0-9.]+|or\s+above|but)", 1),
+            # "could not find required mod: X" / "could not find X"
+            (r"could\s+not\s+find\s+(?:required\s+mod[:\s]+)?(" + MOD_ID + r")", 1),
+            # "Failure message: Mod X requires Y"
+            (r"failure\s+message:\s+mod\s+" + MOD_ID + r"\s+requires?\s+(" + MOD_ID + r")", 1),
+            # Generic "missing dependency: X"
+            (r"missing\s+dependency[:\s]+(" + MOD_ID + r")", 1),
         ]
         
-        for pattern in missing_patterns:
+        for pattern, dep_group in missing_patterns:
             match = re.search(pattern, log_text)
             if match:
-                dep_name = match.group(1) if match.groups() else "unknown"
+                dep_name = match.group(dep_group)
                 return {
                     "type": "missing_dep",
                     "dep": dep_name,
-                    "message": log_text[:200]
+                    "message": log_text[:500]
                 }
         
-        # Check for mod loading errors
-        if "fml" in log_text and "error" in log_text:
+        # Check for mod loading errors (FML/NeoForge specific)
+        if any(kw in log_text for kw in ["fml", "neoforge", "modloading"]) and "error" in log_text:
             return {
                 "type": "mod_error",
-                "message": log_text[:200]
+                "message": log_text[:500]
             }
         
         # Check for version mismatch
-        if "version" in log_text and "mismatch" in log_text:
+        if "version" in log_text and ("mismatch" in log_text or "incompatible" in log_text):
             return {
                 "type": "version_mismatch",
-                "message": log_text[:200]
+                "message": log_text[:500]
             }
         
         return {
             "type": "unknown",
-            "message": log_text[:200]
+            "message": log_text[:500]
         }

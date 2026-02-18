@@ -112,41 +112,70 @@ class NeoForgeLoader(LoaderBase):
         return "21.11.38-beta"  # Fallback
     
     def detect_crash_reason(self, log_output):
-        """Parse NeoForge crash logs for common issues"""
+        """Parse NeoForge crash logs for common issues.
+        
+        Returns dict with:
+            type: 'missing_dep', 'mod_error', 'version_mismatch', 'unknown'
+            dep: name of missing dependency (for missing_dep)
+            culprit: mod ID that caused the crash (if identifiable)
+            message: first 500 chars of relevant log
+        """
         log_text = log_output.lower() if isinstance(log_output, str) else ""
         
         # Check for missing mod dependency
         # NeoForge/FML patterns: mod names can contain hyphens, underscores, dots
         MOD_ID = r'[\w.\-]+'
         missing_patterns = [
-            # "mod X requires Y Z or above"
-            (r"mod\s+(" + MOD_ID + r")\s+requires?\s+(" + MOD_ID + r")", 2),
-            # "missing or unsupported mandatory dependencies: X"
-            (r"missing\s+(?:or\s+unsupported\s+)?(?:mandatory\s+)?dependenc(?:y|ies)[:\s]+(" + MOD_ID + r")", 1),
-            # "Mod X requires Y"
-            (r"requires?\s+(" + MOD_ID + r")\s+(?:[0-9.]+|or\s+above|but)", 1),
-            # "could not find required mod: X" / "could not find X"
-            (r"could\s+not\s+find\s+(?:required\s+mod[:\s]+)?(" + MOD_ID + r")", 1),
-            # "Failure message: Mod X requires Y"
-            (r"failure\s+message:\s+mod\s+" + MOD_ID + r"\s+requires?\s+(" + MOD_ID + r")", 1),
+            # "mod X requires Y Z or above" — X is the culprit, Y is the missing dep
+            (r"mod\s+(" + MOD_ID + r")\s+requires?\s+(" + MOD_ID + r")", 1, 2),
+            # "Failure message: Mod X requires Y" — X is culprit, Y is missing
+            (r"failure\s+message:\s+mod\s+(" + MOD_ID + r")\s+requires?\s+(" + MOD_ID + r")", 1, 2),
+            # "missing or unsupported mandatory dependencies: X" — no culprit
+            (r"missing\s+(?:or\s+unsupported\s+)?(?:mandatory\s+)?dependenc(?:y|ies)[:\s]+(" + MOD_ID + r")", None, 1),
+            # "could not find required mod: X"
+            (r"could\s+not\s+find\s+(?:required\s+mod[:\s]+)?(" + MOD_ID + r")", None, 1),
             # Generic "missing dependency: X"
-            (r"missing\s+dependency[:\s]+(" + MOD_ID + r")", 1),
+            (r"missing\s+dependency[:\s]+(" + MOD_ID + r")", None, 1),
         ]
         
-        for pattern, dep_group in missing_patterns:
+        for pattern, culprit_group, dep_group in missing_patterns:
             match = re.search(pattern, log_text)
             if match:
                 dep_name = match.group(dep_group)
+                culprit = match.group(culprit_group) if culprit_group else None
                 return {
                     "type": "missing_dep",
                     "dep": dep_name,
+                    "culprit": culprit,
                     "message": log_text[:500]
                 }
         
-        # Check for mod loading errors (FML/NeoForge specific)
+        # Check for specific mod errors — try to extract the mod that crashed
+        # Common NeoForge patterns:
+        # "Exception caught during firing of event ... mod_id"
+        # "Error loading mod: mod_id"
+        # "Mod mod_id has crashed"
+        mod_error_patterns = [
+            (r"error\s+loading\s+mod[:\s]+(" + MOD_ID + r")", 1),
+            (r"mod\s+(" + MOD_ID + r")\s+has\s+crashed", 1),
+            (r"exception\s+.*?mod[:\s]+(" + MOD_ID + r")", 1),
+            (r"caused\s+by\s+mod[:\s]+(" + MOD_ID + r")", 1),
+        ]
+        
+        for pattern, group in mod_error_patterns:
+            match = re.search(pattern, log_text)
+            if match:
+                return {
+                    "type": "mod_error",
+                    "culprit": match.group(group),
+                    "message": log_text[:500]
+                }
+        
+        # Generic mod loading error (no specific mod identified)
         if any(kw in log_text for kw in ["fml", "neoforge", "modloading"]) and "error" in log_text:
             return {
                 "type": "mod_error",
+                "culprit": None,
                 "message": log_text[:500]
             }
         
@@ -154,10 +183,12 @@ class NeoForgeLoader(LoaderBase):
         if "version" in log_text and ("mismatch" in log_text or "incompatible" in log_text):
             return {
                 "type": "version_mismatch",
+                "culprit": None,
                 "message": log_text[:500]
             }
         
         return {
             "type": "unknown",
+            "culprit": None,
             "message": log_text[:500]
         }

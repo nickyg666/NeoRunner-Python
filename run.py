@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/home/services/neorunner_env/bin/python3
 """
 Minecraft Modded Server - HTTP Mod Distribution via RCON
 - Hosts mods on HTTP (with security checks)
@@ -6,6 +6,7 @@ Minecraft Modded Server - HTTP Mod Distribution via RCON
 - Daily world backups
 - RCON messaging on player join
 - Crash detection & auto-restart
+- Full-featured hosting dashboard for server management
 """
 
 import os, json, subprocess, sys, time, threading, logging, hashlib, urllib.request, urllib.error
@@ -13,9 +14,16 @@ from http.server import SimpleHTTPRequestHandler, HTTPServer
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urljoin
+from ferium_manager import FeriumManager, setup_ferium_wizard
 
-CONFIG = "config.json"
-CWD = os.getcwd()
+try:
+    from flask import Flask
+    FLASK_AVAILABLE = True
+except ImportError:
+    FLASK_AVAILABLE = False
+
+CWD = "/home/services"
+CONFIG = os.path.join(CWD, "config.json")
 
 # Setup logging to file and console
 LOG_FILE = os.path.join(CWD, "live.log")
@@ -219,22 +227,9 @@ def get_config():
         
         json.dump(cfg, open(CONFIG, "w"), indent=2)
         
-        # API key setup for mod sources
-        print("\n" + "="*70)
-        print("MOD CURATOR SETUP")
-        print("="*70)
-        print("\nMod curator can fetch from Modrinth (no key needed) or CurseForge (requires key).")
-        print("CurseForge API key available? Get one free from: https://console.curseforge.com/\n")
-        
-        api_key = input("CurseForge API key (optional, press Enter to skip): ").strip()
-        if api_key:
-            api_key_file = os.path.join(CWD, "curseforgeAPIkey")
-            with open(api_key_file, "w") as f:
-                f.write(api_key)
-            log_event("SETUP", f"Saved CurseForge API key to {api_key_file}")
-            print(f"✓ CurseForge API key saved - will use CurseForge for mod discovery")
-        else:
-            print("✓ Skipped - mod curator will use Modrinth's public API (no key needed)")
+        # Ferium manager setup
+        cfg = setup_ferium_wizard(cfg, cwd=CWD)
+        json.dump(cfg, open(CONFIG, "w"), indent=2)
         
         # Enable RCON in server.properties
         props_path = os.path.join(CWD, "server.properties")
@@ -260,6 +255,20 @@ def get_config():
         cfg["curator_show_optional_audit"] = True
     if "curator_max_depth" not in cfg:
         cfg["curator_max_depth"] = 3
+    
+    # Ensure ferium settings exist
+    if "ferium_profile" not in cfg:
+        cfg["ferium_profile"] = "neoserver"
+    if "ferium_enable_scheduler" not in cfg:
+        cfg["ferium_enable_scheduler"] = True
+    if "ferium_update_interval_hours" not in cfg:
+        cfg["ferium_update_interval_hours"] = 4
+    if "ferium_weekly_update_day" not in cfg:
+        cfg["ferium_weekly_update_day"] = "mon"
+    if "ferium_weekly_update_hour" not in cfg:
+        cfg["ferium_weekly_update_hour"] = 2
+    if "curseforge_method" not in cfg:
+        cfg["curseforge_method"] = "modrinth_only"
     
     # Ensure RCON is enabled in server.properties
     ensure_rcon_enabled(cfg)
@@ -549,11 +558,175 @@ def backup_scheduler(cfg):
         backup_world(cfg)
 
 def http_server(port, mods_dir):
-    """Start HTTP server for mods"""
+    """Start HTTP server for mods and dashboard
+    
+    If Flask is available, runs dashboard on port+1 (admin panel)
+    and mod server on original port (for client downloads)
+    """
+    
+    # Start standard mod server on main port
     os.chdir(mods_dir)
-    server = HTTPServer(("0.0.0.0", int(port)), SecureHTTPHandler)
-    log_event("HTTP_SERVER", f"Starting on port {port}")
-    server.serve_forever()
+    mod_server = HTTPServer(("0.0.0.0", int(port)), SecureHTTPHandler)
+    log_event("HTTP_SERVER", f"Mod server starting on port {port}")
+    
+    # Start Flask dashboard on port+1 if available
+    if FLASK_AVAILABLE:
+        def run_dashboard():
+            try:
+                # Import dashboard here to avoid import errors if Flask not installed
+                import sys
+                sys.path.insert(0, CWD)
+                
+                from flask import Flask, render_template, jsonify, request
+                import subprocess
+                
+                app = Flask(__name__, template_folder=CWD, static_folder=os.path.join(CWD, "static"))
+                app.secret_key = os.urandom(24)
+                
+                def load_config():
+                    if os.path.exists(CONFIG):
+                        with open(CONFIG) as f:
+                            return json.load(f)
+                    return {}
+                
+                def save_config(cfg):
+                    with open(CONFIG, "w") as f:
+                        json.dump(cfg, f, indent=2)
+                
+                def run_cmd(cmd):
+                    try:
+                        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+                        return {"success": result.returncode == 0, "stdout": result.stdout, "stderr": result.stderr}
+                    except Exception as e:
+                        return {"success": False, "error": str(e)}
+                
+                def get_server_status():
+                    running = run_cmd("tmux list-sessions 2>/dev/null | grep -c MC").get("stdout", "").strip() == "1"
+                    cfg = load_config()
+                    mods_dir_path = os.path.join(CWD, cfg.get("mods_dir", "mods"))
+                    mod_count = len([f for f in os.listdir(mods_dir_path) if f.endswith(".jar")]) if os.path.exists(mods_dir_path) else 0
+                    
+                    return {
+                        "running": running,
+                        "loader": cfg.get("loader", "unknown"),
+                        "mc_version": cfg.get("mc_version", "unknown"),
+                        "mod_count": mod_count,
+                        "player_count": 0,
+                        "rcon_enabled": cfg.get("rcon_pass") is not None,
+                        "uptime": "N/A"
+                    }
+                
+                def get_mod_list():
+                    cfg = load_config()
+                    mods_dir_path = os.path.join(CWD, cfg.get("mods_dir", "mods"))
+                    mods = []
+                    if os.path.exists(mods_dir_path):
+                        for filename in sorted(os.listdir(mods_dir_path)):
+                            if filename.endswith(".jar"):
+                                path = os.path.join(mods_dir_path, filename)
+                                size = os.path.getsize(path)
+                                mods.append({"name": filename, "size": size, "size_mb": round(size / (1024*1024), 2)})
+                    return sorted(mods, key=lambda x: x["name"])
+                
+                @app.route("/")
+                def dashboard():
+                    return render_template("dashboard.html")
+                
+                @app.route("/api/status")
+                def api_status():
+                    return jsonify(get_server_status())
+                
+                @app.route("/api/config")
+                def api_config():
+                    cfg = load_config()
+                    cfg["rcon_pass"] = "***"
+                    return jsonify(cfg)
+                
+                @app.route("/api/config", methods=["POST"])
+                def api_config_update():
+                    try:
+                        data = request.json
+                        cfg = load_config()
+                        allowed = ["ferium_update_interval_hours", "ferium_weekly_update_day", "ferium_weekly_update_hour", "mc_version"]
+                        for field in allowed:
+                            if field in data:
+                                cfg[field] = data[field]
+                        save_config(cfg)
+                        return jsonify({"success": True, "message": "Config updated"})
+                    except Exception as e:
+                        return jsonify({"success": False, "error": str(e)}), 400
+                
+                @app.route("/api/mods")
+                def api_mods():
+                    return jsonify(get_mod_list())
+                
+                @app.route("/api/mods/<mod_name>", methods=["DELETE"])
+                def api_remove_mod(mod_name):
+                    try:
+                        cfg = load_config()
+                        mods_dir_path = os.path.join(CWD, cfg.get("mods_dir", "mods"))
+                        mod_path = os.path.join(mods_dir_path, mod_name)
+                        if not os.path.abspath(mod_path).startswith(os.path.abspath(mods_dir_path)):
+                            return jsonify({"success": False, "error": "Invalid path"}), 400
+                        if os.path.exists(mod_path) and mod_path.endswith(".jar"):
+                            os.remove(mod_path)
+                            return jsonify({"success": True, "message": f"Removed {mod_name}"})
+                        return jsonify({"success": False, "error": "Mod not found"}), 404
+                    except Exception as e:
+                        return jsonify({"success": False, "error": str(e)}), 400
+                
+                @app.route("/api/logs")
+                def api_logs():
+                    lines_param = request.args.get("lines", 50, type=int)
+                    if os.path.exists(LOG_FILE):
+                        try:
+                            with open(LOG_FILE) as f:
+                                return jsonify({"logs": f.readlines()[-min(lines_param, 500):]})
+                        except:
+                            pass
+                    return jsonify({"logs": []})
+                
+                @app.route("/api/server/start", methods=["POST"])
+                def api_server_start():
+                    try:
+                        run_cmd(f"cd {CWD} && python3 run.py run &")
+                        return jsonify({"success": True, "message": "Server starting..."})
+                    except Exception as e:
+                        return jsonify({"success": False, "error": str(e)}), 400
+                
+                @app.route("/api/server/stop", methods=["POST"])
+                def api_server_stop():
+                    try:
+                        cfg = load_config()
+                        if cfg.get("rcon_pass"):
+                            run_cmd(f"echo 'stop' | nc localhost {cfg.get('rcon_port', 25575)} 2>/dev/null")
+                            return jsonify({"success": True, "message": "Stop command sent"})
+                        return jsonify({"success": False, "error": "RCON not configured"}), 400
+                    except Exception as e:
+                        return jsonify({"success": False, "error": str(e)}), 400
+                
+                @app.route("/api/mods/upgrade", methods=["POST"])
+                def api_upgrade_mods():
+                    try:
+                        result = run_cmd("/home/services/.local/bin/ferium upgrade")
+                        if result["success"]:
+                            return jsonify({"success": True, "message": "Mods upgraded"})
+                        return jsonify({"success": False, "error": result["stderr"]}), 400
+                    except Exception as e:
+                        return jsonify({"success": False, "error": str(e)}), 400
+                
+                admin_port = int(port) + 1
+                log_event("DASHBOARD", f"Starting admin dashboard on port {admin_port}")
+                app.run(host="0.0.0.0", port=admin_port, debug=False, use_reloader=False)
+            except Exception as e:
+                log_event("DASHBOARD_ERROR", str(e))
+        
+        threading.Thread(target=run_dashboard, daemon=True).start()
+    else:
+        log_event("HTTP_SERVER", "Flask not available - dashboard disabled")
+    
+    # Run mod server
+    mod_server.serve_forever()
 
 def run_server(cfg):
     """Start Minecraft server in tmux"""
@@ -824,12 +997,12 @@ class ModDownloadHook(EventHook):
         super().__init__("ModDownload")
     
     def should_trigger(self, event_data):
-        msg = event_data.get("message", "").lower()
-        return msg.startswith("download ")
+        msg = event_data.get("message") or ""
+        return msg.lower().startswith("download ")
     
     def on_trigger(self, event_data, cfg):
         player = event_data.get("player", "Unknown")
-        msg = event_data.get("message", "").lower().strip()
+        msg = (event_data.get("message") or "").lower().strip()
         
         if self.debounce_check(f"download_{player}", seconds=5):
             handle_mod_download_command(player, msg, cfg)
@@ -1789,6 +1962,34 @@ WantedBy=multi-user.target
     print(f"  sudo systemctl enable mcserver")
     print(f"  sudo systemctl start mcserver\n")
 
+def init_ferium_scheduler(cfg):
+    """Initialize ferium background scheduler for mod updates"""
+    try:
+        manager = FeriumManager(cwd=CWD)
+        if cfg.get("ferium_enable_scheduler", True):
+            log_event("FERIUM_SETUP", "Initializing mod update scheduler...")
+            
+            # Get scheduler parameters from config
+            update_interval = cfg.get("ferium_update_interval_hours", 4)
+            weekly_day = cfg.get("ferium_weekly_update_day", "mon")
+            weekly_hour = cfg.get("ferium_weekly_update_hour", 2)
+            
+            success = manager.start_scheduler(
+                update_interval_hours=update_interval,
+                weekly_update_day=weekly_day,
+                weekly_update_hour=weekly_hour
+            )
+            if success:
+                log_event("FERIUM_SETUP", f"Scheduler started ({update_interval}h updates, weekly on {weekly_day} at {weekly_hour}:00)")
+                return manager
+            else:
+                log_event("FERIUM_WARN", "Scheduler failed to start")
+                return None
+        return None
+    except Exception as e:
+        log_event("FERIUM_ERROR", f"Failed to initialize ferium: {e}")
+        return None
+
 def main():
     ensure_deps()
     cfg = get_config()
@@ -1893,6 +2094,9 @@ def main():
             threading.Thread(target=http_server, args=(cfg["http_port"], cfg["mods_dir"]), daemon=True).start()
             threading.Thread(target=backup_scheduler, args=(cfg,), daemon=True).start()
             threading.Thread(target=monitor_players, args=(cfg,), daemon=True).start()
+            
+            # Initialize ferium scheduler for automatic mod updates
+            ferium_mgr = init_ferium_scheduler(cfg)
             
             # Start server with crash detection
             run_server(cfg)

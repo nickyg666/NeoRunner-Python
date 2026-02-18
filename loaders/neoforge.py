@@ -115,31 +115,71 @@ class NeoForgeLoader(LoaderBase):
         """Parse NeoForge crash logs for common issues.
         
         Returns dict with:
-            type: 'missing_dep', 'mod_error', 'version_mismatch', 'unknown'
+            type: 'missing_dep', 'mod_error', 'mod_conflict', 'version_mismatch', 'unknown'
             dep: name of missing dependency (for missing_dep)
             culprit: mod ID that caused the crash (if identifiable)
-            message: first 500 chars of relevant log
+            culprits: list of all involved mod IDs (for conflicts involving multiple mods)
+            message: relevant portion of the crash log
         """
-        log_text = log_output.lower() if isinstance(log_output, str) else ""
+        log_text = log_output if isinstance(log_output, str) else ""
+        log_lower = log_text.lower()
         
-        # Check for missing mod dependency
-        # NeoForge/FML patterns: mod names can contain hyphens, underscores, dots
+        # ---- EXTRACT CRASH REPORT SECTION if present ----
+        # NeoForge crash reports have a structured section starting with
+        # "---- Minecraft Crash Report ----" or "Crash report saved to"
+        crash_section = log_text
+        crash_marker = log_text.find("---- Minecraft Crash Report ----")
+        if crash_marker >= 0:
+            crash_section = log_text[crash_marker:]
+        
+        # Also look for FML-specific error blocks
+        fml_error = ""
+        for marker in ["net.neoforged.fml.ModLoadingException", 
+                        "LoadingExceptionModCrash",
+                        "FML detected errors during loading"]:
+            idx = log_lower.find(marker.lower())
+            if idx >= 0:
+                fml_error = log_text[max(0, idx - 200):idx + 1000]
+                break
+        
+        # Use the most relevant section for the message
+        relevant_log = fml_error or crash_section[:2000] or log_text[-2000:]
+        
         MOD_ID = r'[\w.\-]+'
+        
+        # ---- 0. INVALID/CORRUPT JAR FILE ----
+        # "File mods/farming-for-blockheads-7463289.jar is not a jar file"
+        bad_jar_match = re.search(r'file\s+mods/(\S+\.jar)\s+is\s+not\s+a\s+jar\s+file', log_lower)
+        if bad_jar_match:
+            bad_file = bad_jar_match.group(1)
+            # Extract a slug-like token from the filename
+            slug = re.sub(r'[-_]?\d.*$', '', bad_file.replace('.jar', '')).lower()
+            return {
+                "type": "mod_error",
+                "culprit": slug or bad_file,
+                "culprits": [slug or bad_file],
+                "message": f"File mods/{bad_file} is not a valid JAR (likely a corrupt download or HTML error page)",
+                "bad_file": bad_file
+            }
+        
+        # ---- 1. MISSING MOD DEPENDENCY ----
         missing_patterns = [
             # "mod X requires Y Z or above" — X is the culprit, Y is the missing dep
             (r"mod\s+(" + MOD_ID + r")\s+requires?\s+(" + MOD_ID + r")", 1, 2),
-            # "Failure message: Mod X requires Y" — X is culprit, Y is missing
+            # "Failure message: Mod X requires Y"
             (r"failure\s+message:\s+mod\s+(" + MOD_ID + r")\s+requires?\s+(" + MOD_ID + r")", 1, 2),
-            # "missing or unsupported mandatory dependencies: X" — no culprit
+            # "missing or unsupported mandatory dependencies: X {Y}" 
             (r"missing\s+(?:or\s+unsupported\s+)?(?:mandatory\s+)?dependenc(?:y|ies)[:\s]+(" + MOD_ID + r")", None, 1),
             # "could not find required mod: X"
             (r"could\s+not\s+find\s+(?:required\s+mod[:\s]+)?(" + MOD_ID + r")", None, 1),
-            # Generic "missing dependency: X"
+            # "missing dependency: X"
             (r"missing\s+dependency[:\s]+(" + MOD_ID + r")", None, 1),
+            # NeoForge specific: "Mod File X needs Y"
+            (r"mod\s+file\s+\S+\s+needs\s+(" + MOD_ID + r")", None, 1),
         ]
         
         for pattern, culprit_group, dep_group in missing_patterns:
-            match = re.search(pattern, log_text)
+            match = re.search(pattern, log_lower)
             if match:
                 dep_name = match.group(dep_group)
                 culprit = match.group(culprit_group) if culprit_group else None
@@ -147,48 +187,128 @@ class NeoForgeLoader(LoaderBase):
                     "type": "missing_dep",
                     "dep": dep_name,
                     "culprit": culprit,
-                    "message": log_text[:500]
+                    "culprits": [culprit] if culprit else [],
+                    "message": relevant_log[:1000]
                 }
         
-        # Check for specific mod errors — try to extract the mod that crashed
-        # Common NeoForge patterns:
-        # "Exception caught during firing of event ... mod_id"
-        # "Error loading mod: mod_id"
-        # "Mod mod_id has crashed"
+        # ---- 2. MOD CONFLICTS (duplicate registries, incompatible mods) ----
+        # These are common when two biome mods (BOP + BYG) or two tech mods clash
+        conflict_patterns = [
+            # "DuplicateModsFoundException" — two versions of same mod
+            (r"duplicatemodsfoundexception.*?(\S+\.jar).*?(\S+\.jar)", "duplicate"),
+            # Duplicate registry key: "Registry key already exists: modid:name"
+            (r"duplicate\s+(?:registry\s+)?(?:key|entry|id)[:\s]+(" + MOD_ID + r"[:/]" + MOD_ID + r")", "registry"),
+            # "is already registered" patterns
+            (r"(" + MOD_ID + r"[:/]" + MOD_ID + r")\s+is\s+already\s+registered", "registry"),
+            # Mixin conflict: "Overwrite conflict for METHOD in MixinClass from mod A, previously written by mod B"
+            (r"overwrite\s+conflict\s+for\s+\S+\s+in\s+\S+\s+from\s+mod\s+(" + MOD_ID + r").*?previously\s+written\s+by\s+.*?(" + MOD_ID + r")", "mixin"),
+            # "Mixin apply failed" with mod name
+            (r"mixin\s+apply\s+.*?failed.*?(" + MOD_ID + r")", "mixin_fail"),
+            # "Incompatible mod set" 
+            (r"incompatible\s+mod(?:s)?\s+(?:set|found|detected)", "incompatible"),
+            # "conflicts with"
+            (r"(" + MOD_ID + r")\s+conflicts?\s+with\s+(" + MOD_ID + r")", "conflict"),
+        ]
+        
+        for pattern, conflict_type in conflict_patterns:
+            match = re.search(pattern, log_lower)
+            if match:
+                culprits = [g for g in match.groups() if g]
+                # For registry conflicts, try to extract the mod namespace from "modid:name"
+                if conflict_type == "registry" and culprits:
+                    ns = culprits[0].split(":")[0] if ":" in culprits[0] else culprits[0].split("/")[0]
+                    culprits = [ns]
+                
+                # For mixin conflicts, both groups are mod IDs
+                primary_culprit = culprits[-1] if culprits else None
+                
+                return {
+                    "type": "mod_conflict",
+                    "conflict_type": conflict_type,
+                    "culprit": primary_culprit,
+                    "culprits": culprits,
+                    "message": relevant_log[:1000]
+                }
+        
+        # ---- 3. SPECIFIC MOD ERRORS (crash traceable to a single mod) ----
         mod_error_patterns = [
+            # "Error loading mod: mod_id"
             (r"error\s+loading\s+mod[:\s]+(" + MOD_ID + r")", 1),
+            # "Mod mod_id has crashed"
             (r"mod\s+(" + MOD_ID + r")\s+has\s+crashed", 1),
+            # "Exception caught during firing of event ... mod_id"
             (r"exception\s+.*?mod[:\s]+(" + MOD_ID + r")", 1),
+            # "Caused by mod: mod_id"
             (r"caused\s+by\s+mod[:\s]+(" + MOD_ID + r")", 1),
+            # "ModLoadingException: ... mod_id"
+            (r"modloadingexception.*?(" + MOD_ID + r")", 1),
+            # NeoForge: "Mod X (modid) encountered an error during ..."
+            (r"mod\s+\S+\s+\((" + MOD_ID + r")\)\s+encountered\s+an?\s+error", 1),
         ]
         
         for pattern, group in mod_error_patterns:
-            match = re.search(pattern, log_text)
+            match = re.search(pattern, log_lower)
             if match:
+                culprit = match.group(group)
+                # Filter out generic/framework mod IDs that are never the real culprit
+                if culprit not in ("minecraft", "neoforge", "fml", "forge", "java", "net"):
+                    return {
+                        "type": "mod_error",
+                        "culprit": culprit,
+                        "culprits": [culprit],
+                        "message": relevant_log[:1000]
+                    }
+        
+        # ---- 4. TRY TO EXTRACT CULPRIT FROM STACK TRACES ----
+        # Look for mod namespaces in stack traces (e.g., "at com.biomesoplenty.init...")
+        # Common namespace patterns for popular mods
+        stack_ns_patterns = [
+            (r"at\s+(?:com|net|dev|io|org)\.(\w+)\.(\w+)\.", None),  # at com.author.modname.Class
+        ]
+        
+        # Only use stack trace analysis if we haven't found a culprit yet
+        # and there's a real crash (not just warnings)
+        if "exception" in log_lower or "error" in log_lower or "crash" in log_lower:
+            # Look for the last non-minecraft, non-java package in stack trace
+            stack_mods = re.findall(r"at\s+(?:com|net|dev|io|org)\.([\w]+)\.([\w]+)\.", log_lower)
+            # Filter out framework packages
+            framework_pkgs = {"mojang", "minecraft", "neoforged", "neoforge", "cpw", "fml",
+                              "google", "gson", "apache", "netty", "oshi", "slf4j", "log4j",
+                              "java", "sun", "jdk", "spongepowered", "mixin"}
+            mod_pkgs = [(a, m) for a, m in stack_mods if a not in framework_pkgs and m not in framework_pkgs]
+            
+            if mod_pkgs:
+                # Most likely culprit is the first mod-specific class in the stack
+                author, modname = mod_pkgs[0]
+                culprit_guess = modname
                 return {
                     "type": "mod_error",
-                    "culprit": match.group(group),
-                    "message": log_text[:500]
+                    "culprit": culprit_guess,
+                    "culprits": [culprit_guess],
+                    "message": relevant_log[:1000]
                 }
         
-        # Generic mod loading error (no specific mod identified)
-        if any(kw in log_text for kw in ["fml", "neoforge", "modloading"]) and "error" in log_text:
+        # ---- 5. GENERIC MOD LOADING ERROR ----
+        if any(kw in log_lower for kw in ["fml", "neoforge", "modloading"]) and "error" in log_lower:
             return {
                 "type": "mod_error",
                 "culprit": None,
-                "message": log_text[:500]
+                "culprits": [],
+                "message": relevant_log[:1000]
             }
         
-        # Check for version mismatch
-        if "version" in log_text and ("mismatch" in log_text or "incompatible" in log_text):
+        # ---- 6. VERSION MISMATCH ----
+        if "version" in log_lower and ("mismatch" in log_lower or "incompatible" in log_lower):
             return {
                 "type": "version_mismatch",
                 "culprit": None,
-                "message": log_text[:500]
+                "culprits": [],
+                "message": relevant_log[:1000]
             }
         
         return {
             "type": "unknown",
             "culprit": None,
-            "message": log_text[:500]
+            "culprits": [],
+            "message": relevant_log[:1000]
         }

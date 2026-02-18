@@ -390,6 +390,18 @@
             color: #333;
             flex: 1;
         }
+        .modal-mod-item .mod-source {
+            font-size: 10px;
+            font-weight: bold;
+            padding: 2px 6px;
+            border-radius: 3px;
+            color: white;
+            margin-right: 6px;
+            flex-shrink: 0;
+        }
+        .mod-source.modrinth { background: #1bd96a; }
+        .mod-source.curseforge { background: #f16436; }
+        .mod-source.both { background: #7c4dff; }
         .modal-mod-item .mod-downloads {
             color: #888;
             font-size: 12px;
@@ -589,6 +601,7 @@
                 listEl.innerHTML = '<div style="padding: 40px; text-align: center; color: #666;">No mods found</div>';
                 return;
             }
+            let mrCount = 0, cfCount = 0, bothCount = 0;
             let html = '';
             mods.forEach((mod, i) => {
                 const downloads = mod.downloads ? (mod.downloads > 1000000
@@ -596,13 +609,26 @@
                     : mod.downloads > 1000
                         ? (mod.downloads / 1000).toFixed(0) + 'K'
                         : mod.downloads) : '';
+                const src = mod.source || 'modrinth';
+                const hasAlso = mod.also_on ? true : false;
+                let srcLabel, srcClass;
+                if (hasAlso) {
+                    srcLabel = 'M+C'; srcClass = 'both'; bothCount++;
+                } else if (src === 'curseforge') {
+                    srcLabel = 'CF'; srcClass = 'curseforge'; cfCount++;
+                } else {
+                    srcLabel = 'MR'; srcClass = 'modrinth'; mrCount++;
+                }
                 html += `<label class="modal-mod-item" data-name="${(mod.name || '').toLowerCase()}">
                     <input type="checkbox" value="${mod.id}" onchange="updateSelectedCount()">
+                    <span class="mod-source ${srcClass}">${srcLabel}</span>
                     <span class="mod-title">${mod.name || mod.id}</span>
                     <span class="mod-downloads">${downloads} downloads</span>
                 </label>`;
             });
             listEl.innerHTML = html;
+            document.getElementById('modal-footer-info').textContent =
+                `${mods.length} mods | MR: ${mrCount} | CF: ${cfCount} | Both: ${bothCount}`;
         }
 
         function filterModList() {

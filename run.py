@@ -110,6 +110,64 @@ def download_loader(loader):
         log_event("LOADER_ERROR", str(e))
         return False
 
+def ensure_rcon_enabled(cfg):
+    """Ensure RCON is enabled and configured in server.properties"""
+    props_path = os.path.join(CWD, "server.properties")
+    
+    if not os.path.exists(props_path):
+        log_event("RCON_SETUP", f"server.properties not found at {props_path}")
+        return False
+    
+    # Read current properties
+    with open(props_path, "r") as f:
+        lines = f.readlines()
+    
+    # Track what we need to add/update
+    rcon_enabled = False
+    rcon_password_set = False
+    rcon_port_set = False
+    updated_lines = []
+    
+    rcon_pass = cfg.get("rcon_pass", "changeme")
+    rcon_port = cfg.get("rcon_port", "25575")
+    
+    # Process existing lines
+    for line in lines:
+        line_lower = line.lower()
+        
+        if line_lower.startswith("enable-rcon"):
+            updated_lines.append(f"enable-rcon=true\n")
+            rcon_enabled = True
+        elif line_lower.startswith("rcon.password"):
+            updated_lines.append(f"rcon.password={rcon_pass}\n")
+            rcon_password_set = True
+        elif line_lower.startswith("rcon.port"):
+            updated_lines.append(f"rcon.port={rcon_port}\n")
+            rcon_port_set = True
+        else:
+            updated_lines.append(line)
+    
+    # Add missing RCON settings
+    if not rcon_enabled:
+        updated_lines.append(f"\nenable-rcon=true\n")
+        rcon_enabled = True
+    
+    if not rcon_password_set:
+        updated_lines.append(f"rcon.password={rcon_pass}\n")
+        rcon_password_set = True
+    
+    if not rcon_port_set:
+        updated_lines.append(f"rcon.port={rcon_port}\n")
+        rcon_port_set = True
+    
+    # Write back updated properties
+    with open(props_path, "w") as f:
+        f.writelines(updated_lines)
+    
+    log_event("RCON_SETUP", f"Enabled RCON: password set, port={rcon_port}")
+    return True
+
+
 def get_config():
     """Load config, prompt if needed"""
     if not os.path.exists(CONFIG):
@@ -175,6 +233,9 @@ def get_config():
         cfg["curator_show_optional_audit"] = True
     if "curator_max_depth" not in cfg:
         cfg["curator_max_depth"] = 3
+    
+    # Ensure RCON is enabled in server.properties
+    ensure_rcon_enabled(cfg)
     
     return cfg
 

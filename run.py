@@ -81,57 +81,44 @@ def parse_props():
 
 def download_loader(loader):
     """Verify modloader is available and return the startup command"""
+    loader = loader.lower()
     
     if loader == "neoforge":
-        # NeoForge uses @args files from libraries
         neoforge_dir = os.path.join(CWD, "libraries", "net", "neoforged", "neoforge")
         if os.path.exists(neoforge_dir):
-            log_event("LOADER", "NeoForge server environment ready (using @args files)")
+            log_event("LOADER", f"{loader} server environment ready (using @args files)")
             return True
         else:
-            log_event("LOADER_ERROR", f"NeoForge libraries not found at {neoforge_dir}")
+            log_event("LOADER_ERROR", f"{loader} libraries not found at {neoforge_dir}")
             log_event("LOADER_ERROR", "Install NeoForge from https://neoforged.net")
             return False
     
     elif loader == "fabric":
-        # Fabric uses a server jar
-        # Check if fabric-server.jar exists or if libraries are present
         if os.path.exists(os.path.join(CWD, "fabric-server.jar")):
-            log_event("LOADER", "Fabric server JAR found")
+            log_event("LOADER", f"{loader} server JAR found")
             return True
         
         fabric_dir = os.path.join(CWD, "libraries", "net", "fabricmc")
         if os.path.exists(fabric_dir):
-            log_event("LOADER", "Fabric libraries found (need to build server JAR)")
-            # Try to build/download the fabric server jar
-            return _setup_fabric_server()
+            log_event("LOADER", f"{loader} libraries found (need to build server JAR)")
+            log_event("LOADER", f"{loader} libraries detected - download fabric-server.jar from https://fabricmc.net/use/server/")
+            return False
         else:
-            log_event("LOADER_ERROR", "Fabric server JAR or libraries not found")
+            log_event("LOADER_ERROR", f"{loader} server JAR or libraries not found")
             log_event("LOADER_INFO", "Download from: https://fabricmc.net/use/server/")
             return False
     
     elif loader == "forge":
-        # Forge uses a server jar
         if os.path.exists(os.path.join(CWD, "forge-server.jar")) or os.path.exists(os.path.join(CWD, "server.jar")):
-            log_event("LOADER", "Forge server JAR found")
+            log_event("LOADER", f"{loader} server JAR found")
             return True
         else:
-            log_event("LOADER_ERROR", "Forge server JAR not found")
+            log_event("LOADER_ERROR", f"{loader} server JAR not found")
             log_event("LOADER_INFO", "Download from: https://files.minecraftforge.net/")
             return False
     
     else:
         log_event("LOADER_ERROR", f"Unknown loader: {loader}")
-        return False
-
-def _setup_fabric_server():
-    """Helper to set up Fabric server if libraries exist"""
-    try:
-        # If fabric libraries exist but no server jar, user needs to download it
-        log_event("LOADER", "Fabric libraries detected - download fabric-server.jar from https://fabricmc.net/use/server/")
-        return False  # Can't auto-setup without the jar
-    except Exception as e:
-        log_event("LOADER_ERROR", f"Error setting up Fabric: {e}")
         return False
 
 def ensure_rcon_enabled(cfg):
@@ -192,13 +179,108 @@ def ensure_rcon_enabled(cfg):
     return True
 
 
+def detect_loader_from_disk():
+    """Auto-detect which modloader is installed by scanning disk"""
+    # Check NeoForge first
+    neoforge_dir = os.path.join(CWD, "libraries", "net", "neoforged", "neoforge")
+    if os.path.exists(neoforge_dir):
+        versions = [d for d in os.listdir(neoforge_dir) if os.path.isdir(os.path.join(neoforge_dir, d))]
+        if versions:
+            return "neoforge"
+    
+    # Check Fabric
+    fabric_dir = os.path.join(CWD, "libraries", "net", "fabricmc")
+    if os.path.exists(fabric_dir) or os.path.exists(os.path.join(CWD, "fabric-server.jar")):
+        return "fabric"
+    
+    # Check Forge
+    if os.path.exists(os.path.join(CWD, "forge-server.jar")):
+        return "forge"
+    
+    return None
+
+def detect_mc_version_from_disk():
+    """Try to detect MC version from installed files"""
+    # Check NeoForge version dir naming (e.g., 21.11.38-beta -> MC 1.21.11)
+    neoforge_dir = os.path.join(CWD, "libraries", "net", "neoforged", "neoforge")
+    if os.path.exists(neoforge_dir):
+        versions = [d for d in os.listdir(neoforge_dir) if os.path.isdir(os.path.join(neoforge_dir, d))]
+        for v in sorted(versions, reverse=True):
+            # NeoForge versions like "21.11.38-beta" map to MC 1.21.11
+            parts = v.split(".")
+            if len(parts) >= 2:
+                try:
+                    major = int(parts[0])
+                    minor = parts[1].split("-")[0]
+                    return f"1.{major}.{minor}"
+                except ValueError:
+                    pass
+    return None
+
+def build_config_from_properties():
+    """Auto-generate config.json from server.properties and disk detection"""
+    props = parse_props()
+    loader = detect_loader_from_disk()
+    mc_version = detect_mc_version_from_disk()
+    
+    cfg = {
+        "rcon_pass": props.get("rcon.password", "changeme"),
+        "rcon_port": props.get("rcon.port", "25575"),
+        "rcon_host": "localhost",
+        "http_port": "8000",
+        "mods_dir": "mods",
+        "clientonly_dir": "clientonly",
+        "mc_version": mc_version or props.get("mc-version", "1.21.11"),
+        "loader": loader or "neoforge",
+        "server_jar": props.get("server-jar", None),
+        "max_download_mb": 600,
+        "rate_limit_seconds": 2,
+        "run_curator_on_startup": True,
+        "curator_limit": 100,
+        "curator_show_optional_audit": True,
+        "curator_max_depth": 3
+    }
+    
+    # Read server port from properties
+    if "server-port" in props:
+        cfg["server_port"] = props["server-port"]
+    
+    return cfg
+
 def get_config():
-    """Load config, prompt if needed"""
-    if not os.path.exists(CONFIG):
-        props = parse_props()
+    """Load config: from file, auto-detect from disk, or prompt user"""
+    reconfigure = "--reconfigure" in sys.argv
+    
+    if os.path.exists(CONFIG) and not reconfigure:
+        # Existing config -- load and return with defaults filled in
+        log_event("CONFIG", "Loading existing config.json")
+        cfg = json.load(open(CONFIG))
+    elif os.path.exists(os.path.join(CWD, "server.properties")):
+        # No config but server exists -- auto-detect
+        log_event("CONFIG", "No config.json found, auto-detecting from server.properties")
+        cfg = build_config_from_properties()
+        
+        loader = cfg.get("loader", "unknown")
+        mc_ver = cfg.get("mc_version", "unknown")
+        log_event("CONFIG", f"Detected: {loader} server, MC {mc_ver}")
+        
+        # Only prompt if interactive
+        if sys.stdin.isatty():
+            print(f"\nDetected {loader} server for MC {mc_ver}")
+            confirm = input("Use these settings? [Y/n]: ").strip().lower()
+            if confirm == "n":
+                cfg["loader"] = input(f"Modloader (fabric/forge/neoforge) [{loader}]: ").strip() or loader
+                cfg["mc_version"] = input(f"MC version [{mc_ver}]: ").strip() or mc_ver
+                cfg["rcon_pass"] = input(f"RCON password [{cfg['rcon_pass']}]: ").strip() or cfg["rcon_pass"]
+                cfg["http_port"] = input(f"HTTP port [{cfg['http_port']}]: ").strip() or cfg["http_port"]
+        
+        json.dump(cfg, open(CONFIG, "w"), indent=2)
+        log_event("CONFIG", "Config saved from auto-detection")
+    else:
+        # Nothing on disk -- full wizard
+        log_event("CONFIG", "No server detected, running setup wizard")
         
         loader_default = "neoforge"
-        
         cfg = {
             "rcon_pass": input("RCON password [changeme]: ").strip() or "changeme",
             "rcon_port": input("RCON port [25575]: ").strip() or "25575",
@@ -216,62 +298,50 @@ def get_config():
             "curator_max_depth": 3
         }
         
-        # For Fabric/Forge, ask for server jar path
         loader = cfg.get("loader", "neoforge").lower()
         if loader in ["fabric", "forge"]:
             server_jar = input("Server JAR path [fabric-server.jar]: ").strip() or "fabric-server.jar"
             cfg["server_jar"] = server_jar
         else:
-            # NeoForge uses @args files, not a jar
             cfg["server_jar"] = None
         
         json.dump(cfg, open(CONFIG, "w"), indent=2)
         
-        # Ferium manager setup
+        # Ferium manager setup (only on fresh install)
         cfg = setup_ferium_wizard(cfg, cwd=CWD)
         json.dump(cfg, open(CONFIG, "w"), indent=2)
         
-        # Enable RCON in server.properties
-        props_path = os.path.join(CWD, "server.properties")
-        if os.path.exists(props_path):
-            txt = open(props_path).read()
-            if "enable-rcon" not in txt:
-                txt += "\nenable-rcon=true\n"
-            else:
-                txt = txt.replace("enable-rcon=false", "enable-rcon=true")
-            open(props_path, "w").write(txt)
-        
         print("\n" + "="*70)
-        print("✓ CONFIGURATION SAVED")
+        print("CONFIGURATION SAVED")
         print("="*70 + "\n")
     
-    # Load config and add missing defaults
-    cfg = json.load(open(CONFIG))
+    # Fill in missing defaults (backwards compatibility)
+    defaults = {
+        "curator_limit": 100,
+        "curator_show_optional_audit": True,
+        "curator_max_depth": 3,
+        "ferium_profile": f"{cfg.get('loader', 'neoforge')}-{cfg.get('mc_version', '1.21.11')}",
+        "ferium_enable_scheduler": True,
+        "ferium_update_interval_hours": 4,
+        "ferium_weekly_update_day": "mon",
+        "ferium_weekly_update_hour": 2,
+        "curseforge_method": "modrinth_only",
+        "http_port": "8000",
+        "loader": "neoforge",
+        "mc_version": "1.21.11"
+    }
+    for k, v in defaults.items():
+        if k not in cfg:
+            cfg[k] = v
     
-    # Ensure curator settings exist (for backwards compatibility)
-    if "curator_limit" not in cfg:
-        cfg["curator_limit"] = 100
-    if "curator_show_optional_audit" not in cfg:
-        cfg["curator_show_optional_audit"] = True
-    if "curator_max_depth" not in cfg:
-        cfg["curator_max_depth"] = 3
-    
-    # Ensure ferium settings exist
-    if "ferium_profile" not in cfg:
-        cfg["ferium_profile"] = "neoserver"
-    if "ferium_enable_scheduler" not in cfg:
-        cfg["ferium_enable_scheduler"] = True
-    if "ferium_update_interval_hours" not in cfg:
-        cfg["ferium_update_interval_hours"] = 4
-    if "ferium_weekly_update_day" not in cfg:
-        cfg["ferium_weekly_update_day"] = "mon"
-    if "ferium_weekly_update_hour" not in cfg:
-        cfg["ferium_weekly_update_hour"] = 2
-    if "curseforge_method" not in cfg:
-        cfg["curseforge_method"] = "modrinth_only"
-    
-    # Ensure RCON is enabled in server.properties
-    ensure_rcon_enabled(cfg)
+    # Ensure RCON is enabled in server.properties (only if not already set)
+    props_path = os.path.join(CWD, "server.properties")
+    if os.path.exists(props_path):
+        props = parse_props()
+        if props.get("enable-rcon", "false").lower() != "true":
+            ensure_rcon_enabled(cfg)
+        else:
+            log_event("CONFIG", "RCON already enabled in server.properties")
     
     return cfg
 
@@ -371,35 +441,36 @@ def sort_mods_by_type(mods_dir):
     
     return moved_count
 
-def create_install_scripts(mods_dir):
-    """Generate client install scripts"""
+def create_install_scripts(mods_dir, cfg=None):
+    """Generate client install scripts with correct port from config"""
     os.makedirs(mods_dir, exist_ok=True)
+    http_port = int(cfg.get("http_port", 8000)) if cfg else 8000
     
     # PowerShell script for Windows
-    ps = '''# Minecraft Mod Installer (Windows)
-param([string]$ServerIP="localhost", [int]$Port=8000)
+    ps = f'''# Minecraft Mod Installer (Windows)
+param([string]$ServerIP="localhost", [int]$Port={http_port})
 $modsPath = "$env:APPDATA\\.minecraft\\mods"
 $oldmodsPath = "$env:APPDATA\\.minecraft\\oldmods"
 $zipPath = "$env:TEMP\\mods_latest.zip"
 
 Write-Host "Downloading mods..." -ForegroundColor Cyan
 New-Item -ItemType Directory -Path $oldmodsPath -Force | Out-Null
-if (Test-Path $modsPath) {
-    Get-ChildItem -Path $modsPath -Filter "*.jar" -ErrorAction SilentlyContinue | ForEach-Object {
+if (Test-Path $modsPath) {{
+    Get-ChildItem -Path $modsPath -Filter "*.jar" -ErrorAction SilentlyContinue | ForEach-Object {{
         Move-Item -Path $_.FullName -Destination $oldmodsPath -Force
-    }
-}
+    }}
+}}
 (New-Object System.Net.WebClient).DownloadFile("http://$ServerIP:$Port/mods_latest.zip", $zipPath)
 Expand-Archive -Path $zipPath -DestinationPath $modsPath -Force
 Remove-Item -Path $zipPath -Force
 $count = (Get-ChildItem -Path $modsPath -Filter "*.jar" | Measure-Object).Count
-Write-Host "✓ Installed $count mods" -ForegroundColor Green
+Write-Host "Installed $count mods" -ForegroundColor Green
 '''
     
     # Bash script for Linux/Mac
-    bash = '''#!/bin/bash
-SERVER_IP="${1:-localhost}"
-PORT="${2:-8000}"
+    bash = f'''#!/bin/bash
+SERVER_IP="${{1:-localhost}}"
+PORT="${{2:-{http_port}}}"
 [[ "$OSTYPE" == "darwin"* ]] && MC_DIR="$HOME/Library/Application Support/minecraft" || MC_DIR="$HOME/.minecraft"
 MODS="$MC_DIR/mods"
 OLD="$MC_DIR/oldmods"
@@ -410,7 +481,7 @@ echo "Downloading mods..."
 curl -L -o "$ZIP" "http://$SERVER_IP:$PORT/mods_latest.zip" || exit 1
 unzip -q "$ZIP" -d "$MODS"
 rm "$ZIP"
-echo "✓ Installed $(ls -1 "$MODS"/*.jar 2>/dev/null | wc -l) mods"
+echo "Installed $(ls -1 "$MODS"/*.jar 2>/dev/null | wc -l) mods"
 '''
     
     with open(os.path.join(mods_dir, "install-mods.ps1"), "w") as f:
@@ -421,7 +492,7 @@ echo "✓ Installed $(ls -1 "$MODS"/*.jar 2>/dev/null | wc -l) mods"
         f.write(bash)
     os.chmod(bash_path, 0o755)
     
-    log_event("SCRIPTS", "Generated install-mods.ps1 and install-mods.sh")
+    log_event("SCRIPTS", f"Generated install-mods.ps1 and install-mods.sh (port={http_port})")
 
 def create_mod_zip(mods_dir):
     """Create mods_latest.zip with all mods (root + clientonly) in flat structure"""
@@ -558,40 +629,32 @@ def backup_scheduler(cfg):
         backup_world(cfg)
 
 def http_server(port, mods_dir):
-    """Start HTTP server for mods and dashboard
+    """Start HTTP server for mods and dashboard on a single port.
     
-    If Flask is available, runs dashboard on port+1 (admin panel)
-    and mod server on original port (for client downloads)
+    Uses Flask to serve both the dashboard UI and mod download endpoints
+    on the configured http_port (default 8000).
     """
     
-    # Start standard mod server on main port
-    os.chdir(mods_dir)
-    mod_server = HTTPServer(("0.0.0.0", int(port)), SecureHTTPHandler)
-    log_event("HTTP_SERVER", f"Mod server starting on port {port}")
-    
-    # Start Flask dashboard on port+1 if available
     if FLASK_AVAILABLE:
-        def run_dashboard():
+        def run_flask_app():
             try:
-                # Import dashboard here to avoid import errors if Flask not installed
-                import sys
-                sys.path.insert(0, CWD)
+                import sys as _sys
+                _sys.path.insert(0, CWD)
                 
-                from flask import Flask, render_template, jsonify, request
-                import subprocess
+                from flask import Flask, render_template, jsonify, request, send_file
                 
                 app = Flask(__name__, template_folder=CWD, static_folder=os.path.join(CWD, "static"))
                 app.secret_key = os.urandom(24)
                 
-                def load_config():
+                def load_cfg():
                     if os.path.exists(CONFIG):
                         with open(CONFIG) as f:
                             return json.load(f)
                     return {}
                 
-                def save_config(cfg):
+                def save_cfg(c):
                     with open(CONFIG, "w") as f:
-                        json.dump(cfg, f, indent=2)
+                        json.dump(c, f, indent=2)
                 
                 def run_cmd(cmd):
                     try:
@@ -602,23 +665,25 @@ def http_server(port, mods_dir):
                 
                 def get_server_status():
                     running = run_cmd("tmux list-sessions 2>/dev/null | grep -c MC").get("stdout", "").strip() == "1"
-                    cfg = load_config()
-                    mods_dir_path = os.path.join(CWD, cfg.get("mods_dir", "mods"))
+                    c = load_cfg()
+                    loader = c.get("loader", "unknown")
+                    mc_ver = c.get("mc_version", "unknown")
+                    mods_dir_path = os.path.join(CWD, c.get("mods_dir", "mods"))
                     mod_count = len([f for f in os.listdir(mods_dir_path) if f.endswith(".jar")]) if os.path.exists(mods_dir_path) else 0
                     
                     return {
                         "running": running,
-                        "loader": cfg.get("loader", "unknown"),
-                        "mc_version": cfg.get("mc_version", "unknown"),
+                        "loader": loader,
+                        "mc_version": mc_ver,
                         "mod_count": mod_count,
                         "player_count": 0,
-                        "rcon_enabled": cfg.get("rcon_pass") is not None,
+                        "rcon_enabled": c.get("rcon_pass") is not None,
                         "uptime": "N/A"
                     }
                 
                 def get_mod_list():
-                    cfg = load_config()
-                    mods_dir_path = os.path.join(CWD, cfg.get("mods_dir", "mods"))
+                    c = load_cfg()
+                    mods_dir_path = os.path.join(CWD, c.get("mods_dir", "mods"))
                     mods = []
                     if os.path.exists(mods_dir_path):
                         for filename in sorted(os.listdir(mods_dir_path)):
@@ -638,20 +703,20 @@ def http_server(port, mods_dir):
                 
                 @app.route("/api/config")
                 def api_config():
-                    cfg = load_config()
-                    cfg["rcon_pass"] = "***"
-                    return jsonify(cfg)
+                    c = load_cfg()
+                    c["rcon_pass"] = "***"
+                    return jsonify(c)
                 
                 @app.route("/api/config", methods=["POST"])
                 def api_config_update():
                     try:
                         data = request.json
-                        cfg = load_config()
+                        c = load_cfg()
                         allowed = ["ferium_update_interval_hours", "ferium_weekly_update_day", "ferium_weekly_update_hour", "mc_version"]
                         for field in allowed:
                             if field in data:
-                                cfg[field] = data[field]
-                        save_config(cfg)
+                                c[field] = data[field]
+                        save_cfg(c)
                         return jsonify({"success": True, "message": "Config updated"})
                     except Exception as e:
                         return jsonify({"success": False, "error": str(e)}), 400
@@ -663,8 +728,8 @@ def http_server(port, mods_dir):
                 @app.route("/api/mods/<mod_name>", methods=["DELETE"])
                 def api_remove_mod(mod_name):
                     try:
-                        cfg = load_config()
-                        mods_dir_path = os.path.join(CWD, cfg.get("mods_dir", "mods"))
+                        c = load_cfg()
+                        mods_dir_path = os.path.join(CWD, c.get("mods_dir", "mods"))
                         mod_path = os.path.join(mods_dir_path, mod_name)
                         if not os.path.abspath(mod_path).startswith(os.path.abspath(mods_dir_path)):
                             return jsonify({"success": False, "error": "Invalid path"}), 400
@@ -672,6 +737,105 @@ def http_server(port, mods_dir):
                             os.remove(mod_path)
                             return jsonify({"success": True, "message": f"Removed {mod_name}"})
                         return jsonify({"success": False, "error": "Mod not found"}), 404
+                    except Exception as e:
+                        return jsonify({"success": False, "error": str(e)}), 400
+                
+                @app.route("/api/download/<mod_name>")
+                def api_download_mod(mod_name):
+                    """Download a mod JAR file"""
+                    try:
+                        c = load_cfg()
+                        mods_dir_path = os.path.join(CWD, c.get("mods_dir", "mods"))
+                        mod_path = os.path.join(mods_dir_path, mod_name)
+                        if not os.path.abspath(mod_path).startswith(os.path.abspath(mods_dir_path)):
+                            return jsonify({"success": False, "error": "Invalid path"}), 400
+                        if os.path.exists(mod_path) and mod_path.endswith(".jar"):
+                            return send_file(mod_path, as_attachment=True)
+                        return jsonify({"success": False, "error": "Mod not found"}), 404
+                    except Exception as e:
+                        return jsonify({"success": False, "error": str(e)}), 400
+                
+                @app.route("/download/<filename>")
+                def download_file(filename):
+                    """Serve mod/zip/script files for client download"""
+                    c = load_cfg()
+                    mods_dir_path = os.path.join(CWD, c.get("mods_dir", "mods"))
+                    allowed_ext = [".jar", ".zip", ".ps1", ".sh"]
+                    if not any(filename.endswith(ext) for ext in allowed_ext):
+                        return jsonify({"error": "File type not allowed"}), 403
+                    file_path = os.path.join(mods_dir_path, filename)
+                    if not os.path.abspath(file_path).startswith(os.path.abspath(mods_dir_path)):
+                        return jsonify({"error": "Invalid path"}), 400
+                    if os.path.exists(file_path):
+                        return send_file(file_path, as_attachment=True)
+                    return jsonify({"error": "File not found"}), 404
+                
+                @app.route("/api/mod-lists")
+                def api_mod_lists():
+                    """Return curated mod lists from cache, normalized to a list"""
+                    c = load_cfg()
+                    loader = c.get("loader", "neoforge")
+                    mc_ver = c.get("mc_version", "1.21.11")
+                    cache_file = os.path.join(CWD, f"curator_cache_{mc_ver}_{loader}.json")
+                    
+                    if os.path.exists(cache_file):
+                        try:
+                            with open(cache_file) as f:
+                                raw = json.load(f)
+                            # Normalize: cache may be {id: {id,name,...}} or {loader: [list]}
+                            if isinstance(raw, dict):
+                                # Check if values are mod objects (have 'name' key)
+                                first_val = next(iter(raw.values()), None) if raw else None
+                                if isinstance(first_val, dict) and "name" in first_val:
+                                    # Flat dict of {mod_id: mod_obj} -> convert to list
+                                    mods = sorted(raw.values(), key=lambda m: m.get("downloads", 0), reverse=True)
+                                    return jsonify({loader: mods})
+                                elif isinstance(first_val, list):
+                                    # Already {loader: [list]} format
+                                    return jsonify(raw)
+                                else:
+                                    return jsonify(raw)
+                            elif isinstance(raw, list):
+                                return jsonify({loader: raw})
+                            else:
+                                return jsonify(raw)
+                        except Exception:
+                            pass
+                    
+                    return jsonify({"error": "No cached mod lists. Run: python3 run.py curator"}), 404
+                
+                @app.route("/api/install-mods", methods=["POST"])
+                def api_install_mods():
+                    """Install selected mods from curated list"""
+                    try:
+                        data = request.json
+                        selected = data.get("selected", [])
+                        if not selected:
+                            return jsonify({"success": False, "error": "No mods selected"}), 400
+                        
+                        c = load_cfg()
+                        mc_ver = c.get("mc_version", "1.21.11")
+                        loader = c.get("loader", "neoforge")
+                        m_dir = os.path.join(CWD, c.get("mods_dir", "mods"))
+                        
+                        downloaded = 0
+                        failed = []
+                        for mod_id in selected:
+                            try:
+                                mod_data = {"id": mod_id, "name": mod_id}
+                                if download_mod_from_modrinth(mod_data, m_dir, mc_ver, loader):
+                                    downloaded += 1
+                                else:
+                                    failed.append(mod_id)
+                            except Exception as e:
+                                failed.append(mod_id)
+                        
+                        return jsonify({
+                            "success": True,
+                            "downloaded": downloaded,
+                            "failed": failed,
+                            "message": f"Downloaded {downloaded}/{len(selected)} mods"
+                        })
                     except Exception as e:
                         return jsonify({"success": False, "error": str(e)}), 400
                 
@@ -697,9 +861,9 @@ def http_server(port, mods_dir):
                 @app.route("/api/server/stop", methods=["POST"])
                 def api_server_stop():
                     try:
-                        cfg = load_config()
-                        if cfg.get("rcon_pass"):
-                            run_cmd(f"echo 'stop' | nc localhost {cfg.get('rcon_port', 25575)} 2>/dev/null")
+                        c = load_cfg()
+                        if c.get("rcon_pass"):
+                            run_cmd(f"echo 'stop' | nc localhost {c.get('rcon_port', 25575)} 2>/dev/null")
                             return jsonify({"success": True, "message": "Stop command sent"})
                         return jsonify({"success": False, "error": "RCON not configured"}), 400
                     except Exception as e:
@@ -715,32 +879,42 @@ def http_server(port, mods_dir):
                     except Exception as e:
                         return jsonify({"success": False, "error": str(e)}), 400
                 
-                admin_port = int(port) + 1
-                log_event("DASHBOARD", f"Starting admin dashboard on port {admin_port}")
-                app.run(host="0.0.0.0", port=admin_port, debug=False, use_reloader=False)
+                flask_port = int(port)
+                log_event("HTTP_SERVER", f"Starting dashboard + mod server on port {flask_port}")
+                app.run(host="0.0.0.0", port=flask_port, debug=False, use_reloader=False)
             except Exception as e:
-                log_event("DASHBOARD_ERROR", str(e))
+                log_event("HTTP_SERVER_ERROR", str(e))
         
-        threading.Thread(target=run_dashboard, daemon=True).start()
+        run_flask_app()
     else:
-        log_event("HTTP_SERVER", "Flask not available - dashboard disabled")
-    
-    # Run mod server
-    mod_server.serve_forever()
+        # Fallback: simple HTTP file server if Flask not available
+        os.chdir(mods_dir)
+        mod_server = HTTPServer(("0.0.0.0", int(port)), SecureHTTPHandler)
+        log_event("HTTP_SERVER", f"Mod file server (no Flask) on port {port}")
+        mod_server.serve_forever()
+
+def _get_neoforge_version():
+    """Get NeoForge version from installed libraries"""
+    lib_path = os.path.join(CWD, "libraries/net/neoforged/neoforge")
+    if os.path.exists(lib_path):
+        versions = [d for d in os.listdir(lib_path) if os.path.isdir(os.path.join(lib_path, d))]
+        if versions:
+            return sorted(versions)[-1]
+    return "21.11.38-beta"  # Fallback
 
 def run_server(cfg):
     """Start Minecraft server in tmux"""
-    log_event("SERVER_START", "Starting server")
-    
     loader = cfg.get("loader", "neoforge").lower()
+    mc_version = cfg.get("mc_version", "1.21.11")
+    log_event("SERVER_START", f"Starting {loader} server (MC {mc_version})")
     
     # Build appropriate startup command based on loader
     if loader == "neoforge":
-        # NeoForge uses special args files from the installer
-        java_cmd = f"java @user_jvm_args.txt @libraries/net/neoforged/neoforge/21.11.38-beta/unix_args.txt nogui"
+        nf_version = _get_neoforge_version()
+        java_cmd = f"java @user_jvm_args.txt @libraries/net/neoforged/neoforge/{nf_version}/unix_args.txt nogui"
+        log_event("SERVER_START", f"NeoForge version: {nf_version}")
     elif loader in ["fabric", "forge"]:
-        # Fabric and Forge use server jars
-        server_jar = cfg.get("server_jar", "fabric-server.jar")
+        server_jar = cfg.get("server_jar", f"{loader}-server.jar")
         if not server_jar:
             log_event("SERVER_ERROR", f"No server JAR configured for {loader}")
             return False
@@ -1711,14 +1885,16 @@ def download_mod_from_modrinth(mod_data, mods_dir, mc_version, loader):
         log_event("CURATOR", f"Error downloading {mod_name}: {e}")
         return False
 
-def generate_mod_lists_for_loaders(mc_version, limit=100):
+def generate_mod_lists_for_loaders(mc_version, limit=100, loaders=None):
     """
-    Generate and cache top 100 mod lists for all loaders
-    Returns dict with "neoforge" and "fabric" keys, each containing list of mods
+    Generate and cache mod lists for specified loaders (or just the active one).
+    Returns dict keyed by loader name, each containing list of mods.
     """
+    if loaders is None:
+        loaders = ["neoforge"]
     mod_lists = {}
     
-    for loader in ["neoforge", "fabric"]:
+    for loader in loaders:
         print(f"\nGenerating {loader.upper()} mod list ({limit} mods)...")
         
         # Fetch more than limit to account for libs filtered out
@@ -1750,7 +1926,7 @@ def generate_mod_lists_for_loaders(mc_version, limit=100):
                 })
         
         mod_lists[loader] = user_facing
-        print(f"  ✓ {len(user_facing)} {loader} mods ready")
+        print(f"  {len(user_facing)} {loader} mods ready")
     
     return mod_lists
 
@@ -1937,15 +2113,18 @@ def curator_command(cfg, limit=None, show_optional_audit=False):
 
 def create_systemd_service(cfg):
     """Generate systemd service file for auto-start"""
+    loader = cfg.get("loader", "neoforge")
+    mc_ver = cfg.get("mc_version", "1.21.11")
+    python_bin = sys.executable or "/usr/bin/python3"
     service_content = f"""[Unit]
-Description=Minecraft Server
+Description=Minecraft {loader} {mc_ver} Server (NeoRunner)
 After=network.target
 
 [Service]
 Type=simple
 User={os.getenv('USER')}
 WorkingDirectory={CWD}
-ExecStart=/usr/bin/python3 {os.path.basename(__file__)} run
+ExecStart={python_bin} {os.path.abspath(__file__)} run
 Restart=always
 RestartSec=10
 
@@ -2036,8 +2215,15 @@ def main():
         elif cmd == "run":
             print("[BOOT] Starting server automation...")
             
-            # Create systemd service file
-            create_systemd_service(cfg)
+            # Check if server is already initialized (skip regeneration)
+            initialized_marker = os.path.join(CWD, ".initialized")
+            is_initialized = os.path.exists(initialized_marker)
+            
+            if is_initialized:
+                log_event("BOOT", "Server already initialized, skipping regeneration")
+            else:
+                # First-time setup: generate systemd service and install scripts
+                create_systemd_service(cfg)
             
             # Check if first run and offer curator
             first_run_marker = os.path.join(CWD, ".curator_first_run")
@@ -2056,7 +2242,7 @@ def main():
                     if response == "y":
                         print("\nLaunching curator...")
                         curator_command(cfg)
-                        print("\n✓ Curator complete! Starting server...\n")
+                        print("\nCurator complete! Starting server...\n")
                 else:
                     # Running as systemd service - skip interactive prompt
                     log_event("BOOT", "Skipping interactive curator setup (running as service)")
@@ -2078,15 +2264,27 @@ def main():
             print("[BOOT] Sorting mods by type (client/server/both)...")
             sort_mods_by_type(cfg["mods_dir"])
             
-            create_install_scripts(cfg["mods_dir"])
-            create_mod_zip(cfg["mods_dir"])
+            if not is_initialized:
+                create_install_scripts(cfg["mods_dir"], cfg)
+                create_mod_zip(cfg["mods_dir"])
+                
+                # Write initialized marker
+                with open(initialized_marker, "w") as f:
+                    f.write(f"initialized at {datetime.now().isoformat()}")
+                log_event("BOOT", "First-time initialization complete, marker written")
+            else:
+                # Still recreate mod zip on every boot (mods may have changed)
+                create_mod_zip(cfg["mods_dir"])
             
-            # Generate mod lists for both loaders at startup
-            print("\n[BOOT] Generating mod lists for all loaders...")
+            # Generate mod lists for the active loader at startup
+            loader = cfg.get("loader", "neoforge")
+            mc_version = cfg.get("mc_version", "1.21.11")
+            curator_limit = cfg.get("curator_limit", 100)
+            print(f"\n[BOOT] Generating mod list for {loader}...")
             try:
-                mod_lists = generate_mod_lists_for_loaders(cfg.get("mc_version", "1.21.11"), limit=100)
+                mod_lists = generate_mod_lists_for_loaders(mc_version, limit=curator_limit, loaders=[loader])
                 cfg["mod_lists"] = mod_lists
-                log_event("BOOT", "Mod lists generated: neoforge + fabric")
+                log_event("BOOT", f"Mod list generated for {loader}")
             except Exception as e:
                 log_event("ERROR", f"Failed to generate mod lists: {e}")
             

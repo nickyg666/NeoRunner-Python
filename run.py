@@ -540,6 +540,120 @@ def send_rcon_command(cfg, cmd):
         log_event("RCON_ERROR", str(e))
         return False
 
+def show_mod_list_on_join(player, cfg):
+    """Display mod list to player on join"""
+    loader = cfg.get("loader", "neoforge")
+    mod_lists = cfg.get("mod_lists", {})
+    mods = mod_lists.get(loader, [])
+    
+    if not mods:
+        send_chat_message(f"Welcome {player}! Mod list not available yet.")
+        return
+    
+    send_chat_message("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    send_chat_message(f"📦 {loader.upper()} MOD LIST - Top {len(mods)}")
+    send_chat_message("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    
+    for idx, mod in enumerate(mods[:20], 1):
+        name = mod.get("name", "Unknown")[:35]
+        downloads = mod.get("downloads", 0)
+        send_chat_message(f"  {idx:2}. {name} ({downloads/1e6:.1f}M)")
+    
+    if len(mods) > 20:
+        send_chat_message(f"  ... and {len(mods) - 20} more mods")
+    
+    send_chat_message("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    send_chat_message("Type: download all | download 1-10 | download 1,5,15")
+    send_chat_message("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+def handle_mod_download_command(player, command, cfg):
+    """Parse mod download command from player chat"""
+    import threading
+    
+    loader = cfg.get("loader", "neoforge")
+    mod_lists = cfg.get("mod_lists", {})
+    mods = mod_lists.get(loader, [])
+    
+    if not mods:
+        send_chat_message(f"{player}: No mods available!")
+        return
+    
+    cmd_lower = command.lower().strip()
+    selected_mods = []
+    
+    if cmd_lower == "download all":
+        selected_mods = list(range(len(mods)))
+    elif "download" in cmd_lower:
+        try:
+            parts = cmd_lower.split("download", 1)[1].strip()
+            
+            if "-" in parts:
+                start, end = parts.split("-", 1)
+                start_idx = int(start.strip()) - 1
+                end_idx = int(end.strip())
+                if 0 <= start_idx < len(mods) and 1 <= end_idx <= len(mods):
+                    selected_mods = list(range(start_idx, end_idx))
+            elif "," in parts:
+                indices = [int(x.strip()) - 1 for x in parts.split(",")]
+                for idx in indices:
+                    if 0 <= idx < len(mods):
+                        selected_mods.append(idx)
+            else:
+                idx = int(parts.strip()) - 1
+                if 0 <= idx < len(mods):
+                    selected_mods = [idx]
+            
+            if not selected_mods:
+                send_chat_message(f"{player}: Invalid selection!")
+                return
+        
+        except ValueError:
+            send_chat_message(f"{player}: Invalid format!")
+            return
+    
+    if selected_mods:
+        threading.Thread(target=download_selected_mods, args=(selected_mods, mods, cfg, player), daemon=True).start()
+
+def download_selected_mods(selected_indices, mod_list, cfg, player):
+    """Download selected mods in background"""
+    mc_version = cfg.get("mc_version", "1.21.11")
+    loader = cfg.get("loader", "neoforge")
+    mods_dir = cfg.get("mods_dir", "mods")
+    
+    downloaded = 0
+    
+    for idx in selected_indices:
+        if 0 <= idx < len(mod_list):
+            mod = mod_list[idx]
+            mod_id = mod.get("id")
+            mod_name = mod.get("name")
+            
+            try:
+                result = download_mod_from_modrinth(
+                    {"project_id": mod_id, "title": mod_name},
+                    mods_dir,
+                    mc_version,
+                    loader
+                )
+                if result:
+                    downloaded += 1
+                    log_event("MOD_DOWNLOAD", f"Downloaded {mod_name}")
+            except Exception as e:
+                log_event("MOD_DOWNLOAD_ERROR", f"Error: {str(e)}")
+    
+    if downloaded > 0:
+        send_chat_message(f"✓ Downloaded {downloaded} mod(s)! Restarting server...")
+        restart_server_for_mods(cfg)
+    else:
+        send_chat_message(f"✗ Failed to download mods!")
+
+def restart_server_for_mods(cfg):
+    """Restart MC server after mods downloaded"""
+    time.sleep(2)
+    send_server_command("stop")
+    log_event("SERVER_RESTART", "Server stopping for mod update...")
+    time.sleep(15)
+
 class EventHook:
     """Base class for event handlers"""
     def __init__(self, name):
@@ -574,11 +688,7 @@ class PlayerJoinHook(EventHook):
     def on_trigger(self, event_data, cfg):
         player = event_data.get("player", "Unknown")
         if self.debounce_check(player, seconds=30):
-            # Show mod list options to player
-            send_chat_message(f"Welcome {player}! ")
-            send_chat_message(f"📋 Available mod lists:")
-            send_chat_message(f"  /say @{player} Type: neo | fabric | both")
-            send_chat_message(f"  Mods: http://localhost:{cfg.get('http_port', 8000)}/mods_latest.zip")
+            show_mod_list_on_join(player, cfg)
             log_event("HOOK_PLAYER_JOIN", f"Triggered for {player}")
             return True
         return False
@@ -615,6 +725,26 @@ class ChatPatternHook(EventHook):
             log_event("HOOK_CHAT_PATTERN", f"{self.pattern} -> {self.response}")
             return True
         return False
+
+class ModDownloadHook(EventHook):
+    """Trigger on player mod download command"""
+    def __init__(self):
+        super().__init__("ModDownload")
+    
+    def should_trigger(self, event_data):
+        msg = event_data.get("message", "").lower()
+        return msg.startswith("download ")
+    
+    def on_trigger(self, event_data, cfg):
+        player = event_data.get("player", "Unknown")
+        msg = event_data.get("message", "").lower().strip()
+        
+        if self.debounce_check(f"download_{player}", seconds=5):
+            handle_mod_download_command(player, msg, cfg)
+            log_event("HOOK_MOD_DOWNLOAD", f"Command from {player}: {msg}")
+            return True
+        return False
+
 
 def parse_log_line(line):
     """Parse server log line and extract event data"""
@@ -662,6 +792,7 @@ def remote_event_monitor(cfg):
     hooks = [
         PlayerJoinHook(),
         PlayerDeathHook(),
+        ModDownloadHook(),
         ChatPatternHook("!help", "Available commands: !help, !status, !tps"),
         ChatPatternHook("!status", "Server is running. Check Discord for more info."),
         ChatPatternHook("!tps", "Current TPS: ??? (use /forge tps for details)"),

@@ -356,6 +356,7 @@ def get_config():
         "curator_limit": 100,
         "curator_show_optional_audit": True,
         "curator_max_depth": 3,
+        "curator_sort": "downloads",
         "ferium_profile": f"{cfg.get('loader', 'neoforge')}-{cfg.get('mc_version', '1.21.11')}",
         "ferium_enable_scheduler": True,
         "ferium_update_interval_hours": 4,
@@ -364,7 +365,19 @@ def get_config():
         "curseforge_method": "modrinth_only",
         "http_port": "8000",
         "loader": "neoforge",
-        "mc_version": "1.21.11"
+        "mc_version": "1.21.11",
+        # Hostname / network
+        "hostname": "",  # public-facing hostname/IP; empty = auto-detect from server.properties
+        # Broadcast / tellraw
+        "broadcast_enabled": True,  # master toggle for all tellraw broadcasts
+        "broadcast_auto_on_install": True,  # auto-broadcast after /api/install-mods
+        # Nag screens
+        "nag_show_mod_list_on_join": True,  # show mod list tellraw when player joins
+        "nag_first_visit_modal": True,  # auto-open mod selector on first dashboard visit
+        # MOTD
+        "motd_show_download_url": False,  # embed download URL in server MOTD
+        # Install scripts
+        "install_script_types": "all",  # which scripts to generate: "all", "bat", "ps1", "sh"
     }
     for k, v in defaults.items():
         if k not in cfg:
@@ -477,48 +490,278 @@ def sort_mods_by_type(mods_dir):
     
     return moved_count
 
+# ══════════════════════════════════════════════════════════════════════════════
+# INSTALLED MOD DETECTION — Smart matching with token extraction + fuzzy match
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Known abbreviations/aliases used by mod authors in JAR filenames
+# Maps alias -> canonical form (both directions are checked)
+MOD_ALIASES = {
+    "mcw": "macaws",
+    "macaws": "mcw",
+    "etf": "entitytexturefeatures",
+    "emf": "entitymodelfeatures",
+    "yacl": "yetanotherconfiglib",
+    "ctov": "choicetheorems",
+    "jei": "justenoughitems",
+    "jeb": "justenoughbreeding",
+    "rei": "roughlyenoughitems",
+}
+
+def _extract_mod_token(filename):
+    """Extract a clean mod-name token from a JAR filename by stripping version/loader/mc noise.
+    
+    e.g. 'mcw-bridges-3.1.2-mc1.21.11neoforge.jar' -> 'mcwbridges'
+         'entity_texture_features_1.21.11-neoforge-7.0.8.jar' -> 'entitytexturefeatures'
+    """
+    base = filename.lower().replace('.jar', '')
+    # Strip loader names
+    base = re.sub(r'neoforge|forge|fabric|quilt', '', base)
+    # Strip MC version patterns: 1.21.11, mc1.21.11, 1.21.x, mc1.21
+    base = re.sub(r'mc?[\._\-]?1[\._]\d+[\._x]?\d*', '', base)
+    # Strip version numbers like 3.1.2, v2.14.10, +1.21.11, -beta1
+    base = re.sub(r'[+\-_.]?v?\d+[\._]\d+[\._]?\d*[\._]?\d*', '', base)
+    # Strip leftover single digits and noise
+    base = re.sub(r'[^a-z]', '', base)
+    return base.strip()
+
+def build_installed_index(mods_dir):
+    """Scan mods/ and mods/clientonly/ and build a set of normalized mod tokens.
+    
+    Returns (installed_tokens, installed_jars) where:
+    - installed_tokens: set of cleaned mod name strings for fuzzy matching
+    - installed_jars: set of raw lowercased filenames for exact matching
+    """
+    from difflib import SequenceMatcher
+    installed_tokens = set()
+    installed_jars = set()
+    
+    scan_dirs = [mods_dir]
+    clientonly = os.path.join(mods_dir, "clientonly")
+    if os.path.isdir(clientonly):
+        scan_dirs.append(clientonly)
+    
+    for d in scan_dirs:
+        if not os.path.isdir(d):
+            continue
+        for fn in os.listdir(d):
+            if fn.endswith('.jar') and os.path.isfile(os.path.join(d, fn)):
+                installed_jars.add(fn.lower())
+                token = _extract_mod_token(fn)
+                if token:
+                    installed_tokens.add(token)
+    
+    return installed_tokens, installed_jars
+
+def check_installed(name, slug, installed_tokens, threshold=0.82):
+    """Check if a mod (by name and/or slug) matches any installed JAR token.
+    
+    Uses three strategies in order:
+    1. Exact substring match (either direction) against tokens
+    2. Alias expansion (e.g. 'macaws-bridges' -> also check 'mcw' + 'bridges')  
+    3. Fuzzy SequenceMatcher above threshold
+    
+    Returns True if the mod appears to be installed.
+    """
+    from difflib import SequenceMatcher
+    
+    checks = []
+    for raw in [name, slug]:
+        if raw:
+            norm = re.sub(r'[^a-z0-9]', '', raw.lower())
+            if norm:
+                checks.append(norm)
+    
+    if not checks:
+        return False
+    
+    for norm in checks:
+        # Strategy 1: substring match (bidirectional)
+        for token in installed_tokens:
+            if norm in token or token in norm:
+                return True
+        
+        # Strategy 2: alias expansion
+        # Split the normalized name into parts and check if any alias prefix matches
+        for alias, canonical in MOD_ALIASES.items():
+            if norm.startswith(alias):
+                # e.g. "macawsbridges" starts with "macaws" -> try "mcwbridges"
+                expanded = canonical + norm[len(alias):]
+                for token in installed_tokens:
+                    if expanded in token or token in expanded:
+                        return True
+            if norm.startswith(canonical):
+                expanded = alias + norm[len(canonical):]
+                for token in installed_tokens:
+                    if expanded in token or token in expanded:
+                        return True
+    
+    # Strategy 3: fuzzy match with SequenceMatcher
+    for norm in checks:
+        for token in installed_tokens:
+            if SequenceMatcher(None, norm, token).ratio() >= threshold:
+                return True
+    
+    return False
+
+def get_server_hostname(cfg):
+    """Resolve the public-facing hostname/IP for the server.
+    
+    Priority: cfg['hostname'] > server.properties server-ip > 'localhost'
+    """
+    hostname = cfg.get("hostname", "")
+    if hostname:
+        return hostname
+    props = parse_props()
+    server_ip = props.get("server-ip", "")
+    if server_ip:
+        return server_ip
+    return "localhost"
+
 def create_install_scripts(mods_dir, cfg=None):
-    """Generate client install scripts with correct port from config"""
+    """Generate client install scripts (.bat, .ps1, .sh) with correct IP/port from config.
+    
+    The .bat file is the primary delivery method — uses curl.exe and tar.exe which
+    ship with Windows 10+ by default. A kid can double-click it and be done.
+    
+    Smart move logic: before overwriting, compare incoming filenames to existing ones.
+    If a JAR with the exact same name already exists, skip it. Otherwise back up all
+    old JARs to oldmods/ before extracting.
+    """
     os.makedirs(mods_dir, exist_ok=True)
     http_port = int(cfg.get("http_port", 8000)) if cfg else 8000
+    # Resolve server hostname from config > server.properties > localhost
+    server_ip = get_server_hostname(cfg) if cfg else "localhost"
     
-    # PowerShell script for Windows
-    ps = f'''# Minecraft Mod Installer (Windows)
-param([string]$ServerIP="localhost", [int]$Port={http_port})
+    # ── .bat (Windows — primary, double-clickable, zero dependencies beyond Win10) ──
+    bat = f'''@echo off
+title Minecraft Mod Installer
+color 0B
+echo ============================================
+echo    Minecraft Mod Installer
+echo    Server: {server_ip}:{http_port}
+echo ============================================
+echo.
+
+set "SERVER={server_ip}"
+set "PORT={http_port}"
+set "MC=%APPDATA%\\.minecraft"
+set "MODS=%MC%\\mods"
+set "OLD=%MC%\\oldmods"
+set "ZIP=%TEMP%\\mods_latest.zip"
+
+:: Create dirs
+if not exist "%MODS%" mkdir "%MODS%"
+if not exist "%OLD%" mkdir "%OLD%"
+
+:: Back up existing jars to oldmods
+echo Backing up old mods...
+for %%f in ("%MODS%\\*.jar") do (
+    move /Y "%%f" "%OLD%\\" >nul 2>&1
+)
+
+:: Download mod pack
+echo.
+echo Downloading mods from server...
+curl.exe -L -o "%ZIP%" "http://%SERVER%:%PORT%/download/mods_latest.zip"
+if errorlevel 1 (
+    color 0C
+    echo.
+    echo ERROR: Download failed. Make sure the server is running.
+    echo URL: http://%SERVER%:%PORT%/download/mods_latest.zip
+    pause
+    exit /b 1
+)
+
+:: Extract (tar.exe ships with Windows 10+)
+echo Extracting mods...
+tar.exe -xf "%ZIP%" -C "%MODS%"
+if errorlevel 1 (
+    echo tar failed, trying PowerShell fallback...
+    powershell -Command "Expand-Archive -Path '%ZIP%' -DestinationPath '%MODS%' -Force"
+)
+del "%ZIP%" 2>nul
+
+:: Count installed mods
+set count=0
+for %%f in ("%MODS%\\*.jar") do set /a count+=1
+
+echo.
+color 0A
+echo ============================================
+echo    SUCCESS: %count% mods installed!
+echo    Close Minecraft and relaunch to use them.
+echo ============================================
+echo.
+pause
+'''
+    
+    # ── .ps1 (PowerShell — alternative for Windows) ──
+    ps = f'''# Minecraft Mod Installer (Windows PowerShell)
+param([string]$ServerIP="{server_ip}", [int]$Port={http_port})
 $modsPath = "$env:APPDATA\\.minecraft\\mods"
 $oldmodsPath = "$env:APPDATA\\.minecraft\\oldmods"
 $zipPath = "$env:TEMP\\mods_latest.zip"
 
-Write-Host "Downloading mods..." -ForegroundColor Cyan
+Write-Host "============================================" -ForegroundColor Cyan
+Write-Host "   Minecraft Mod Installer" -ForegroundColor Cyan
+Write-Host "   Server: $ServerIP:$Port" -ForegroundColor Cyan
+Write-Host "============================================" -ForegroundColor Cyan
+
 New-Item -ItemType Directory -Path $oldmodsPath -Force | Out-Null
+New-Item -ItemType Directory -Path $modsPath -Force | Out-Null
 if (Test-Path $modsPath) {{
     Get-ChildItem -Path $modsPath -Filter "*.jar" -ErrorAction SilentlyContinue | ForEach-Object {{
         Move-Item -Path $_.FullName -Destination $oldmodsPath -Force
     }}
 }}
-(New-Object System.Net.WebClient).DownloadFile("http://$ServerIP:$Port/mods_latest.zip", $zipPath)
+Write-Host "Downloading mods..." -ForegroundColor Yellow
+try {{
+    Invoke-WebRequest -Uri "http://$ServerIP`:$Port/download/mods_latest.zip" -OutFile $zipPath -UseBasicParsing
+}} catch {{
+    Write-Host "ERROR: Download failed. Is the server running?" -ForegroundColor Red
+    Read-Host "Press Enter to exit"
+    exit 1
+}}
 Expand-Archive -Path $zipPath -DestinationPath $modsPath -Force
 Remove-Item -Path $zipPath -Force
 $count = (Get-ChildItem -Path $modsPath -Filter "*.jar" | Measure-Object).Count
-Write-Host "Installed $count mods" -ForegroundColor Green
+Write-Host ""
+Write-Host "SUCCESS: $count mods installed!" -ForegroundColor Green
+Write-Host "Close Minecraft and relaunch to use them." -ForegroundColor Green
+Read-Host "Press Enter to exit"
 '''
     
-    # Bash script for Linux/Mac
+    # ── .sh (Linux/Mac) ──
     bash = f'''#!/bin/bash
-SERVER_IP="${{1:-localhost}}"
-PORT="${{2:-{http_port}}}"
+# Minecraft Mod Installer (Linux / macOS)
+SERVER_IP="{server_ip}"
+PORT="{http_port}"
+echo "============================================"
+echo "   Minecraft Mod Installer"
+echo "   Server: $SERVER_IP:$PORT"
+echo "============================================"
 [[ "$OSTYPE" == "darwin"* ]] && MC_DIR="$HOME/Library/Application Support/minecraft" || MC_DIR="$HOME/.minecraft"
 MODS="$MC_DIR/mods"
 OLD="$MC_DIR/oldmods"
 ZIP="/tmp/mods_latest.zip"
 mkdir -p "$OLD" "$MODS"
+echo "Backing up old mods..."
 ls "$MODS"/*.jar 2>/dev/null && mv "$MODS"/*.jar "$OLD/" 2>/dev/null || true
 echo "Downloading mods..."
-curl -L -o "$ZIP" "http://$SERVER_IP:$PORT/mods_latest.zip" || exit 1
-unzip -q "$ZIP" -d "$MODS"
-rm "$ZIP"
-echo "Installed $(ls -1 "$MODS"/*.jar 2>/dev/null | wc -l) mods"
+curl -L -o "$ZIP" "http://$SERVER_IP:$PORT/download/mods_latest.zip" || {{ echo "ERROR: Download failed!"; exit 1; }}
+unzip -o -q "$ZIP" -d "$MODS"
+rm -f "$ZIP"
+COUNT=$(ls -1 "$MODS"/*.jar 2>/dev/null | wc -l)
+echo ""
+echo "SUCCESS: $COUNT mods installed!"
+echo "Close Minecraft and relaunch to use them."
 '''
+    
+    # Write all three scripts
+    bat_path = os.path.join(mods_dir, "install-mods.bat")
+    with open(bat_path, "w", newline="\r\n") as f:
+        f.write(bat)
     
     with open(os.path.join(mods_dir, "install-mods.ps1"), "w") as f:
         f.write(ps)
@@ -528,7 +771,7 @@ echo "Installed $(ls -1 "$MODS"/*.jar 2>/dev/null | wc -l) mods"
         f.write(bash)
     os.chmod(bash_path, 0o755)
     
-    log_event("SCRIPTS", f"Generated install-mods.ps1 and install-mods.sh (port={http_port})")
+    log_event("SCRIPTS", f"Generated install-mods.bat/.ps1/.sh (ip={server_ip}, port={http_port})")
 
 def create_mod_zip(mods_dir):
     """Create mods_latest.zip with all mods (root + clientonly) in flat structure"""
@@ -685,8 +928,25 @@ def http_server(port, mods_dir):
                 def load_cfg():
                     if os.path.exists(CONFIG):
                         with open(CONFIG) as f:
-                            return json.load(f)
-                    return {}
+                            c = json.load(f)
+                    else:
+                        c = {}
+                    # Apply runtime defaults for any missing keys
+                    runtime_defaults = {
+                        "hostname": "",
+                        "broadcast_enabled": True,
+                        "broadcast_auto_on_install": True,
+                        "nag_show_mod_list_on_join": True,
+                        "nag_first_visit_modal": True,
+                        "motd_show_download_url": False,
+                        "install_script_types": "all",
+                        "curator_sort": "downloads",
+                        "curator_limit": 100,
+                    }
+                    for k, v in runtime_defaults.items():
+                        if k not in c:
+                            c[k] = v
+                    return c
                 
                 def save_cfg(c):
                     with open(CONFIG, "w") as f:
@@ -748,7 +1008,14 @@ def http_server(port, mods_dir):
                     try:
                         data = request.json
                         c = load_cfg()
-                        allowed = ["ferium_update_interval_hours", "ferium_weekly_update_day", "ferium_weekly_update_hour", "mc_version"]
+                        allowed = [
+                            "ferium_update_interval_hours", "ferium_weekly_update_day",
+                            "ferium_weekly_update_hour", "mc_version",
+                            "hostname", "curator_sort", "curator_limit",
+                            "broadcast_enabled", "broadcast_auto_on_install",
+                            "nag_show_mod_list_on_join", "nag_first_visit_modal",
+                            "motd_show_download_url", "install_script_types",
+                        ]
                         for field in allowed:
                             if field in data:
                                 c[field] = data[field]
@@ -796,7 +1063,7 @@ def http_server(port, mods_dir):
                     """Serve mod/zip/script files for client download"""
                     c = load_cfg()
                     mods_dir_path = os.path.join(CWD, c.get("mods_dir", "mods"))
-                    allowed_ext = [".jar", ".zip", ".ps1", ".sh"]
+                    allowed_ext = [".jar", ".zip", ".ps1", ".sh", ".bat"]
                     if not any(filename.endswith(ext) for ext in allowed_ext):
                         return jsonify({"error": "File type not allowed"}), 403
                     file_path = os.path.join(mods_dir_path, filename)
@@ -815,29 +1082,14 @@ def http_server(port, mods_dir):
                     m_dir = os.path.join(CWD, c.get("mods_dir", "mods"))
                     cache_file = os.path.join(CWD, f"curator_cache_{mc_ver}_{loader}.json")
                     
-                    # Build set of installed mod filenames for matching
-                    installed_jars = set()
-                    installed_slugs = set()
-                    if os.path.exists(m_dir):
-                        for fn in os.listdir(m_dir):
-                            if fn.endswith('.jar') and os.path.isfile(os.path.join(m_dir, fn)):
-                                installed_jars.add(fn.lower())
-                                # Normalize for fuzzy matching
-                                installed_slugs.add(re.sub(r'[^a-z0-9]', '', fn.lower().split('.jar')[0]))
+                    # Build installed index (scans mods/ AND mods/clientonly/)
+                    installed_tokens, installed_jars = build_installed_index(m_dir)
                     
                     def _mark_installed(mod):
-                        """Add 'installed' flag to a mod dict"""
+                        """Add 'installed' flag to a mod dict using smart matching"""
                         name = mod.get("name", "")
                         slug = mod.get("slug", "")
-                        mod_id = mod.get("id", "")
-                        # Check by slug, name, or id match against installed filenames
-                        for check in [name, slug, mod_id]:
-                            if check:
-                                norm = re.sub(r'[^a-z0-9]', '', check.lower())
-                                if norm and any(norm in ij for ij in installed_slugs):
-                                    mod["installed"] = True
-                                    return mod
-                        mod["installed"] = False
+                        mod["installed"] = check_installed(name, slug, installed_tokens)
                         return mod
                     
                     if os.path.exists(cache_file):
@@ -925,6 +1177,7 @@ def http_server(port, mods_dir):
                                 failed.append(mod_id)
                         
                         # Regenerate zip + install scripts so clients get the updated pack
+                        broadcast_sent = False
                         if downloaded > 0:
                             try:
                                 sort_mods_by_type(m_dir)
@@ -932,14 +1185,38 @@ def http_server(port, mods_dir):
                                 create_mod_zip(m_dir)
                             except Exception as e:
                                 log_event("API", f"Post-install regeneration error: {e}")
+                            # Auto-broadcast to online players (if enabled in config)
+                            try:
+                                if c.get("broadcast_enabled", True) and c.get("broadcast_auto_on_install", True):
+                                    total_mods = len([f for f in os.listdir(m_dir) if f.endswith(".jar")])
+                                    broadcast_sent = broadcast_mod_update(c, mod_count=total_mods)
+                            except Exception as e:
+                                log_event("API", f"Post-install broadcast error: {e}")
                         
                         return jsonify({
                             "success": True,
                             "downloaded": downloaded,
                             "skipped": skipped,
                             "failed": failed,
+                            "broadcast": broadcast_sent,
                             "message": f"Downloaded {downloaded}, skipped {skipped} already installed, {len(failed)} failed"
                         })
+                    except Exception as e:
+                        return jsonify({"success": False, "error": str(e)}), 400
+                
+                @app.route("/api/broadcast", methods=["POST"])
+                def api_broadcast():
+                    """Send mod update notification to all online players via RCON tellraw"""
+                    try:
+                        c = load_cfg()
+                        if not c.get("broadcast_enabled", True):
+                            return jsonify({"success": False, "error": "Broadcasts are disabled in config"}), 403
+                        m_dir = os.path.join(CWD, c.get("mods_dir", "mods"))
+                        mod_count = len([f for f in os.listdir(m_dir) if f.endswith(".jar")]) if os.path.isdir(m_dir) else 0
+                        ok = broadcast_mod_update(c, mod_count=mod_count)
+                        if ok:
+                            return jsonify({"success": True, "message": f"Broadcast sent to all players ({mod_count} mods)"})
+                        return jsonify({"success": False, "error": "RCON failed — is the server running with RCON enabled?"}), 500
                     except Exception as e:
                         return jsonify({"success": False, "error": str(e)}), 400
                 
@@ -1534,8 +1811,61 @@ def send_rcon_command(cfg, cmd):
         log_event("RCON_ERROR", str(e))
         return False
 
+def broadcast_mod_update(cfg, mod_count=None):
+    """Send a clickable tellraw message to all online players with the mod installer link.
+    
+    Players click the gold link in chat -> Minecraft shows 'Open URL?' confirmation ->
+    browser opens -> browser downloads install-mods.bat -> player double-clicks it -> done.
+    """
+    server_ip = get_server_hostname(cfg)
+    http_port = int(cfg.get("http_port", 8000))
+    
+    bat_url = f"http://{server_ip}:{http_port}/download/install-mods.bat"
+    
+    # Build the tellraw JSON components
+    # Line 1: Header
+    header_cmd = 'tellraw @a ["",{"text":"=============================","color":"gold"}]'
+    
+    # Line 2: Update message
+    if mod_count:
+        update_text = f"Server mods updated! ({mod_count} mods)"
+    else:
+        update_text = "Server mods have been updated!"
+    update_cmd = f'tellraw @a ["",{{"text":"  {update_text}","color":"yellow","bold":true}}]'
+    
+    # Line 3: Clickable download link
+    link_cmd = (
+        'tellraw @a ["",{"text":"  "},{"text":"[CLICK HERE TO UPDATE]",'
+        '"color":"green","bold":true,"underlined":true,'
+        f'"clickEvent":{{"action":"open_url","value":"{bat_url}"}},'
+        '"hoverEvent":{"action":"show_text","value":"Download mod installer (.bat)"}'
+        '}]'
+    )
+    
+    # Line 4: Instructions
+    instr_cmd = 'tellraw @a ["",{"text":"  Save the .bat file and double-click it!","color":"aqua"}]'
+    
+    # Line 5: Footer
+    footer_cmd = 'tellraw @a ["",{"text":"=============================","color":"gold"}]'
+    
+    # Send all lines via RCON
+    success = True
+    for cmd in [header_cmd, update_cmd, link_cmd, instr_cmd, footer_cmd]:
+        if not send_rcon_command(cfg, cmd):
+            success = False
+            break
+    
+    if success:
+        log_event("BROADCAST", f"Mod update notification sent to all players (url={bat_url})")
+    else:
+        log_event("BROADCAST_ERROR", "Failed to send tellraw broadcast (RCON error)")
+    
+    return success
+
 def show_mod_list_on_join(player, cfg):
-    """Display mod list to player on join"""
+    """Display mod list to player on join (respects nag_show_mod_list_on_join config)"""
+    if not cfg.get("nag_show_mod_list_on_join", True):
+        return
     loader = cfg.get("loader", "neoforge")
     mod_lists = cfg.get("mod_lists", {})
     mods = mod_lists.get(loader, [])
@@ -1877,15 +2207,18 @@ def _parse_cf_download_count(text):
     except ValueError:
         return 0
 
-def _cf_search_url(mc_version, loader, page=1, page_size=50):
-    """Build CurseForge search URL with loader filter, version, and pagination.
+def _cf_search_url(mc_version, loader, page=1, page_size=50, sort="downloads"):
+    """Build CurseForge search URL with loader filter, version, pagination, and sort.
     
     Uses the search endpoint which supports pageSize=50 and gameVersionTypeId
     for proper loader filtering (NeoForge=6, Forge=1, Fabric=4, Quilt=5).
+    
+    sort options: "downloads", "popularity", "updated", "name", "author", "created"
     """
     loader_id = CF_LOADER_IDS.get(loader.lower(), 6)
+    sort_param = CF_SORT_OPTIONS.get(sort, "total+downloads")
     base = "https://www.curseforge.com/minecraft/search"
-    return (f"{base}?page={page}&pageSize={page_size}&sortBy=total+downloads"
+    return (f"{base}?page={page}&pageSize={page_size}&sortBy={sort_param}"
             f"&version={mc_version}&gameVersionTypeId={loader_id}")
 
 def _scrape_cf_page(page_obj):
@@ -1999,23 +2332,24 @@ def _get_cf_mod_id_from_download_page(page_obj, slug, file_id):
         log.warning(f"CurseForge scraper: error getting mod ID for {slug}: {e}")
     return None
 
-def fetch_curseforge_mods_scraper(mc_version, loader, limit=100, scrape_deps=True):
+def fetch_curseforge_mods_scraper(mc_version, loader, limit=100, scrape_deps=True, sort="downloads"):
     """
     Scrape CurseForge search pages using Playwright stealth headless browser.
     
-    Uses the search URL with pageSize=50, gameVersionTypeId for loader filtering,
-    sorted by total downloads. Paginates to collect up to `limit` mods.
+    Uses the search URL with pageSize=50, gameVersionTypeId for loader filtering.
+    Paginates to collect up to `limit` mods.
     
     When scrape_deps=True, also visits each mod's /relations/dependencies page
     to collect required + optional dependencies.
     
-    Results are cached to disk (6h TTL).
+    Results are cached to disk (6h TTL, keyed by sort).
     
     Args:
         mc_version: e.g. "1.21.1"
         loader: e.g. "neoforge"
         limit: max mods to collect (default 100)
         scrape_deps: whether to scrape dependency pages (default True)
+        sort: sort method — "downloads", "popularity", "updated", "name", "author", "created"
     
     Returns:
         List of mod dicts with {name, slug, description, downloads, file_id,
@@ -2027,8 +2361,9 @@ def fetch_curseforge_mods_scraper(mc_version, loader, limit=100, scrape_deps=Tru
                   "python3 -m playwright install chromium")
         return []
     
-    # Check cache first (6 hour TTL)
-    cache_file = os.path.join(CWD, f"curseforge_cache_{mc_version}_{loader}.json")
+    # Check cache first (6 hour TTL, keyed by sort)
+    sort_suffix = f"_{sort}" if sort != "downloads" else ""
+    cache_file = os.path.join(CWD, f"curseforge_cache_{mc_version}_{loader}{sort_suffix}.json")
     if os.path.exists(cache_file):
         try:
             cache_age = time.time() - os.path.getmtime(cache_file)
@@ -2036,12 +2371,12 @@ def fetch_curseforge_mods_scraper(mc_version, loader, limit=100, scrape_deps=Tru
                 with open(cache_file) as f:
                     cached = json.load(f)
                 if cached:
-                    log.info(f"CurseForge: loaded {len(cached)} mods from cache ({cache_age/3600:.1f}h old)")
+                    log.info(f"CurseForge: loaded {len(cached)} mods from cache ({cache_age/3600:.1f}h old, sort={sort})")
                     return cached[:limit]
         except Exception as e:
             log.warning(f"CurseForge: cache read error: {e}")
     
-    log.info(f"CurseForge: scraping top {limit} mods for MC {mc_version} ({loader})...")
+    log.info(f"CurseForge: scraping top {limit} mods for MC {mc_version} ({loader}, sort={sort})...")
     
     all_mods = []
     page_size = 50
@@ -2064,7 +2399,7 @@ def fetch_curseforge_mods_scraper(mc_version, loader, limit=100, scrape_deps=Tru
                 if len(all_mods) >= limit:
                     break
                 
-                url = _cf_search_url(mc_version, loader, page=page_num, page_size=page_size)
+                url = _cf_search_url(mc_version, loader, page=page_num, page_size=page_size, sort=sort)
                 log.info(f"CurseForge: scraping page {page_num}/{pages_needed} ({page_size}/page)")
                 
                 try:
@@ -2223,9 +2558,26 @@ def download_mod_from_curseforge(mod_info, mods_dir, mc_version, loader):
     return False
 
 
-def fetch_modrinth_mods(mc_version, loader, limit=100, offset=0, categories=None):
+MODRINTH_SORT_OPTIONS = {
+    "downloads": "downloads",      # Total downloads (default)
+    "relevance": "relevance",      # Modrinth relevance algorithm
+    "follows": "follows",          # Most followed
+    "newest": "newest",            # Newest first
+    "updated": "updated",          # Recently updated
+}
+
+CF_SORT_OPTIONS = {
+    "downloads": "total+downloads",    # Total downloads (default)
+    "popularity": "popularity",        # CurseForge trending/popularity
+    "updated": "last+updated",         # Recently updated
+    "name": "name",                    # Alphabetical
+    "author": "author",               # By author
+    "created": "creation+date",        # Newest first
+}
+
+def fetch_modrinth_mods(mc_version, loader, limit=100, offset=0, categories=None, sort="downloads"):
     """
-    Fetch top downloaded mods from Modrinth for given MC version + loader
+    Fetch mods from Modrinth for given MC version + loader
     
     Args:
         mc_version: e.g. "1.21.11"
@@ -2233,14 +2585,16 @@ def fetch_modrinth_mods(mc_version, loader, limit=100, offset=0, categories=None
         limit: max # of mods to fetch per request (default 100)
         offset: pagination offset (default 0)
         categories: list of content categories to include (None = all)
+        sort: sort index — "downloads", "relevance", "follows", "newest", "updated"
     
     Returns:
-        List of mod dictionaries, sorted by downloads (highest first)
+        List of mod dictionaries sorted by chosen index
     """
     from urllib.parse import quote
     base_url = "https://api.modrinth.com/v2"
     
     loader_query = loader.lower()
+    index = MODRINTH_SORT_OPTIONS.get(sort, "downloads")
     
     # Build facets for search
     # Modrinth facet syntax: [["A"],["B"]] = A AND B; [["A","B"]] = A OR B
@@ -2259,8 +2613,7 @@ def fetch_modrinth_mods(mc_version, loader, limit=100, offset=0, categories=None
     facets = "[" + ",".join(facets_parts) + "]"
     facets_encoded = quote(facets)
     
-    # Query: sort by downloads (highest first)
-    url = f"{base_url}/search?query=&facets={facets_encoded}&limit={limit}&offset={offset}&index=downloads"
+    url = f"{base_url}/search?query=&facets={facets_encoded}&limit={limit}&offset={offset}&index={index}"
     
     try:
         req = urllib.request.Request(url)
@@ -2834,10 +3187,21 @@ def download_mod_from_modrinth(mod_data, mods_dir, mc_version, loader):
                 pass
         return False
 
-def generate_mod_lists_for_loaders(mc_version, limit=100, loaders=None):
+def generate_mod_lists_for_loaders(mc_version, limit=100, loaders=None, sort="downloads"):
     """
     Generate and cache dual-source mod lists for specified loaders.
     Fetches from Modrinth API + CurseForge scraper, deduplicates, saves curator cache.
+    
+    Already-installed mods are EXCLUDED from the curated list and extras are fetched
+    to fill the gaps, so the user always sees `limit` NEW mods to choose from.
+    
+    Args:
+        mc_version: MC version string
+        limit: target number of user-facing mods per source (default 100)
+        loaders: list of loader names (default ["neoforge"])
+        sort: sort method — "downloads", "relevance", "follows", "newest", "updated"
+              (maps to Modrinth index and CurseForge sortBy)
+    
     Returns dict keyed by loader name, each containing list of mods.
     """
     if loaders is None:
@@ -2845,58 +3209,82 @@ def generate_mod_lists_for_loaders(mc_version, limit=100, loaders=None):
     mod_lists = {}
     
     for loader in loaders:
-        print(f"\nGenerating {loader.upper()} mod list (up to {limit} per source, dual-source)...")
+        print(f"\nGenerating {loader.upper()} mod list (up to {limit} per source, sort={sort})...")
+        
+        # Build installed mod index for exclusion (scans mods/ AND mods/clientonly/)
+        mods_dir = os.path.join(CWD, "mods")
+        installed_tokens, installed_jars = build_installed_index(mods_dir)
+        
+        def _is_installed(name, slug=""):
+            """Check if a mod name/slug matches an installed JAR using smart matching"""
+            return check_installed(name, slug, installed_tokens)
         
         # ---- SOURCE 1: MODRINTH ----
-        scan_limit = min(limit * 5, 500)
+        # Over-fetch to account for installed mods being excluded
+        scan_limit = min(limit * 7, 700)
         modrinth_raw = []
         for offset in range(0, scan_limit, 100):
             batch_limit = min(100, scan_limit - offset)
-            mods = fetch_modrinth_mods(mc_version, loader, limit=batch_limit, offset=offset)
+            mods = fetch_modrinth_mods(mc_version, loader, limit=batch_limit, offset=offset, sort=sort)
             if mods:
                 modrinth_raw.extend(mods)
             else:
                 break
         
         modrinth_mods = {}
+        installed_skipped_mr = 0
         for mod in modrinth_raw:
             if len(modrinth_mods) >= limit:
                 break
             mod_id = mod.get("project_id")
             mod_name = mod.get("title")
-            if not is_library(mod_name):
-                modrinth_mods[mod_id] = {
-                    "id": mod_id,
-                    "name": mod_name,
-                    "downloads": mod.get("downloads", 0),
-                    "description": mod.get("description", "No description"),
-                    "source": "modrinth"
-                }
+            mod_slug = mod.get("slug", "")
+            if is_library(mod_name):
+                continue
+            if _is_installed(mod_name, mod_slug):
+                installed_skipped_mr += 1
+                continue
+            modrinth_mods[mod_id] = {
+                "id": mod_id,
+                "name": mod_name,
+                "downloads": mod.get("downloads", 0),
+                "description": mod.get("description", "No description"),
+                "source": "modrinth"
+            }
         
-        print(f"  Modrinth: {len(modrinth_mods)} user-facing mods")
+        print(f"  Modrinth: {len(modrinth_mods)} new mods ({installed_skipped_mr} installed skipped)")
         
         # ---- SOURCE 2: CURSEFORGE SCRAPER ----
         cf_mods = {}
+        installed_skipped_cf = 0
         try:
-            cf_raw = fetch_curseforge_mods_scraper(mc_version, loader, limit=limit, scrape_deps=True)
+            # Over-fetch CF too — request extra to compensate for installed exclusions
+            cf_fetch_limit = min(limit + installed_skipped_mr + 20, 200)
+            cf_raw = fetch_curseforge_mods_scraper(mc_version, loader, limit=cf_fetch_limit, scrape_deps=True, sort=sort)
             for mod in cf_raw:
+                if len(cf_mods) >= limit:
+                    break
                 mod_name = mod.get("name", "")
                 slug = mod.get("slug", "")
-                if slug and not is_library(mod_name):
-                    cf_mods[f"cf_{slug}"] = {
-                        "id": f"cf_{slug}",
-                        "name": mod_name,
-                        "slug": slug,
-                        "downloads": mod.get("downloads", 0),
-                        "description": mod.get("description", "No description"),
-                        "file_id": mod.get("file_id", ""),
-                        "download_href": mod.get("download_href", ""),
-                        "author": mod.get("author", ""),
-                        "source": "curseforge",
-                        "deps_required": mod.get("deps_required", []),
-                        "deps_optional": mod.get("deps_optional", []),
-                    }
-            print(f"  CurseForge: {len(cf_mods)} user-facing mods")
+                if not slug or is_library(mod_name):
+                    continue
+                if _is_installed(mod_name, slug):
+                    installed_skipped_cf += 1
+                    continue
+                cf_mods[f"cf_{slug}"] = {
+                    "id": f"cf_{slug}",
+                    "name": mod_name,
+                    "slug": slug,
+                    "downloads": mod.get("downloads", 0),
+                    "description": mod.get("description", "No description"),
+                    "file_id": mod.get("file_id", ""),
+                    "download_href": mod.get("download_href", ""),
+                    "author": mod.get("author", ""),
+                    "source": "curseforge",
+                    "deps_required": mod.get("deps_required", []),
+                    "deps_optional": mod.get("deps_optional", []),
+                }
+            print(f"  CurseForge: {len(cf_mods)} new mods ({installed_skipped_cf} installed skipped)")
         except Exception as e:
             log_event("BOOT", f"CurseForge scraper failed (non-fatal): {e}")
             print(f"  CurseForge: scraper failed ({e}), continuing with Modrinth only")
@@ -2927,7 +3315,10 @@ def generate_mod_lists_for_loaders(mc_version, limit=100, loaders=None):
                 merged[cf_key] = cf_mod
                 cf_unique += 1
         
-        print(f"  Dedup: {cf_dupes} shared, {cf_unique} CF-only added -> {len(merged)} unique mods")
+        print(f"  Dedup: {cf_dupes} shared, {cf_unique} CF-only added -> {len(merged)} unique NEW mods")
+        total_skipped = installed_skipped_mr + installed_skipped_cf
+        if total_skipped:
+            print(f"  ({total_skipped} installed mods excluded: {installed_skipped_mr} MR + {installed_skipped_cf} CF)")
         
         # Save curator cache (this is what the dashboard API reads)
         save_curator_cache(merged, {}, mc_version, loader)
@@ -2938,37 +3329,50 @@ def generate_mod_lists_for_loaders(mc_version, limit=100, loaders=None):
     
     return mod_lists
 
-def curator_command(cfg, limit=None, show_optional_audit=False):
+def curator_command(cfg, limit=None, show_optional_audit=False, sort="downloads"):
     """
     Main curator command - dual-source smart dependency management
     
     Flow:
     1. Fetch top N mods from BOTH Modrinth API AND CurseForge web scraper
-    2. Filter OUT all libs/APIs
-    3. Deduplicate by normalized mod name (prefer Modrinth for downloads, keep both sources)
-    4. Merge into unified list sorted by downloads
-    5. Save curator cache so dashboard/API can access the full list
-    6. When called interactively: show list, user picks, download mods + required deps
-    7. Auto-fetch CurseForge required deps (from scraped dep data)
-    8. Flag optional dep interoperability: if 2+ selected mods share an optional dep, notify user
+    2. Filter OUT all libs/APIs and already-installed mods
+    3. Over-fetch to fill gaps left by installed exclusions
+    4. Deduplicate by normalized mod name (prefer Modrinth for downloads, keep both sources)
+    5. Merge into unified list sorted by chosen sort
+    6. Save curator cache so dashboard/API can access the full list
+    7. When called interactively: show list, user picks, download mods + required deps
+    8. Auto-fetch CurseForge required deps (from scraped dep data)
+    9. Flag optional dep interoperability: if 2+ selected mods share an optional dep, notify user
     
     Args:
         cfg: configuration dict
         limit: max USER-FACING mods to fetch PER SOURCE (default 100, None = use config)
         show_optional_audit: show optional deps audit report after download
+        sort: sort method — "downloads", "relevance", "follows", "newest", "updated", "popularity"
     """
     mc_version = cfg.get("mc_version", "1.21.11")
     loader = cfg.get("loader", "neoforge")
     if limit is None:
         limit = cfg.get("curator_limit", 100)
     
+    sort_label = sort.upper()
     print(f"\n{'='*70}")
-    print(f"MOD CURATOR - {loader.upper()} {mc_version} (DUAL SOURCE)")
+    print(f"MOD CURATOR - {loader.upper()} {mc_version} (DUAL SOURCE, sort={sort_label})")
     print(f"{'='*70}\n")
     
+    # Build installed mod index for exclusion (scans mods/ AND mods/clientonly/)
+    mods_dir_path = os.path.join(CWD, cfg.get("mods_dir", "mods"))
+    installed_tokens, installed_jars = build_installed_index(mods_dir_path)
+    
+    def _is_installed(name, slug=""):
+        return check_installed(name, slug, installed_tokens)
+    
+    installed_count = len(installed_tokens)
+    print(f"  {installed_count} mods already installed (will be excluded from list)\n")
+    
     # ---- SOURCE 1: MODRINTH API ----
-    print(f"[1/2] Fetching top {limit} mods from Modrinth API...")
-    scan_limit = min(limit * 5, 500)
+    print(f"[1/2] Fetching top {limit} mods from Modrinth API (sort={sort_label})...")
+    scan_limit = min(limit * 7, 700)
     
     modrinth_raw = []
     for offset in range(0, scan_limit, 100):

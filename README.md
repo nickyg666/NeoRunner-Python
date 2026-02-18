@@ -1,3 +1,36 @@
+# NeoRunner-Python
+Built for a linux host, this (vibe-coded) program will download/run the latest neoforged server (others supported as well) and try to sync mods it finds into client side to sidestep modloader swaps and client/server upgrades. I am a huge fan of the automodpack mod for what it's worth, and 
+## shout-out to skidam for making that mod and giving me the idea. 
+This has spiraled into a whole expansive hosting and mod management console, dependent on Ferium to manage downloads, uses a stealth browser to check curseforge, and modrinths super cool API that's free to use for the modrinth side. Should give you top 100 non-lib/api downloads from either suppier by default, but you can sort but other criteria in the settings.
+
+As always, big shout-out to 
+# My wife Sage, who understands that after I get home from work all I really want to do is more work. I love her more than trees love carbon dioxide.
+# To my son, Lorenzo, who is the whole reason I would ever touch minecraft in the first place, let alone get this involved with it.
+
+
+Here is the idea behind the project:
+
+run script, it handles a lot of stuff so you don't have to. goal: move from minecraft version to version, modloader agnostic and able to grab whatever mods you had before that got updated. Offer install scripts to pull latest mods from server to client. Web UI just for fun, helps reach more users that way, and helps me be lazier with my leisure activities.
+
+you don't have to know a ton about minecraft modding to get started.
+
+you run the script, you enable RCON (so it can tell your clients what they need when they try to connect), and set other configs.
+
+it runs in a tmux for persistence, optionally will autostart. It will get all the things it needs on first run. It will prompt for authentication when it needs to install software.
+
+
+restart minecraft -> sees new mods -> connect to server and have fun! Or find a reason to do more work like me haha!
+
+
+
+## I vibe coded this for max time efficiency in getting started, then manually tweaked it to actually work. Used ChatGPT, logs attached.
+
+workflow is generally -> workshop ideas on chatGPT/any free LLM -> turn into starter script -> manually improve -> development enters support mode (we are here right now - 02.16.2026) || feed to more advanced coding AI like claude haiku 4.5 + github copilot + opencode.ai ide (here right now! 2/18/2026) -> finished product (hopefully 2/18?) I've graduated off to anthropic's Opus 4.6, because my tasking need is outgrowing AI pretty quickly; I'll have to get better at coding fast - but I can't type 400WPM like an LLM can!
+
+This workflow maximizes the bang for my buck (or so I hope) on the copilot token usage - I don't waste any precious paid tokens on prototyping!
+
+<--- CLAUDE, YOU CAN DO YOUR INFO STUFF DOWN HERE, DON'T REMIX MINE ----->
+
 # NeoRunner
 
 Production-ready modded Minecraft server manager. Single Python file, runs everything.

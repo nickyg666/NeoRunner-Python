@@ -125,9 +125,28 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+# In-memory event store for dashboard (survives until process restart)
+_server_events = []
+_SERVER_EVENT_TYPES = {
+    "CRASH_DETECT", "SELF_HEAL", "QUARANTINE", "SERVER_RESTART",
+    "SERVER_STOPPED", "SERVER_RUNNING", "SERVER_START", "SERVER_ERROR",
+    "SERVER_TIMEOUT", "PREFLIGHT", "MOD_INSTALL"
+}
+_MAX_EVENTS = 200
+
 def log_event(event_type, msg):
-    """Log with event type tag"""
+    """Log with event type tag. Captures crash/heal/quarantine events for dashboard."""
     log.info(f"[{event_type}] {msg}")
+    if event_type in _SERVER_EVENT_TYPES:
+        from datetime import datetime
+        _server_events.append({
+            "type": event_type,
+            "message": msg,
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        })
+        # Trim to max
+        while len(_server_events) > _MAX_EVENTS:
+            _server_events.pop(0)
 
 def run(cmd):
     """Execute shell command"""
@@ -1249,6 +1268,19 @@ def http_server(port, mods_dir):
                                     broadcast_sent = broadcast_mod_update(c, mod_count=total_mods)
                             except Exception as e:
                                 log_event("API", f"Post-install broadcast error: {e}")
+                            
+                            # Auto-restart server so new mods are loaded
+                            # Run in background thread so the API response returns immediately
+                            def _deferred_restart(config):
+                                try:
+                                    time.sleep(3)  # Brief delay for zip/scripts to finish
+                                    log_event("API", "Auto-restarting server to load new mods...")
+                                    restart_server_for_mods(config)
+                                except Exception as e:
+                                    log_event("API", f"Auto-restart failed: {e}")
+                            
+                            restart_thread = threading.Thread(target=_deferred_restart, args=(c,), daemon=True)
+                            restart_thread.start()
                         
                         return jsonify({
                             "success": True,
@@ -1256,7 +1288,8 @@ def http_server(port, mods_dir):
                             "skipped": skipped,
                             "failed": failed,
                             "broadcast": broadcast_sent,
-                            "message": f"Downloaded {downloaded}, skipped {skipped} already installed, {len(failed)} failed"
+                            "restarting": downloaded > 0,
+                            "message": f"Downloaded {downloaded}, skipped {skipped} already installed, {len(failed)} failed" + (". Server restarting to load new mods..." if downloaded > 0 else "")
                         })
                     except Exception as e:
                         return jsonify({"success": False, "error": str(e)}), 400
@@ -1469,24 +1502,20 @@ def http_server(port, mods_dir):
                 @app.route("/api/server/start", methods=["POST"])
                 def api_server_start():
                     try:
-                        run_cmd(f"cd {CWD} && python3 run.py run &")
-                        return jsonify({"success": True, "message": "Server starting..."})
+                        result = run_cmd("sudo systemctl start mcserver")
+                        if result.get("success"):
+                            return jsonify({"success": True, "message": "Server starting via systemd..."})
+                        return jsonify({"success": False, "error": result.get("stderr", "systemctl start failed")}), 500
                     except Exception as e:
                         return jsonify({"success": False, "error": str(e)}), 400
                 
                 @app.route("/api/server/stop", methods=["POST"])
                 def api_server_stop():
                     try:
-                        c = load_cfg()
-                        if c.get("rcon_pass"):
-                            if send_rcon_command(c, "stop"):
-                                return jsonify({"success": True, "message": "Stop command sent via RCON"})
-                            # Fallback: send stop via tmux if RCON fails
-                            run_cmd("tmux send-keys -t MC 'stop' Enter")
-                            return jsonify({"success": True, "message": "Stop command sent via tmux (RCON failed)"})
-                        # No RCON configured, use tmux
-                        run_cmd("tmux send-keys -t MC 'stop' Enter")
-                        return jsonify({"success": True, "message": "Stop command sent via tmux"})
+                        result = run_cmd("sudo systemctl stop mcserver")
+                        if result.get("success"):
+                            return jsonify({"success": True, "message": "Server stopping via systemd..."})
+                        return jsonify({"success": False, "error": result.get("stderr", "systemctl stop failed")}), 500
                     except Exception as e:
                         return jsonify({"success": False, "error": str(e)}), 400
                 
@@ -1499,6 +1528,107 @@ def http_server(port, mods_dir):
                         return jsonify({"success": False, "error": result["stderr"]}), 400
                     except Exception as e:
                         return jsonify({"success": False, "error": str(e)}), 400
+                
+                # ---- Quarantine API ----
+                @app.route("/api/quarantine")
+                def api_quarantine():
+                    """List all quarantined mods with their reasons"""
+                    try:
+                        c = load_cfg()
+                        q_dir = os.path.join(CWD, c.get("mods_dir", "mods"), "quarantine")
+                        if not os.path.isdir(q_dir):
+                            return jsonify({"mods": []})
+                        mods = []
+                        for fn in sorted(os.listdir(q_dir)):
+                            if not fn.endswith(".jar"):
+                                continue
+                            reason_file = os.path.join(q_dir, f"{fn}.reason.txt")
+                            reason = ""
+                            date = ""
+                            mod_id = ""
+                            if os.path.exists(reason_file):
+                                try:
+                                    with open(reason_file) as rf:
+                                        for line in rf:
+                                            if line.startswith("Reason:"):
+                                                reason = line.split(":", 1)[1].strip()
+                                            elif line.startswith("Quarantined:"):
+                                                date = line.split(":", 1)[1].strip()
+                                            elif line.startswith("Mod ID"):
+                                                mod_id = line.split(":", 1)[1].strip()
+                                except Exception:
+                                    pass
+                            size_mb = round(os.path.getsize(os.path.join(q_dir, fn)) / (1024*1024), 2)
+                            mods.append({
+                                "filename": fn,
+                                "reason": reason,
+                                "date": date,
+                                "mod_id": mod_id,
+                                "size_mb": size_mb
+                            })
+                        return jsonify({"mods": mods})
+                    except Exception as e:
+                        return jsonify({"mods": [], "error": str(e)}), 500
+                
+                @app.route("/api/quarantine/restore", methods=["POST"])
+                def api_quarantine_restore():
+                    """Restore a quarantined mod back to the mods folder"""
+                    try:
+                        import shutil
+                        data = request.json
+                        filename = data.get("filename", "")
+                        if not filename or not filename.endswith(".jar"):
+                            return jsonify({"success": False, "error": "Invalid filename"}), 400
+                        c = load_cfg()
+                        m_dir = os.path.join(CWD, c.get("mods_dir", "mods"))
+                        q_dir = os.path.join(m_dir, "quarantine")
+                        src = os.path.join(q_dir, filename)
+                        dst = os.path.join(m_dir, filename)
+                        if not os.path.exists(src):
+                            return jsonify({"success": False, "error": "File not found in quarantine"}), 404
+                        shutil.move(src, dst)
+                        # Remove reason sidecar
+                        reason_file = os.path.join(q_dir, f"{filename}.reason.txt")
+                        if os.path.exists(reason_file):
+                            os.remove(reason_file)
+                        log_event("QUARANTINE", f"Restored {filename} from quarantine")
+                        return jsonify({"success": True, "message": f"Restored {filename}"})
+                    except Exception as e:
+                        return jsonify({"success": False, "error": str(e)}), 400
+                
+                @app.route("/api/quarantine/delete", methods=["POST"])
+                def api_quarantine_delete():
+                    """Permanently delete a quarantined mod"""
+                    try:
+                        data = request.json
+                        filename = data.get("filename", "")
+                        if not filename or not filename.endswith(".jar"):
+                            return jsonify({"success": False, "error": "Invalid filename"}), 400
+                        c = load_cfg()
+                        q_dir = os.path.join(CWD, c.get("mods_dir", "mods"), "quarantine")
+                        jar_path = os.path.join(q_dir, filename)
+                        reason_path = os.path.join(q_dir, f"{filename}.reason.txt")
+                        if not os.path.exists(jar_path):
+                            return jsonify({"success": False, "error": "File not found in quarantine"}), 404
+                        os.remove(jar_path)
+                        if os.path.exists(reason_path):
+                            os.remove(reason_path)
+                        log_event("QUARANTINE", f"Permanently deleted {filename} from quarantine")
+                        return jsonify({"success": True, "message": f"Deleted {filename}"})
+                    except Exception as e:
+                        return jsonify({"success": False, "error": str(e)}), 400
+                
+                # ---- Server Events API ----
+                @app.route("/api/server-events")
+                def api_server_events():
+                    """Return server events (crash, heal, quarantine) for dashboard timeline"""
+                    return jsonify({"events": _server_events})
+                
+                @app.route("/api/server-events/clear", methods=["POST"])
+                def api_server_events_clear():
+                    """Clear the in-memory event store"""
+                    _server_events.clear()
+                    return jsonify({"success": True})
                 
                 flask_port = int(port)
                 log_event("HTTP_SERVER", f"Starting dashboard + mod server on port {flask_port}")
@@ -1680,8 +1810,50 @@ def _try_self_heal(loader_instance, crash_info, cfg, crash_history):
         
         return False
     
+    elif crash_type == "mod_conflict":
+        # Two or more mods are incompatible — quarantine the most recently installed one
+        culprits = crash_info.get("culprits", [])
+        conflict_type = crash_info.get("conflict_type", "unknown")
+        log_event("SELF_HEAL", f"Mod conflict ({conflict_type}) involving: {', '.join(culprits) if culprits else 'unknown mods'}")
+        
+        if culprit:
+            crash_history[culprit] = crash_history.get(culprit, 0) + 1
+            log_event("SELF_HEAL", f"Quarantining {culprit} (conflict type: {conflict_type})")
+            quarantined = _quarantine_mod(mods_dir, culprit, f"Mod conflict ({conflict_type}) with other installed mods")
+            if quarantined:
+                return "quarantined"
+        
+        # If primary culprit couldn't be quarantined, try the last one in the list
+        for c in reversed(culprits):
+            if c and c != culprit:
+                log_event("SELF_HEAL", f"Trying to quarantine alternate conflict mod: {c}")
+                quarantined = _quarantine_mod(mods_dir, c, f"Mod conflict ({conflict_type})")
+                if quarantined:
+                    return "quarantined"
+        
+        log_event("SELF_HEAL", "Cannot identify which mod to quarantine for conflict")
+        return False
+    
     elif crash_type == "mod_error":
         if culprit:
+            # If it's a corrupt/invalid JAR, quarantine immediately by exact filename
+            bad_file = crash_info.get("bad_file")
+            if bad_file:
+                import shutil
+                jar_path = os.path.join(mods_dir, bad_file)
+                if os.path.exists(jar_path):
+                    quarantine_dir = os.path.join(mods_dir, "quarantine")
+                    os.makedirs(quarantine_dir, exist_ok=True)
+                    dst = os.path.join(quarantine_dir, bad_file)
+                    shutil.move(jar_path, dst)
+                    reason_file = os.path.join(quarantine_dir, f"{bad_file}.reason.txt")
+                    with open(reason_file, "w") as rf:
+                        rf.write(f"Quarantined: {datetime.now().isoformat()}\n")
+                        rf.write(f"Reason: Invalid JAR file (corrupt download / HTML error page)\n")
+                        rf.write(f"Mod ID/slug: {culprit}\n")
+                    log_event("QUARANTINE", f"Quarantined invalid JAR {bad_file} -> quarantine/")
+                    return "quarantined"
+            
             # Track crash count for this mod
             crash_history[culprit] = crash_history.get(culprit, 0) + 1
             log_event("SELF_HEAL", f"Mod error from {culprit} (crash #{crash_history[culprit]})")

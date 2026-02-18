@@ -283,6 +283,100 @@
             border: 1px solid #bee5eb;
         }
         
+        .alert-warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffc107;
+        }
+        
+        /* Client installer download buttons */
+        .installer-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 14px 24px;
+            border-radius: 8px;
+            text-decoration: none;
+            color: white;
+            font-weight: 600;
+            transition: transform 0.15s, box-shadow 0.15s;
+            min-width: 120px;
+            cursor: pointer;
+        }
+        .installer-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+        }
+        .installer-bat { background: linear-gradient(135deg, #0078d4, #005a9e); }
+        .installer-ps1 { background: linear-gradient(135deg, #012456, #1e3a5f); }
+        .installer-sh  { background: linear-gradient(135deg, #e95420, #c34113); }
+        .installer-icon { font-size: 22px; margin-bottom: 4px; }
+        .installer-label { font-size: 16px; font-weight: bold; }
+        .installer-desc { font-size: 11px; opacity: 0.85; margin-top: 2px; }
+        
+        /* Quarantine items */
+        .quarantine-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #fff8e1;
+            border: 1px solid #ffe082;
+            border-radius: 6px;
+            padding: 8px 12px;
+            margin-bottom: 6px;
+            font-size: 13px;
+        }
+        .quarantine-item .q-info { flex: 1; }
+        .quarantine-item .q-name { font-weight: 600; color: #333; }
+        .quarantine-item .q-reason { color: #888; font-size: 12px; }
+        .quarantine-item .q-restore {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 4px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-left: 10px;
+        }
+        .quarantine-item .q-restore:hover { background: #388E3C; }
+        .quarantine-item .q-delete {
+            background: #f44336;
+            color: white;
+            border: none;
+            padding: 4px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-left: 6px;
+        }
+        .quarantine-item .q-delete:hover { background: #d32f2f; }
+        
+        /* Server events timeline */
+        .event-timeline { max-height: 300px; overflow-y: auto; }
+        .event-item {
+            display: flex;
+            gap: 8px;
+            padding: 6px 0;
+            border-bottom: 1px solid #eee;
+            font-size: 13px;
+        }
+        .event-item:last-child { border-bottom: none; }
+        .event-time { color: #999; font-size: 11px; white-space: nowrap; }
+        .event-type {
+            font-weight: 600;
+            font-size: 11px;
+            padding: 1px 6px;
+            border-radius: 3px;
+            white-space: nowrap;
+        }
+        .event-type-crash { background: #f8d7da; color: #721c24; }
+        .event-type-heal { background: #d4edda; color: #155724; }
+        .event-type-quarantine { background: #fff3cd; color: #856404; }
+        .event-type-restart { background: #d1ecf1; color: #0c5460; }
+        .event-type-default { background: #e2e3e5; color: #383d41; }
+        .event-msg { color: #333; flex: 1; }
+        
         @media (max-width: 768px) {
             .grid {
                 grid-template-columns: 1fr;
@@ -459,7 +553,7 @@
                 </div>
             </div>
             
-            <!-- Quick Actions Card -->
+             <!-- Quick Actions Card -->
             <div class="card">
                 <h2>Quick Actions</h2>
                 <button id="btn-start" class="success" onclick="startServer()">▶ Start Server</button>
@@ -470,11 +564,46 @@
             </div>
         </div>
         
+        <!-- Client Installers Card -->
+        <div class="card" style="margin-bottom: 20px;">
+            <h2>Client Mod Installer</h2>
+            <p style="color:#666; font-size:13px; margin-bottom:12px;">Download a script, run it on your PC, and your client mods folder will be synced with the server. Pick the one that matches your OS:</p>
+            <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                <a href="/download/install-mods.bat" class="installer-btn installer-bat" download>
+                    <span class="installer-icon">&#x1F4E5;</span>
+                    <span class="installer-label">.bat</span>
+                    <span class="installer-desc">Windows (double-click)</span>
+                </a>
+                <a href="/download/install-mods.ps1" class="installer-btn installer-ps1" download>
+                    <span class="installer-icon">&#x1F4E5;</span>
+                    <span class="installer-label">.ps1</span>
+                    <span class="installer-desc">PowerShell</span>
+                </a>
+                <a href="/download/install-mods.sh" class="installer-btn installer-sh" download>
+                    <span class="installer-icon">&#x1F4E5;</span>
+                    <span class="installer-label">.sh</span>
+                    <span class="installer-desc">Linux / macOS</span>
+                </a>
+            </div>
+        </div>
+        
+        <!-- Quarantine Banner (hidden by default, shown when mods are quarantined) -->
+        <div id="quarantine-banner" style="display:none; background:#fff3cd; border:1px solid #ffc107; border-radius:8px; padding:16px; margin-bottom:20px;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+                <span style="font-size:20px;">&#x26A0;</span>
+                <strong style="color:#856404; font-size:15px;">Quarantined Mods</strong>
+                <span id="quarantine-count" style="background:#ffc107; color:#856404; padding:2px 8px; border-radius:10px; font-size:12px; font-weight:bold;">0</span>
+            </div>
+            <p style="color:#856404; font-size:13px; margin-bottom:10px;">These mods were automatically removed because they caused crashes. You can restore them if the issue has been resolved.</p>
+            <div id="quarantine-list"></div>
+        </div>
+        
         <!-- Tabbed Section -->
         <div class="card">
             <div class="tabs">
                 <button class="tab-button active" onclick="switchTab('mods')">📦 Mods</button>
                 <button class="tab-button" onclick="switchTab('config')">⚙️ Configuration</button>
+                <button class="tab-button" onclick="switchTab('events')">🔔 Events</button>
                 <button class="tab-button" onclick="switchTab('logs')">📝 Logs</button>
             </div>
             
@@ -597,6 +726,17 @@
                 </div>
             </div>
             
+            <!-- Events Tab -->
+            <div id="events" class="tab-content">
+                <h2>Server Events</h2>
+                <p style="color:#666; font-size:13px; margin-bottom:12px;">Crash detection, self-healing actions, and quarantine events. Auto-refreshes every 10 seconds.</p>
+                <button onclick="loadEvents()">🔄 Refresh</button>
+                <button onclick="clearEvents()" class="danger" style="margin-left:8px;">Clear Events</button>
+                <div id="events-content" class="event-timeline" style="margin-top:12px;">
+                    <div class="loading"></div> Loading events...
+                </div>
+            </div>
+            
             <!-- Logs Tab -->
             <div id="logs" class="tab-content">
                 <h2>Live Logs</h2>
@@ -696,6 +836,8 @@
         // Auto-refresh status every 5 seconds
         setInterval(refreshStatus, 5000);
         setInterval(refreshMods, 30000);
+        setInterval(loadQuarantine, 15000);
+        setInterval(loadEvents, 10000);
         
         // Initial load
         document.addEventListener('DOMContentLoaded', function() {
@@ -703,6 +845,8 @@
             loadMods();
             loadConfig();
             refreshLogs();
+            loadQuarantine();
+            loadEvents();
 
             // First-visit check: show mod selector if never loaded AND config allows it
             if (!localStorage.getItem('neorunner-mods-loaded')) {
@@ -1291,6 +1435,122 @@
                 btn.textContent = 'Install Selected';
                 showAlert(`Error: ${err}`, 'error');
             });
+        }
+
+        // ---- Quarantine Management ----
+        function loadQuarantine() {
+            fetch('/api/quarantine')
+                .then(r => r.json())
+                .then(data => {
+                    const banner = document.getElementById('quarantine-banner');
+                    const list = document.getElementById('quarantine-list');
+                    const count = document.getElementById('quarantine-count');
+                    if (!data.mods || data.mods.length === 0) {
+                        banner.style.display = 'none';
+                        return;
+                    }
+                    banner.style.display = 'block';
+                    count.textContent = data.mods.length;
+                    let html = '';
+                    data.mods.forEach(m => {
+                        html += `<div class="quarantine-item">
+                            <div class="q-info">
+                                <div class="q-name">${m.filename}</div>
+                                <div class="q-reason">${m.reason || 'Unknown reason'} &mdash; ${m.date || ''}</div>
+                            </div>
+                            <button class="q-restore" onclick="restoreQuarantined('${m.filename}')">Restore</button>
+                            <button class="q-delete" onclick="deleteQuarantined('${m.filename}')">Delete</button>
+                        </div>`;
+                    });
+                    list.innerHTML = html;
+                })
+                .catch(() => {});
+        }
+
+        function restoreQuarantined(filename) {
+            if (!confirm(`Restore ${filename} back to the mods folder?`)) return;
+            fetch('/api/quarantine/restore', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filename })
+            })
+            .then(r => r.json())
+            .then(result => {
+                if (result.success) {
+                    showAlert(`Restored ${filename}`, 'success');
+                    loadQuarantine();
+                    loadMods();
+                } else {
+                    showAlert(`Error: ${result.error}`, 'error');
+                }
+            })
+            .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+
+        function deleteQuarantined(filename) {
+            if (!confirm(`Permanently delete ${filename}? This cannot be undone.`)) return;
+            fetch('/api/quarantine/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filename })
+            })
+            .then(r => r.json())
+            .then(result => {
+                if (result.success) {
+                    showAlert(`Deleted ${filename}`, 'success');
+                    loadQuarantine();
+                } else {
+                    showAlert(`Error: ${result.error}`, 'error');
+                }
+            })
+            .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+
+        // ---- Server Events Timeline ----
+        function loadEvents() {
+            fetch('/api/server-events')
+                .then(r => r.json())
+                .then(data => {
+                    const el = document.getElementById('events-content');
+                    if (!data.events || data.events.length === 0) {
+                        el.innerHTML = '<div style="color:#999; padding:20px; text-align:center;">No server events yet. Events will appear here when the server detects crashes, quarantines mods, or performs self-healing.</div>';
+                        return;
+                    }
+                    let html = '';
+                    // Show newest first
+                    const events = [...data.events].reverse();
+                    events.forEach(ev => {
+                        const typeClass = {
+                            'CRASH_DETECT': 'event-type-crash',
+                            'SELF_HEAL': 'event-type-heal',
+                            'QUARANTINE': 'event-type-quarantine',
+                            'SERVER_RESTART': 'event-type-restart',
+                            'SERVER_STOPPED': 'event-type-restart',
+                            'SERVER_RUNNING': 'event-type-restart',
+                            'PREFLIGHT': 'event-type-heal',
+                        }[ev.type] || 'event-type-default';
+                        html += `<div class="event-item">
+                            <span class="event-time">${ev.time || ''}</span>
+                            <span class="event-type ${typeClass}">${ev.type}</span>
+                            <span class="event-msg">${(ev.message || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>
+                        </div>`;
+                    });
+                    el.innerHTML = html;
+                })
+                .catch(() => {});
+        }
+
+        function clearEvents() {
+            if (!confirm('Clear all server events?')) return;
+            fetch('/api/server-events/clear', { method: 'POST' })
+                .then(r => r.json())
+                .then(result => {
+                    if (result.success) {
+                        showAlert('Events cleared', 'success');
+                        loadEvents();
+                    }
+                })
+                .catch(err => showAlert(`Error: ${err}`, 'error'));
         }
     </script>
 </body>

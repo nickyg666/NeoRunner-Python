@@ -13,7 +13,7 @@ import os, json, subprocess, sys, time, threading, logging, hashlib, urllib.requ
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 from datetime import datetime, timedelta
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urljoin, quote as url_quote
 from ferium_manager import FeriumManager, setup_ferium_wizard
 
 # Loader abstraction classes
@@ -882,9 +882,14 @@ def http_server(port, mods_dir):
                     try:
                         c = load_cfg()
                         if c.get("rcon_pass"):
-                            run_cmd(f"echo 'stop' | nc localhost {c.get('rcon_port', 25575)} 2>/dev/null")
-                            return jsonify({"success": True, "message": "Stop command sent"})
-                        return jsonify({"success": False, "error": "RCON not configured"}), 400
+                            if send_rcon_command(c, "stop"):
+                                return jsonify({"success": True, "message": "Stop command sent via RCON"})
+                            # Fallback: send stop via tmux if RCON fails
+                            run_cmd("tmux send-keys -t MC 'stop' Enter")
+                            return jsonify({"success": True, "message": "Stop command sent via tmux (RCON failed)"})
+                        # No RCON configured, use tmux
+                        run_cmd("tmux send-keys -t MC 'stop' Enter")
+                        return jsonify({"success": True, "message": "Stop command sent via tmux"})
                     except Exception as e:
                         return jsonify({"success": False, "error": str(e)}), 400
                 
@@ -950,7 +955,8 @@ def _try_self_heal(loader_instance, crash_info, cfg):
         
         # Search Modrinth for the mod by name
         try:
-            search_url = f"https://api.modrinth.com/v2/search?query={dep_name}&facets=[[\"versions:{mc_version}\"],[\"categories:{loader_name}\"]]]&limit=5"
+            dep_query = url_quote(dep_name)
+            search_url = f"https://api.modrinth.com/v2/search?query={dep_query}&facets=[[\"versions:{mc_version}\"],[\"categories:{loader_name}\"]]&limit=5"
             req = urllib.request.Request(search_url, headers={"User-Agent": "NeoRunner/1.0"})
             with urllib.request.urlopen(req, timeout=15) as resp:
                 results = json.loads(resp.read().decode())
@@ -1130,26 +1136,57 @@ def send_chat_message(msg):
     return send_server_command(f"say {msg_safe}")
 
 def send_rcon_command(cfg, cmd):
-    """Send command via RCON (if mcrcon available)"""
+    """Send command via RCON using the Source RCON protocol"""
     try:
         import socket
+        import struct
+        
         host = cfg.get("rcon_host", "localhost")
         port = int(cfg.get("rcon_port", 25575))
         password = cfg.get("rcon_pass", "changeme")
         
+        def _make_packet(request_id, packet_type, payload):
+            """Build a Source RCON packet: length(4) + request_id(4) + type(4) + payload + \x00\x00"""
+            payload_bytes = payload.encode("utf-8") + b"\x00\x00"
+            length = 4 + 4 + len(payload_bytes)  # request_id + type + payload
+            return struct.pack("<iii", length, request_id, packet_type) + payload_bytes
+        
+        def _read_packet(sock):
+            """Read a Source RCON response packet"""
+            raw_len = sock.recv(4)
+            if len(raw_len) < 4:
+                return None, None, None
+            length = struct.unpack("<i", raw_len)[0]
+            data = b""
+            while len(data) < length:
+                chunk = sock.recv(length - len(data))
+                if not chunk:
+                    break
+                data += chunk
+            if len(data) < 10:
+                return None, None, None
+            request_id, packet_type = struct.unpack("<ii", data[:8])
+            payload = data[8:-2].decode("utf-8", errors="replace")  # strip 2 null bytes
+            return request_id, packet_type, payload
+        
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(5)
         sock.connect((host, port))
         
-        # Send login
-        login_payload = f"\x00\x00\x00\x00\x03\x00\x00\x00" + password.encode()
-        sock.send(login_payload)
+        # Login (type 3)
+        sock.sendall(_make_packet(1, 3, password))
+        req_id, _, _ = _read_packet(sock)
+        if req_id == -1 or req_id is None:
+            log_event("RCON_ERROR", "Authentication failed")
+            sock.close()
+            return False
         
-        # Send command
-        cmd_payload = f"\x00\x00\x00\x00\x02{cmd}".encode()
-        sock.send(cmd_payload)
+        # Send command (type 2)
+        sock.sendall(_make_packet(2, 2, cmd))
+        _, _, response = _read_packet(sock)
         
         sock.close()
-        log_event("RCON", f"Command sent: {cmd}")
+        log_event("RCON", f"Command sent: {cmd}" + (f" -> {response}" if response else ""))
         return True
     except Exception as e:
         log_event("RCON_ERROR", str(e))
@@ -1673,53 +1710,79 @@ def get_mod_version_dependencies(mod_id, mc_version, loader):
 
 def is_library(mod_name, required_dep=False):
     """
-    Check if mod is a library (not a user-facing mod)
+    Check if mod is a library/API/dependency (not a user-facing gameplay mod)
     
     ONLY user-facing mods are shown. Dependencies are fetched on-demand.
-    Fabric API/Loader are allowed if explicitly required.
     
     Args:
         mod_name: name of the mod
         required_dep: if True, don't filter (required deps override library status)
     
     Returns:
-        True if should be filtered (is a library), False if user-facing
+        True if should be filtered (is a library/API), False if user-facing
     """
     if not mod_name:
         return True  # Filter out mods with no name
     
     name_lower = mod_name.lower()
     
-    # Always allow Fabric core loaders/APIs
-    fabric_whitelist = ["fabric api", "fabric-api", "fabric loader", "fabric-loader"]
-    for allowed in fabric_whitelist:
-        if allowed in name_lower:
-            return False  # Don't filter - this is allowed
+    # Exact name matches for known libraries/APIs/dependencies
+    lib_exact = {
+        "fabric api", "fabric-api", "fabric loader", "fabric-loader",
+        "fabric language kotlin", "fabric language scala",
+        "collective", "konkrete", "balm", "terrablender",
+        "searchables", "curios api", "malilib", "malllib",
+        "owo-lib", "oωo (owo-lib)", "text placeholder api",
+        "playeranimator", "placeholder api",
+        "geckolib", "architectury api", "architectury",
+        "cloth config", "cloth-config",
+        "ferrite core", "ferritecore",
+        "yacl", "yet another config lib",
+        "puzzles lib", "forge config api port",
+        "creative core", "creativecore", "libipn",
+        "resourceful lib", "resourceful config",
+        "supermartijn642's config lib", "supermartijn642's core lib",
+        "fzzy config", "midnight lib", "midnightlib",
+        "kotlin for forge", "kotlinforforge",
+        "sinytra connector", "forgified fabric api",
+        "connector extras", "mod menu", "modmenu",
+        "iceberg", "prism lib", "prismlib",
+        "lithostitched", "neoforge", "forge",
+        "indium", "quilted fabric api",
+        "cardinal components api", "trinkets",
+        "completeconfig", "complete config",
+        "parchment", "mixinextras",
+        "connector", "panorama api",
+    }
     
-    # Specific libraries to filter out (from our identified list)
-    # These are known dependency-only mods
-    lib_name_patterns = [
-        "cloth config",
-        "ferrite",
-        "yacl", "yet another config",
-        "architectury",
-        "geckolib",
-        "puzzles lib",
-        "forge config api",
-        "creative",  # CreativeCore
-        "libipn",
-        "resourceful",
-        "supermartijn", # Config libs
-        "fzzy config",
-        "midnight",  # MidnightLib
-        "kotlin for forge",
-        "lib ",  # "lib " prefix
-        " lib",  # " lib" suffix
+    if name_lower.strip() in lib_exact:
+        return True
+    
+    # Substring patterns that indicate a library/API
+    lib_patterns = [
+        " api",       # "Curios API", "Fabric API", etc.
+        " lib",       # "Puzzles Lib", "Prism Lib"
+        "lib ",       # "lib " prefix
+        "config lib", # Config libraries
+        "core lib",   # Core libraries
+        "language kotlin",
+        "language scala",
+        "placeholder api",
     ]
     
-    for pattern in lib_name_patterns:
+    for pattern in lib_patterns:
         if pattern in name_lower:
-            return True  # This is a library
+            return True
+    
+    # Suffix patterns
+    if name_lower.endswith(" api") or name_lower.endswith("-api"):
+        return True
+    if name_lower.endswith(" lib") or name_lower.endswith("-lib"):
+        return True
+    if name_lower.endswith("lib") and len(name_lower) > 5:
+        # Catch "geckolib", "malilib" but not short words
+        if name_lower not in {"toolib"}:  # whitelist real mods ending in lib
+            return True
     
     return False  # User-facing mod
 
@@ -2169,6 +2232,9 @@ def curator_command(cfg, limit=None, show_optional_audit=False):
             }
     
     print(f"\n✓ Found {len(user_facing_mods)} user-facing mods (scanned {len(all_mods)} total)\n")
+    
+    # Save curator cache so dashboard/API can access the full list
+    save_curator_cache(user_facing_mods, {}, mc_version, loader)
     
     # Display the list informally
     print(f"{'='*70}")

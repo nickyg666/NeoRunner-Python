@@ -12,7 +12,7 @@ import os, json, subprocess, sys, time, threading, logging, hashlib, urllib.requ
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 from datetime import datetime, timedelta
 from pathlib import Path
-from urllib.parse import urljoin, quote
+from urllib.parse import urljoin
 
 CONFIG = "config.json"
 CWD = os.getcwd()
@@ -935,59 +935,6 @@ def monitor_players(cfg):
     remote_event_monitor(cfg)
 
 # ============================================================================
-# SELENIUM CLOUDFLARE BYPASS (for Cloudflare-protected sites)
-# ============================================================================
-
-def fetch_with_selenium(url, timeout=30, headless=True):
-    """
-    Fetch URL using Selenium + Firefox to bypass Cloudflare challenges
-    Returns HTML content or None on failure
-    """
-    try:
-        from selenium import webdriver
-        from selenium.webdriver.common.by import By
-        from selenium.webdriver.support.ui import WebDriverWait
-        from selenium.webdriver.support import expected_conditions as EC
-        from selenium.webdriver.firefox.options import Options as FirefoxOptions
-        
-        options = FirefoxOptions()
-        if headless:
-            options.add_argument("--headless")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-gpu")
-        
-        driver = None
-        try:
-            driver = webdriver.Firefox(options=options)
-            driver.set_page_load_timeout(timeout)
-            
-            log_event("SELENIUM", f"Fetching {url} with Selenium...")
-            driver.get(url)
-            
-            # Wait for page to load (body element must be present)
-            WebDriverWait(driver, timeout).until(
-                EC.presence_of_element_located((By.TAG_NAME, "body"))
-            )
-            
-            time.sleep(2)  # Extra wait for JS execution
-            html = driver.page_source
-            
-            log_event("SELENIUM", f"Successfully fetched {len(html)} bytes")
-            return html
-            
-        finally:
-            if driver:
-                driver.quit()
-    
-    except ImportError:
-        log_event("SELENIUM", "Selenium not installed, skipping Cloudflare bypass")
-        return None
-    except Exception as e:
-        log_event("SELENIUM_ERROR", f"Failed to fetch with Selenium: {e}")
-        return None
-
-# ============================================================================
 # CURSEFORGE MOD CURATOR SYSTEM (using Modrinth API for better public access)
 # ============================================================================
 
@@ -1108,7 +1055,6 @@ def get_mod_dependencies_curseforge(mod_id):
 def fetch_modrinth_mods(mc_version, loader, limit=100, offset=0, categories=None):
     """
     Fetch top downloaded mods from Modrinth for given MC version + loader
-    Falls back to CurseForge if Modrinth fails (rare).
     
     Args:
         mc_version: e.g. "1.21.11"
@@ -1145,7 +1091,7 @@ def fetch_modrinth_mods(mc_version, loader, limit=100, offset=0, categories=None
             data = json.loads(response.read().decode())
             return data.get("hits", [])
     except Exception as e:
-        log_event("CURATOR", f"Error fetching from Modrinth: {e}")
+        log_event("CURATOR", f"Error fetching mods: {e}")
         return []
 
 def get_mod_dependencies_modrinth(mod_id):

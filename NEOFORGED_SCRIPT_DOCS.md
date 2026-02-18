@@ -1,16 +1,16 @@
-# NeoForged Advanced Server Script Documentation
+# NeoForged Advanced Server Script POOR AI Documentation
 
 ## Overview
 
-`neoforgedAdvanced.sh` is a comprehensive Minecraft NeoForged server management script that automates:
-- Server startup with crash recovery
-- Client mod synchronization via SMB (network share)
-- World backups (incremental with hard links)
-- Player session monitoring
-- Server console interaction
+`neoforgedAdvanced.sh` is a comprehensive Minecraft NeoForged server management script that automates: #it's actually just run.py to fit in with run.bat and run.sh
+- Server startup with crash recovery # working on this to recover and self repair for mods that don't mix with the rest
+- Client mod synchronization via SMB (network share) # This has been upgraded to http.server with python, for ease of LAN/WAN usage
+- World backups (incremental with hard links) #this is still implemented
+- Player session monitoring # We want to log everything the server does, for a future project where an SBC will react to events / messages
+- Server console interaction # we want to do op adds and stuff from the chat
 
 The script uses **tmux** for process management and maintains comprehensive logs in `live.log`.
-
+### This is the core of the thing, what started it all. I just wanted to log all output somewhere an external machine can act upon events on the server, like making a bananapi m2zero actuate externally powered motors via gpio pins to drive a lego car forward/reverse/activate left motor (turn right)/activate right motor(turn left). It was initially my son's idea to make a car go forward when we die in minecraft, when I realized I can actually acheive that for him
 ---
 
 ## Architecture
@@ -18,12 +18,12 @@ The script uses **tmux** for process management and maintains comprehensive logs
 ### Core Components
 
 ```
-neoforgedAdvanced.sh
+run.py
 ├── Logging System (timestamps, event types)
-├── Hash-based Mod Sync (detects changes via SHA1)
-├── Tmux Session Manager (isolated server process)
-├── SMB Mount Handler (network share mounting)
-├── Backup System (incremental + retention)
+├── Hash-based Mod Sync (detects changes via SHA1) / mod push with ps1/.sh script for clients, offered via rcon messaging on server connect
+├── Tmux Session Manager (isolated server process) / helps for logging / console access / interaction wrapper
+├── HTTP server / # lan only in this release! wrap this behind a reverse proxy like caddy etc for WAN configurations!
+├── Backup System (incremental + retention) 7 day retention
 ├── Connection Monitor (client detection)
 └── Player Listener (event detection)
 ```
@@ -33,7 +33,7 @@ neoforgedAdvanced.sh
 ## Configuration
 
 Located at the top of the script (lines 4-20):
-
+### these are probably moot, it generates a config file on first run, and lets you install Forge/NeoForge/Fabric and get mods for them.
 ```bash
 SESSION="MC"                    # Tmux session name
 BASE="/home/services"           # Root working directory
@@ -49,16 +49,16 @@ WORLD_DIR="$BASE/world"         # Server world directory
 ```
 
 ### Key Paths
-- **Mods**: `/home/services/mods/`
-- **World Save**: `/home/services/world/`
-- **JVM Args**: `/home/services/user_jvm_args.txt`
-- **Libraries**: `/home/services/libraries/net/neoforged/neoforge/21.11.38-beta/`
+- **Mods**: `/home/services/mods/` # it should ask on first run!
+- **World Save**: `/home/services/world/` # ''
+- **JVM Args**: `/home/services/user_jvm_args.txt` # ''
+- **Libraries**: `/home/services/libraries/net/neoforged/neoforge/21.11.38-beta/` # ''
 
 ---
 
 ## Command Reference
 
-### `./neoforgedAdvanced.sh start`
+### `./run.py || python3 run.py`
 **Starts the server with all background processes**
 
 Launches in parallel:
@@ -74,7 +74,7 @@ Launches in parallel:
 [SERVER_RUNNING] Server process started
 ```
 
-### `./neoforgedAdvanced.sh stop`
+### `tmux attach && stop`
 **Sends stop command to running server**
 
 Issues `stop` to tmux console, triggers clean shutdown.
@@ -85,13 +85,13 @@ Issues `stop` to tmux console, triggers clean shutdown.
 [SERVER_SHUTDOWN] Clean shutdown detected
 ```
 
-### `./neoforgedAdvanced.sh console`
+### DEPRECATED: `./neoforgedAdvanced.sh console`
 **Attach to interactive tmux session**
 
 ```bash
 ./neoforgedAdvanced.sh console
 # Now in tmux - type Minecraft commands directly
-# Exit with Ctrl+B then D
+# Exit with Ctrl+B then D (DETACH)
 ```
 
 ### `./neoforgedAdvanced.sh backup`

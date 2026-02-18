@@ -826,15 +826,19 @@ def get_mod_dependencies_curseforge(mod_id):
         return None
 
 
-def fetch_modrinth_mods(mc_version, loader, limit=100, categories=None):
+def fetch_modrinth_mods(mc_version, loader, limit=100, offset=0, categories=None):
     """
     Fetch top downloaded mods from Modrinth for given MC version + loader
     
     Args:
         mc_version: e.g. "1.21.11"
         loader: e.g. "neoforge"
-        limit: max # of mods to fetch (configurable, default 100)
-        categories: list of content categories to include (None = all except libraries)
+        limit: max # of mods to fetch per request (default 100)
+        offset: pagination offset (default 0)
+        categories: list of content categories to include (None = all)
+    
+    Returns:
+        List of mod dictionaries, sorted by downloads (highest first)
     """
     from urllib.parse import quote
     base_url = "https://api.modrinth.com/v2"
@@ -852,8 +856,8 @@ def fetch_modrinth_mods(mc_version, loader, limit=100, categories=None):
     facets += ']]'
     facets_encoded = quote(facets)
     
-    # Query: sort by downloads
-    url = f"{base_url}/search?query=&facets={facets_encoded}&limit={limit}&offset=0&index=downloads"
+    # Query: sort by downloads (highest first)
+    url = f"{base_url}/search?query=&facets={facets_encoded}&limit={limit}&offset={offset}&index=downloads"
     
     try:
         req = urllib.request.Request(url)
@@ -1313,8 +1317,8 @@ def curator_command(cfg, limit=None, show_optional_audit=False):
     Main curator command - smart dependency management
     
     Flow:
-    1. Fetch top N mods
-    2. Filter OUT all libs/APIs (except Fabric API if explicitly needed)
+    1. Fetch top N mods (scans deeper to find N user-facing after filtering libs)
+    2. Filter OUT all libs/APIs (except Fabric API/Loader)
     3. Show user-facing mods list for selection
     4. User picks which mods they want
     5. System auto-downloads selected mods + their required dependencies
@@ -1322,7 +1326,7 @@ def curator_command(cfg, limit=None, show_optional_audit=False):
     
     Args:
         cfg: configuration dict
-        limit: max mods to fetch (default 100, None = use config)
+        limit: max USER-FACING mods to fetch (default 100, None = use config)
         show_optional_audit: show optional deps audit report (disabled by default)
     """
     mc_version = cfg.get("mc_version", "1.21.11")
@@ -1334,15 +1338,32 @@ def curator_command(cfg, limit=None, show_optional_audit=False):
     print(f"MOD CURATOR - {loader.upper()} {mc_version}")
     print(f"{'='*70}\n")
     
-    print(f"Fetching top {limit} mods...")
-    mods = fetch_modrinth_mods(mc_version, loader, limit=limit)
-    if not mods:
+    # Fetch more than limit to account for libs we filter out
+    # Scan up to 5x the limit to find enough user-facing mods
+    scan_limit = min(limit * 5, 500)
+    print(f"Scanning top {scan_limit} mods to find {limit} user-facing mods...")
+    
+    # Fetch in batches (API limit is 100 per request)
+    all_mods = []
+    for offset in range(0, scan_limit, 100):
+        batch_limit = min(100, scan_limit - offset)
+        mods = fetch_modrinth_mods(mc_version, loader, limit=batch_limit, offset=offset)
+        if mods:
+            all_mods.extend(mods)
+        else:
+            break
+    
+    if not all_mods:
         print("Error: Could not fetch mods from Modrinth")
         return
     
     # Filter to ONLY user-facing mods (NO libs/APIs)
+    # Stop once we have enough
     user_facing_mods = {}
-    for mod in mods:
+    for mod in all_mods:
+        if len(user_facing_mods) >= limit:
+            break
+        
         mod_id = mod.get("project_id")
         mod_name = mod.get("title")
         if not is_library(mod_name):
@@ -1353,7 +1374,7 @@ def curator_command(cfg, limit=None, show_optional_audit=False):
                 "description": mod.get("description", "No description")
             }
     
-    print(f"\n✓ Found {len(user_facing_mods)} user-facing mods (filtered out {len(mods) - len(user_facing_mods)} libs/APIs)\n")
+    print(f"\n✓ Found {len(user_facing_mods)} user-facing mods (scanned {len(all_mods)} total)\n")
     
     # Display the list informally
     print(f"{'='*70}")
@@ -1362,7 +1383,7 @@ def curator_command(cfg, limit=None, show_optional_audit=False):
     
     sorted_mods = sorted(user_facing_mods.items(), key=lambda x: x[1]['downloads'], reverse=True)
     for idx, (mod_id, mod_data) in enumerate(sorted_mods, 1):
-        print(f"{idx:3}. {mod_data['name']:<40} ({mod_data['downloads']:>12,} downloads)")
+        print(f"{idx:3}. {mod_data['name']:<50} ({mod_data['downloads']:>12,})")
     
     print(f"\n{len(user_facing_mods)} total mods available for selection")
     

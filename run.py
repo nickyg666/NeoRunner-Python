@@ -41,6 +41,23 @@ try:
 except ImportError:
     FLASK_AVAILABLE = False
 
+# Playwright stealth browser for CurseForge scraping (Cloudflare bypass)
+try:
+    from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
+    from playwright_stealth import Stealth
+    PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    PLAYWRIGHT_AVAILABLE = False
+
+# CurseForge scraper constants
+CF_USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:126.0) Gecko/20100101 Firefox/126.0",
+]
+import re
+import random
+
 CWD = "/home/services"
 CONFIG = os.path.join(CWD, "config.json")
 
@@ -825,7 +842,7 @@ def http_server(port, mods_dir):
                 
                 @app.route("/api/install-mods", methods=["POST"])
                 def api_install_mods():
-                    """Install selected mods from curated list"""
+                    """Install selected mods from curated list (supports both Modrinth + CurseForge)"""
                     try:
                         data = request.json
                         selected = data.get("selected", [])
@@ -837,15 +854,37 @@ def http_server(port, mods_dir):
                         loader = c.get("loader", "neoforge")
                         m_dir = os.path.join(CWD, c.get("mods_dir", "mods"))
                         
+                        # Load the full curator cache to get mod details (source, slug, file_id, etc.)
+                        cache_file = os.path.join(CWD, f"curator_cache_{mc_ver}_{loader}.json")
+                        cached_mods = {}
+                        if os.path.exists(cache_file):
+                            try:
+                                with open(cache_file) as f:
+                                    raw = json.load(f)
+                                if isinstance(raw, dict):
+                                    cached_mods = raw
+                            except:
+                                pass
+                        
                         downloaded = 0
                         failed = []
                         for mod_id in selected:
                             try:
-                                mod_data = {"id": mod_id, "name": mod_id}
-                                if download_mod_from_modrinth(mod_data, m_dir, mc_ver, loader):
-                                    downloaded += 1
+                                # Look up full mod data from cache
+                                mod_data = cached_mods.get(mod_id, {"id": mod_id, "name": mod_id})
+                                source = mod_data.get("source", "modrinth")
+                                
+                                if source == "curseforge":
+                                    if download_mod_from_curseforge(mod_data, m_dir, mc_ver, loader):
+                                        downloaded += 1
+                                    else:
+                                        failed.append(mod_id)
                                 else:
-                                    failed.append(mod_id)
+                                    # Default: Modrinth
+                                    if download_mod_from_modrinth(mod_data, m_dir, mc_ver, loader):
+                                        downloaded += 1
+                                    else:
+                                        failed.append(mod_id)
                             except Exception as e:
                                 failed.append(mod_id)
                         
@@ -1136,12 +1175,21 @@ def send_chat_message(msg):
     return send_server_command(f"say {msg_safe}")
 
 def send_rcon_command(cfg, cmd):
-    """Send command via RCON using the Source RCON protocol"""
+    """Send command via RCON using the Source RCON protocol.
+    Tries configured host first, then falls back to server-ip from server.properties."""
     try:
         import socket
         import struct
         
-        host = cfg.get("rcon_host", "localhost")
+        hosts_to_try = [cfg.get("rcon_host", "localhost")]
+        # Add server-ip from server.properties as fallback
+        props = parse_props()
+        server_ip = props.get("server-ip", "")
+        if server_ip and server_ip not in hosts_to_try:
+            hosts_to_try.append(server_ip)
+        if "localhost" not in hosts_to_try:
+            hosts_to_try.append("localhost")
+        
         port = int(cfg.get("rcon_port", 25575))
         password = cfg.get("rcon_pass", "changeme")
         
@@ -1169,15 +1217,33 @@ def send_rcon_command(cfg, cmd):
             payload = data[8:-2].decode("utf-8", errors="replace")  # strip 2 null bytes
             return request_id, packet_type, payload
         
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(5)
-        sock.connect((host, port))
+        sock = None
+        last_error = None
+        connected_host = None
+        for host in hosts_to_try:
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(5)
+                sock.connect((host, port))
+                connected_host = host
+                break
+            except Exception as e:
+                last_error = e
+                try:
+                    sock.close()
+                except:
+                    pass
+                sock = None
+        
+        if sock is None:
+            log_event("RCON_ERROR", f"Could not connect to any host: {hosts_to_try} - {last_error}")
+            return False
         
         # Login (type 3)
         sock.sendall(_make_packet(1, 3, password))
         req_id, _, _ = _read_packet(sock)
         if req_id == -1 or req_id is None:
-            log_event("RCON_ERROR", "Authentication failed")
+            log_event("RCON_ERROR", f"Authentication failed on {connected_host}")
             sock.close()
             return False
         
@@ -1495,121 +1561,342 @@ def monitor_players(cfg):
     remote_event_monitor(cfg)
 
 # ============================================================================
-# CURSEFORGE MOD CURATOR SYSTEM (using Modrinth API for better public access)
+# CURSEFORGE MOD SCRAPER (Playwright stealth browser — API key is useless)
 # ============================================================================
 
-def get_curseforge_key():
-    """Read CurseForge API key from disk (optional - can fallback to Modrinth if not available)"""
-    key_file = os.path.join(CWD, "curseforgeAPIkey")
-    if os.path.exists(key_file):
-        return open(key_file).read().strip()
+def _parse_cf_download_count(text):
+    """Parse CurseForge download count strings like '315.0M', '539.8K', '1.2B' to int"""
+    if not text:
+        return 0
+    text = text.strip().replace(",", "")
+    multipliers = {"K": 1_000, "M": 1_000_000, "B": 1_000_000_000}
+    for suffix, mult in multipliers.items():
+        if text.upper().endswith(suffix):
+            try:
+                return int(float(text[:-1]) * mult)
+            except ValueError:
+                return 0
+    try:
+        return int(float(text))
+    except ValueError:
+        return 0
+
+def _cf_browse_url(mc_version, loader, page=1):
+    """Build CurseForge browse URL for a given MC version, loader, and page.
+    
+    CurseForge filter params:
+      filter-game-version: MC version string
+      filter-sort: 2 = popularity
+      page: 1-indexed page number
+    
+    Loader is filtered via the category slug in the URL path for some loaders,
+    but the browse page with game-version filter is loader-agnostic on the URL.
+    We rely on the game-version filter to narrow results; CurseForge shows all
+    loaders but the most popular mods for a given version tend to have the right
+    loader support.
+    """
+    base = "https://www.curseforge.com/minecraft/mc-mods"
+    return f"{base}?filter-game-version={mc_version}&filter-sort=2&page={page}"
+
+def _scrape_cf_page(page_obj):
+    """Extract mod data from a loaded CurseForge browse page using DOM selectors.
+    
+    Returns list of dicts: {name, slug, description, downloads, file_id, download_href}
+    """
+    mods = []
+    
+    # Each mod is in a div.project-card (or similar card container)
+    cards = page_obj.query_selector_all("div.project-card")
+    if not cards:
+        # Fallback: try other known card selectors
+        cards = page_obj.query_selector_all("li.project-listing-row")
+    
+    for card in cards:
+        try:
+            mod = {}
+            
+            # Name: a.name > span.ellipsis OR just the overlay link text
+            name_el = card.query_selector("a.name span.ellipsis")
+            if not name_el:
+                name_el = card.query_selector("a.name")
+            mod["name"] = name_el.inner_text().strip() if name_el else ""
+            
+            # Slug from overlay link href: /minecraft/mc-mods/<slug>
+            slug_el = card.query_selector("a.overlay-link")
+            href = slug_el.get_attribute("href") if slug_el else ""
+            slug_match = re.search(r'/minecraft/mc-mods/([^/?]+)', href) if href else None
+            mod["slug"] = slug_match.group(1) if slug_match else ""
+            
+            # Description
+            desc_el = card.query_selector("p.description")
+            mod["description"] = desc_el.inner_text().strip() if desc_el else ""
+            
+            # Downloads count — in li.detail-downloads or similar
+            dl_el = card.query_selector("li.detail-downloads")
+            dl_text = dl_el.inner_text().strip() if dl_el else "0"
+            # Extract just the number part (e.g. "315.0M Downloads" -> "315.0M")
+            dl_num = re.sub(r'\s*(downloads?|total)\s*', '', dl_text, flags=re.IGNORECASE).strip()
+            mod["downloads"] = _parse_cf_download_count(dl_num)
+            mod["downloads_raw"] = dl_text
+            
+            # Download CTA link with file ID
+            dl_cta = card.query_selector("a.download-cta")
+            dl_href = dl_cta.get_attribute("href") if dl_cta else ""
+            file_match = re.search(r'/download/(\d+)', dl_href) if dl_href else None
+            mod["file_id"] = file_match.group(1) if file_match else ""
+            mod["download_href"] = dl_href or ""
+            
+            # Author
+            author_el = card.query_selector("span.author-name")
+            mod["author"] = author_el.inner_text().strip() if author_el else ""
+            
+            # Source marker
+            mod["source"] = "curseforge"
+            
+            if mod["name"] and mod["slug"]:
+                mods.append(mod)
+        except Exception as e:
+            log.warning(f"CurseForge scraper: error parsing card: {e}")
+            continue
+    
+    return mods
+
+def _get_cf_mod_id_from_download_page(page_obj, slug, file_id):
+    """Navigate to a CurseForge download page and extract the numeric mod ID.
+    
+    The download page HTML contains a 'try again' link with the API URL:
+    https://www.curseforge.com/api/v1/mods/<numericModId>/files/<fileId>/download
+    
+    Returns numeric mod ID as string, or None.
+    """
+    url = f"https://www.curseforge.com/minecraft/mc-mods/{slug}/download/{file_id}"
+    try:
+        page_obj.goto(url, wait_until="domcontentloaded", timeout=30000)
+        time.sleep(3)
+        
+        html = page_obj.content()
+        # Look for the API download link pattern
+        match = re.search(r'/api/v1/mods/(\d+)/files/\d+/download', html)
+        if match:
+            return match.group(1)
+    except Exception as e:
+        log.warning(f"CurseForge scraper: error getting mod ID for {slug}: {e}")
+    
     return None
 
-def fetch_curseforge_mods(mc_version, loader, limit=100, categories=None):
+def fetch_curseforge_mods_scraper(mc_version, loader, limit=100):
     """
-    Fetch top downloaded mods from CurseForge for given MC version + loader
-    Uses official CurseForge REST API (https://docs.curseforge.com/rest-api)
+    Scrape CurseForge browse pages using Playwright stealth headless browser.
+    
+    Paginates through CurseForge's browse pages (20 mods per page) to collect
+    up to `limit` mods sorted by popularity. Results are cached to disk to
+    avoid re-scraping too frequently (cache TTL: 6 hours).
     
     Args:
         mc_version: e.g. "1.21.11"
-        loader: e.g. "neoforge" 
-        limit: max # of mods to fetch (configurable, default 100, max 50 per request)
-        categories: list of category ids to include (optional)
-        
+        loader: e.g. "neoforge" (used for cache key and logging)
+        limit: max mods to collect (default 100)
+    
     Returns:
-        List of mod objects from CurseForge API
+        List of mod dicts: {name, slug, description, downloads, file_id, 
+                           download_href, author, source, downloads_raw}
     """
-    api_key = get_curseforge_key()
-    if not api_key:
-        log_event("CURATOR", "No CurseForge API key found, skipping CurseForge")
+    if not PLAYWRIGHT_AVAILABLE:
+        log.error("Playwright not installed — cannot scrape CurseForge. "
+                  "Install: pip3 install --break-system-packages playwright playwright-stealth && "
+                  "python3 -m playwright install chromium")
         return []
     
-    base_url = "https://api.curseforge.com/v1/mods/search"
-    
-    # CurseForge Game ID for Minecraft
-    game_id = 432
-    
-    # Map loader names to CurseForge ModLoaderType IDs (from official docs)
-    loader_map = {
-        "forge": 1,
-        "cauldron": 2,
-        "liteloader": 3,
-        "fabric": 4,
-        "quilt": 5,
-        "neoforge": 6,
-    }
-    
-    loader_id = loader_map.get(loader.lower())
-    if not loader_id:
-        log_event("CURATOR", f"Unknown loader for CurseForge: {loader}")
-        return []
-    
-    # CurseForge has a max page size of 50, so we'll need multiple requests if limit > 50
-    all_mods = []
-    page_size = min(limit, 50)
-    pages_needed = (limit + page_size - 1) // page_size
-    
-    headers = {
-        "x-api-key": api_key,
-        "Accept": "application/json"
-    }
-    
-    for page in range(pages_needed):
-        index = page * page_size
-        
-        params = {
-            "gameId": game_id,
-            "gameVersion": mc_version,
-            "modLoaderType": loader_id,
-            "sortField": 0,  # 0 = Featured, 1 = Popularity, 2 = LastUpdated, 3 = Name, 4 = Author, 5 = TotalDownloads, 6 = Category, 7 = GameVersion
-            "sortOrder": "desc",
-            "pageSize": page_size,
-            "index": index
-        }
-        
+    # Check cache first (6 hour TTL)
+    cache_file = os.path.join(CWD, f"curseforge_cache_{mc_version}_{loader}.json")
+    if os.path.exists(cache_file):
         try:
-            # Build query string
-            query_parts = [f"{k}={v}" for k, v in params.items()]
-            url = f"{base_url}?{'&'.join(query_parts)}"
-            
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=30) as response:
-                data = json.loads(response.read().decode())
-                mods = data.get("data", [])
-                all_mods.extend(mods)
-                
-                # Check if we got fewer results than requested (end of list)
-                if len(mods) < page_size:
-                    break
+            cache_age = time.time() - os.path.getmtime(cache_file)
+            if cache_age < 6 * 3600:  # 6 hours
+                with open(cache_file) as f:
+                    cached = json.load(f)
+                if cached:
+                    log.info(f"CurseForge: loaded {len(cached)} mods from cache ({cache_age/3600:.1f}h old)")
+                    return cached[:limit]
         except Exception as e:
-            log_event("CURATOR", f"Error fetching CurseForge mods (page {page}): {e}")
-            if page == 0:  # First page failed
-                return []
-            else:
-                break  # Continue with what we have
+            log.warning(f"CurseForge: cache read error: {e}")
     
-    return all_mods[:limit]
-
-def get_mod_dependencies_curseforge(mod_id):
-    """Fetch dependencies for a specific mod from CurseForge"""
-    api_key = get_curseforge_key()
-    if not api_key:
-        return None
+    log.info(f"CurseForge: scraping top {limit} mods for MC {mc_version} ({loader})...")
     
-    base_url = f"https://api.curseforge.com/v1/mods/{mod_id}"
-    headers = {
-        "x-api-key": api_key,
-        "Accept": "application/json"
-    }
+    all_mods = []
+    pages_needed = (limit + 19) // 20  # 20 mods per page
     
     try:
-        req = urllib.request.Request(base_url, headers=headers)
-        with urllib.request.urlopen(req, timeout=30) as response:
-            data = json.loads(response.read().decode())
-            return data.get("data", {})
+        with Stealth().use_sync(sync_playwright()) as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]
+            )
+            
+            context = browser.new_context(
+                user_agent=random.choice(CF_USER_AGENTS),
+                viewport={"width": 1920, "height": 1080}
+            )
+            page = context.new_page()
+            
+            for page_num in range(1, pages_needed + 1):
+                if len(all_mods) >= limit:
+                    break
+                
+                url = _cf_browse_url(mc_version, loader, page=page_num)
+                log.info(f"CurseForge: scraping page {page_num}/{pages_needed} - {url}")
+                
+                try:
+                    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                    # Wait for content to render (networkidle times out on analytics)
+                    time.sleep(8)
+                    
+                    # Check for Cloudflare challenge
+                    title = page.title()
+                    if any(kw in title.lower() for kw in ["just a moment", "attention required", "checking"]):
+                        log.warning(f"CurseForge: Cloudflare challenge on page {page_num}, waiting 15s...")
+                        time.sleep(15)
+                        title = page.title()
+                        if any(kw in title.lower() for kw in ["just a moment", "attention required", "checking"]):
+                            log.error(f"CurseForge: Cloudflare challenge NOT resolved on page {page_num}, aborting")
+                            break
+                    
+                    page_mods = _scrape_cf_page(page)
+                    
+                    if not page_mods:
+                        log.warning(f"CurseForge: no mods found on page {page_num}, stopping pagination")
+                        break
+                    
+                    all_mods.extend(page_mods)
+                    log.info(f"CurseForge: page {page_num} yielded {len(page_mods)} mods (total: {len(all_mods)})")
+                    
+                    # Small random delay between pages to be polite
+                    if page_num < pages_needed:
+                        time.sleep(random.uniform(2, 4))
+                
+                except PlaywrightTimeout:
+                    log.warning(f"CurseForge: timeout on page {page_num}")
+                    continue
+                except Exception as e:
+                    log.error(f"CurseForge: error on page {page_num}: {e}")
+                    if page_num == 1:
+                        break  # First page failed, abort
+                    continue
+            
+            context.close()
+            browser.close()
+    
     except Exception as e:
-        log_event("CURATOR", f"Error fetching CurseForge mod {mod_id}: {e}")
-        return None
+        log.error(f"CurseForge scraper failed: {e}")
+        return []
+    
+    # Trim to limit
+    all_mods = all_mods[:limit]
+    
+    # Cache results
+    if all_mods:
+        try:
+            with open(cache_file, "w") as f:
+                json.dump(all_mods, f, indent=2)
+            log.info(f"CurseForge: cached {len(all_mods)} mods to {cache_file}")
+        except Exception as e:
+            log.warning(f"CurseForge: cache write error: {e}")
+    
+    return all_mods
+
+def download_mod_from_curseforge(mod_info, mods_dir, mc_version, loader):
+    """
+    Download a mod JAR from CurseForge using the CDN URL pattern.
+    
+    CurseForge download chain:
+    1. API URL: https://www.curseforge.com/api/v1/mods/<modId>/files/<fileId>/download
+    2. Redirects to: edge.forgecdn.net/files/<id1>/<id2>/<filename>.jar?api-key=...
+    3. Redirects to: mediafilez.forgecdn.net/files/<id1>/<id2>/<filename>.jar
+    
+    If we don't have the numeric modId, we fall back to navigating the download
+    page with Playwright to extract it.
+    
+    Args:
+        mod_info: dict with at least {name, slug, file_id} and optionally {mod_id}
+        mods_dir: directory to save the JAR
+        mc_version: MC version string
+        loader: loader name
+    
+    Returns:
+        True if download succeeded, False otherwise
+    """
+    mod_name = mod_info.get("name", "unknown")
+    slug = mod_info.get("slug", "")
+    file_id = mod_info.get("file_id", "")
+    mod_id = mod_info.get("mod_id", "")
+    
+    if not file_id:
+        log.warning(f"CurseForge download: no file_id for {mod_name}")
+        return False
+    
+    # If we have the numeric mod_id, use the direct API download URL
+    if mod_id:
+        api_url = f"https://www.curseforge.com/api/v1/mods/{mod_id}/files/{file_id}/download"
+        try:
+            req = urllib.request.Request(api_url, headers={
+                "User-Agent": random.choice(CF_USER_AGENTS)
+            })
+            with urllib.request.urlopen(req, timeout=60) as response:
+                # Follow redirect chain — final URL has the filename
+                final_url = response.url
+                filename = os.path.basename(final_url.split("?")[0])
+                if not filename.endswith(".jar"):
+                    filename = f"{slug}-{file_id}.jar"
+                
+                file_path = os.path.join(mods_dir, filename)
+                if os.path.exists(file_path):
+                    log.info(f"CurseForge: {filename} already exists, skipping")
+                    return True
+                
+                data = response.read()
+                with open(file_path, "wb") as f:
+                    f.write(data)
+                
+                log.info(f"CurseForge: downloaded {filename} ({len(data)/1024:.0f} KB)")
+                return True
+        except Exception as e:
+            log.warning(f"CurseForge: API download failed for {mod_name}: {e}")
+    
+    # Fallback: try CDN URL pattern directly (file_id split: first 4 digits / remaining)
+    if len(file_id) >= 5:
+        id1 = file_id[:4]
+        id2 = file_id[4:]
+        # We don't know the exact filename, try common patterns
+        cdn_base = f"https://mediafilez.forgecdn.net/files/{id1}/{id2}"
+        # Try to get filename from download page with Playwright
+        if PLAYWRIGHT_AVAILABLE and slug:
+            try:
+                with Stealth().use_sync(sync_playwright()) as p:
+                    browser = p.chromium.launch(
+                        headless=True,
+                        args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]
+                    )
+                    context = browser.new_context(
+                        user_agent=random.choice(CF_USER_AGENTS),
+                        viewport={"width": 1920, "height": 1080}
+                    )
+                    page = context.new_page()
+                    
+                    # Get the numeric modId from the download page
+                    numeric_id = _get_cf_mod_id_from_download_page(page, slug, file_id)
+                    
+                    context.close()
+                    browser.close()
+                    
+                    if numeric_id:
+                        # Retry with the discovered modId
+                        mod_info_with_id = dict(mod_info, mod_id=numeric_id)
+                        return download_mod_from_curseforge(mod_info_with_id, mods_dir, mc_version, loader)
+            except Exception as e:
+                log.warning(f"CurseForge: Playwright fallback failed for {mod_name}: {e}")
+    
+    log.error(f"CurseForge: could not download {mod_name} (slug={slug}, file_id={file_id})")
+    return False
 
 
 def fetch_modrinth_mods(mc_version, loader, limit=100, offset=0, categories=None):
@@ -1632,14 +1919,20 @@ def fetch_modrinth_mods(mc_version, loader, limit=100, offset=0, categories=None
     loader_query = loader.lower()
     
     # Build facets for search
-    facets = f'[["game_versions:{mc_version}","mrpack_loaders:{loader_query}"'
+    # Modrinth facet syntax: [["A"],["B"]] = A AND B; [["A","B"]] = A OR B
+    # We want: version AND loader (AND category if specified)
+    facets_parts = [
+        f'["versions:{mc_version}"]',
+        f'["categories:{loader_query}"]',
+        '["project_type:mod"]'
+    ]
     
     # Add category filters if specified
     if categories:
         for cat in categories:
-            facets += f'","categories:{cat}'
+            facets_parts.append(f'["categories:{cat}"]')
     
-    facets += ']]'
+    facets = "[" + ",".join(facets_parts) + "]"
     facets_encoded = quote(facets)
     
     # Query: sort by downloads (highest first)
@@ -2083,18 +2376,27 @@ def download_mod_from_modrinth(mod_data, mods_dir, mc_version, loader):
             except:
                 pass
         
-        # Last fallback: get latest versions and pick first with matching MC
+        # Last fallback: get latest versions and pick first with matching MC version
         if not versions:
-            url = f'{base_url}/project/{mod_id}/version?limit=10'
+            url = f'{base_url}/project/{mod_id}/version?limit=20'
             req = urllib.request.Request(url)
-            with urllib.request.urlopen(req, timeout=30) as response:
-                all_versions = json.loads(response.read().decode())
-                for v in all_versions:
-                    if mc_version in v.get("game_versions", []):
-                        versions = [v]
-                        break
-                if not versions and all_versions:
-                    versions = [all_versions[0]]
+            try:
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    all_versions = json.loads(response.read().decode())
+                    # Try exact MC version match with correct loader
+                    for v in all_versions:
+                        if mc_version in v.get("game_versions", []) and loader_lower in v.get("loaders", []):
+                            versions = [v]
+                            break
+                    # Try exact MC version match with any loader
+                    if not versions:
+                        for v in all_versions:
+                            if mc_version in v.get("game_versions", []):
+                                versions = [v]
+                                break
+                    # Do NOT fall back to random versions — that causes wrong MC version installs
+            except:
+                pass
         
         if not versions:
             log_event("CURATOR", f"No versions found for {mod_name}")
@@ -2171,19 +2473,21 @@ def generate_mod_lists_for_loaders(mc_version, limit=100, loaders=None):
 
 def curator_command(cfg, limit=None, show_optional_audit=False):
     """
-    Main curator command - smart dependency management
+    Main curator command - dual-source smart dependency management
     
     Flow:
-    1. Fetch top N mods (scans deeper to find N user-facing after filtering libs)
-    2. Filter OUT all libs/APIs (except Fabric API/Loader)
-    3. Show user-facing mods list for selection
-    4. User picks which mods they want
-    5. System auto-downloads selected mods + their required dependencies
-    6. Dependencies fetched silently in background
+    1. Fetch top N mods from BOTH Modrinth API AND CurseForge web scraper
+    2. Filter OUT all libs/APIs
+    3. Deduplicate by normalized mod name (prefer Modrinth for downloads, keep both sources)
+    4. Merge into unified list sorted by downloads
+    5. Show user-facing mods list for selection
+    6. User picks which mods they want
+    7. System auto-downloads selected mods + their required dependencies
+    8. CurseForge mods downloaded via CDN, Modrinth via API
     
     Args:
         cfg: configuration dict
-        limit: max USER-FACING mods to fetch (default 100, None = use config)
+        limit: max USER-FACING mods to fetch PER SOURCE (default 100, None = use config)
         show_optional_audit: show optional deps audit report (disabled by default)
     """
     mc_version = cfg.get("mc_version", "1.21.11")
@@ -2192,60 +2496,123 @@ def curator_command(cfg, limit=None, show_optional_audit=False):
         limit = cfg.get("curator_limit", 100)
     
     print(f"\n{'='*70}")
-    print(f"MOD CURATOR - {loader.upper()} {mc_version}")
+    print(f"MOD CURATOR - {loader.upper()} {mc_version} (DUAL SOURCE)")
     print(f"{'='*70}\n")
     
-    # Fetch more than limit to account for libs we filter out
-    # Scan up to 5x the limit to find enough user-facing mods
+    # ---- SOURCE 1: MODRINTH API ----
+    print(f"[1/2] Fetching top {limit} mods from Modrinth API...")
     scan_limit = min(limit * 5, 500)
-    print(f"Scanning top {scan_limit} mods to find {limit} user-facing mods...")
     
-    # Fetch in batches (API limit is 100 per request)
-    all_mods = []
+    modrinth_raw = []
     for offset in range(0, scan_limit, 100):
         batch_limit = min(100, scan_limit - offset)
         mods = fetch_modrinth_mods(mc_version, loader, limit=batch_limit, offset=offset)
         if mods:
-            all_mods.extend(mods)
+            modrinth_raw.extend(mods)
         else:
             break
     
-    if not all_mods:
-        print("Error: Could not fetch mods from Modrinth")
-        return
-    
-    # Filter to ONLY user-facing mods (NO libs/APIs)
-    # Stop once we have enough
-    user_facing_mods = {}
-    for mod in all_mods:
-        if len(user_facing_mods) >= limit:
+    # Filter Modrinth to user-facing only
+    modrinth_mods = {}
+    for mod in modrinth_raw:
+        if len(modrinth_mods) >= limit:
             break
-        
         mod_id = mod.get("project_id")
         mod_name = mod.get("title")
         if not is_library(mod_name):
-            user_facing_mods[mod_id] = {
+            modrinth_mods[mod_id] = {
                 "id": mod_id,
                 "name": mod_name,
                 "downloads": mod.get("downloads", 0),
-                "description": mod.get("description", "No description")
+                "description": mod.get("description", "No description"),
+                "source": "modrinth"
             }
     
-    print(f"\n✓ Found {len(user_facing_mods)} user-facing mods (scanned {len(all_mods)} total)\n")
+    print(f"  Modrinth: {len(modrinth_mods)} user-facing mods (scanned {len(modrinth_raw)} total)")
+    
+    # ---- SOURCE 2: CURSEFORGE SCRAPER ----
+    print(f"\n[2/2] Fetching top {limit} mods from CurseForge (web scraper)...")
+    cf_raw = fetch_curseforge_mods_scraper(mc_version, loader, limit=limit)
+    
+    # Filter CurseForge to user-facing only
+    cf_mods = {}
+    for mod in cf_raw:
+        mod_name = mod.get("name", "")
+        if not is_library(mod_name):
+            # Use slug as unique key for CurseForge (no project_id like Modrinth)
+            slug = mod.get("slug", "")
+            if slug:
+                cf_mods[f"cf_{slug}"] = {
+                    "id": f"cf_{slug}",
+                    "name": mod_name,
+                    "slug": slug,
+                    "downloads": mod.get("downloads", 0),
+                    "description": mod.get("description", "No description"),
+                    "file_id": mod.get("file_id", ""),
+                    "author": mod.get("author", ""),
+                    "source": "curseforge"
+                }
+    
+    print(f"  CurseForge: {len(cf_mods)} user-facing mods (scraped {len(cf_raw)} total)")
+    
+    # ---- DEDUPLICATION ----
+    # Normalize mod names for matching across sources
+    def _normalize_name(name):
+        """Normalize mod name for dedup comparison: lowercase, strip non-alphanum"""
+        return re.sub(r'[^a-z0-9]', '', name.lower())
+    
+    # Build name -> key mapping for Modrinth mods
+    modrinth_name_map = {}
+    for mod_id, mod_data in modrinth_mods.items():
+        norm = _normalize_name(mod_data["name"])
+        modrinth_name_map[norm] = mod_id
+    
+    # Merge: start with all Modrinth mods, add CurseForge-only mods
+    merged_mods = dict(modrinth_mods)  # Start with all Modrinth mods
+    cf_dupes = 0
+    cf_unique = 0
+    
+    for cf_key, cf_mod in cf_mods.items():
+        norm = _normalize_name(cf_mod["name"])
+        if norm in modrinth_name_map:
+            # Duplicate — mod exists in both sources
+            # Mark the Modrinth entry as also available on CurseForge
+            mr_key = modrinth_name_map[norm]
+            if mr_key in merged_mods:
+                merged_mods[mr_key]["also_on"] = "curseforge"
+                merged_mods[mr_key]["cf_slug"] = cf_mod.get("slug", "")
+                merged_mods[mr_key]["cf_file_id"] = cf_mod.get("file_id", "")
+            cf_dupes += 1
+        else:
+            # CurseForge-only mod — add to merged list
+            merged_mods[cf_key] = cf_mod
+            cf_unique += 1
+    
+    print(f"\n  Deduplication: {cf_dupes} shared mods, {cf_unique} CurseForge-only mods added")
+    print(f"  Total unique mods: {len(merged_mods)}")
+    
+    # ---- SORT & DISPLAY ----
+    user_facing_mods = merged_mods
+    
+    print(f"\n{'='*70}")
+    print(f"  Found {len(user_facing_mods)} unique user-facing mods from both sources")
+    print(f"{'='*70}\n")
     
     # Save curator cache so dashboard/API can access the full list
     save_curator_cache(user_facing_mods, {}, mc_version, loader)
     
-    # Display the list informally
+    # Display the list
     print(f"{'='*70}")
     print("AVAILABLE MODS FOR SELECTION")
     print(f"{'='*70}\n")
     
     sorted_mods = sorted(user_facing_mods.items(), key=lambda x: x[1]['downloads'], reverse=True)
     for idx, (mod_id, mod_data) in enumerate(sorted_mods, 1):
-        print(f"{idx:3}. {mod_data['name']:<50} ({mod_data['downloads']:>12,})")
+        src_tag = mod_data.get("source", "?")[0].upper()  # M or C
+        also = "+" if mod_data.get("also_on") else " "
+        print(f"{idx:3}. [{src_tag}{also}] {mod_data['name']:<46} ({mod_data['downloads']:>12,})")
     
-    print(f"\n{len(user_facing_mods)} total mods available for selection")
+    print(f"\n{len(user_facing_mods)} total mods available  [M]=Modrinth [C]=CurseForge [+]=both sources")
     
     # Ask user if they want all or custom selection
     print(f"\n{'='*70}")
@@ -2306,45 +2673,62 @@ def curator_command(cfg, limit=None, show_optional_audit=False):
     mods_dir = cfg.get("mods_dir", "mods")
     os.makedirs(mods_dir, exist_ok=True)
     
-    # Track what we download
+    # Separate mods by source for appropriate download method
+    modrinth_selected = [m for m in selected_mods_list if m.get("source") == "modrinth"]
+    curseforge_selected = [m for m in selected_mods_list if m.get("source") == "curseforge"]
+    
     downloaded_mods = []
     all_deps_to_download = set()
     
-    # Resolve dependencies for all selected mods
-    print("Resolving dependencies...")
-    for mod in selected_mods_list:
-        deps = resolve_mod_dependencies_modrinth(mod['id'], mc_version, loader)
-        all_deps_to_download.update(deps.get("required", {}).keys())
+    # Resolve dependencies for Modrinth mods (CurseForge doesn't have public dep API)
+    if modrinth_selected:
+        print(f"Resolving dependencies for {len(modrinth_selected)} Modrinth mods...")
+        for mod in modrinth_selected:
+            deps = resolve_mod_dependencies_modrinth(mod['id'], mc_version, loader)
+            all_deps_to_download.update(deps.get("required", {}).keys())
+        print(f"  -> Found {len(all_deps_to_download)} required dependencies\n")
     
-    print(f"  -> Found {len(all_deps_to_download)} required dependencies\n")
+    # Download Modrinth mods
+    if modrinth_selected:
+        print(f"Downloading {len(modrinth_selected)} Modrinth mods:")
+        for mod in modrinth_selected:
+            if download_mod_from_modrinth(mod, mods_dir, mc_version, loader):
+                downloaded_mods.append(f"[M] {mod['name']}")
+                print(f"  ✓ [M] {mod['name']}")
+            else:
+                print(f"  ✗ [M] {mod['name']} (failed)")
     
-    # Download selected mods
-    print("Downloading selected mods:")
-    for mod in selected_mods_list:
-        if download_mod_from_modrinth(mod, mods_dir, mc_version, loader):
-            downloaded_mods.append(mod['name'])
-            print(f"  ✓ {mod['name']}")
-        else:
-            print(f"  ✗ {mod['name']} (failed)")
+    # Download CurseForge mods
+    if curseforge_selected:
+        print(f"\nDownloading {len(curseforge_selected)} CurseForge mods:")
+        for mod in curseforge_selected:
+            if download_mod_from_curseforge(mod, mods_dir, mc_version, loader):
+                downloaded_mods.append(f"[C] {mod['name']}")
+                print(f"  ✓ [C] {mod['name']}")
+            else:
+                print(f"  ✗ [C] {mod['name']} (failed)")
     
-    # Download dependencies silently in background
-    print("\nDownloading dependencies (background):")
-    deps_downloaded = 0
-    for dep_mod_id in all_deps_to_download:
-        # Fetch minimal info about the dependency
-        try:
-            dep_info = {"id": dep_mod_id, "name": dep_mod_id}
-            if download_mod_from_modrinth(dep_info, mods_dir, mc_version, loader):
-                deps_downloaded += 1
-                print(f"  ✓ {dep_mod_id}")
-        except:
-            pass
+    # Download Modrinth dependencies silently
+    if all_deps_to_download:
+        print(f"\nDownloading {len(all_deps_to_download)} dependencies (Modrinth):")
+        deps_downloaded = 0
+        for dep_mod_id in all_deps_to_download:
+            try:
+                dep_info = {"id": dep_mod_id, "name": dep_mod_id}
+                if download_mod_from_modrinth(dep_info, mods_dir, mc_version, loader):
+                    deps_downloaded += 1
+                    print(f"  ✓ {dep_mod_id}")
+            except:
+                pass
+    else:
+        deps_downloaded = 0
     
     print(f"\n{'='*70}")
     print(f"DOWNLOAD COMPLETE")
     print(f"{'='*70}")
-    print(f"  Mods: {len(downloaded_mods)} downloaded")
-    print(f"  Dependencies: {deps_downloaded} downloaded")
+    print(f"  Modrinth mods: {len(modrinth_selected)} selected")
+    print(f"  CurseForge mods: {len(curseforge_selected)} selected")
+    print(f"  Downloaded: {len(downloaded_mods)} mods + {deps_downloaded} dependencies")
     print(f"  Total: {len(downloaded_mods) + deps_downloaded} files\n")
     
     # Regenerate mod ZIP

@@ -564,7 +564,7 @@ class EventHook:
         return True
 
 class PlayerJoinHook(EventHook):
-    """Trigger on player join event"""
+    """Trigger on player join event - show mod list options"""
     def __init__(self):
         super().__init__("PlayerJoin")
     
@@ -574,8 +574,11 @@ class PlayerJoinHook(EventHook):
     def on_trigger(self, event_data, cfg):
         player = event_data.get("player", "Unknown")
         if self.debounce_check(player, seconds=30):
-            msg = f"Welcome {player}! Mods: http://localhost:{cfg.get('http_port', 8000)}/mods_latest.zip"
-            send_chat_message(msg)
+            # Show mod list options to player
+            send_chat_message(f"Welcome {player}! ")
+            send_chat_message(f"📋 Available mod lists:")
+            send_chat_message(f"  /say @{player} Type: neo | fabric | both")
+            send_chat_message(f"  Mods: http://localhost:{cfg.get('http_port', 8000)}/mods_latest.zip")
             log_event("HOOK_PLAYER_JOIN", f"Triggered for {player}")
             return True
         return False
@@ -1312,6 +1315,49 @@ def download_mod_from_modrinth(mod_data, mods_dir, mc_version, loader):
         log_event("CURATOR", f"Error downloading {mod_name}: {e}")
         return False
 
+def generate_mod_lists_for_loaders(mc_version, limit=100):
+    """
+    Generate and cache top 100 mod lists for all loaders
+    Returns dict with "neoforge" and "fabric" keys, each containing list of mods
+    """
+    mod_lists = {}
+    
+    for loader in ["neoforge", "fabric"]:
+        print(f"\nGenerating {loader.upper()} mod list ({limit} mods)...")
+        
+        # Fetch more than limit to account for libs filtered out
+        scan_limit = min(limit * 5, 500)
+        all_mods = []
+        
+        # Fetch in batches
+        for offset in range(0, scan_limit, 100):
+            batch_limit = min(100, scan_limit - offset)
+            mods = fetch_modrinth_mods(mc_version, loader, limit=batch_limit, offset=offset)
+            if mods:
+                all_mods.extend(mods)
+            else:
+                break
+        
+        # Filter to user-facing only
+        user_facing = []
+        for mod in all_mods:
+            if len(user_facing) >= limit:
+                break
+            
+            mod_id = mod.get("project_id")
+            mod_name = mod.get("title")
+            if not is_library(mod_name):
+                user_facing.append({
+                    "id": mod_id,
+                    "name": mod_name,
+                    "downloads": mod.get("downloads", 0)
+                })
+        
+        mod_lists[loader] = user_facing
+        print(f"  ✓ {len(user_facing)} {loader} mods ready")
+    
+    return mod_lists
+
 def curator_command(cfg, limit=None, show_optional_audit=False):
     """
     Main curator command - smart dependency management
@@ -1611,6 +1657,15 @@ def main():
             
             create_install_scripts(cfg["mods_dir"])
             create_mod_zip(cfg["mods_dir"])
+            
+            # Generate mod lists for both loaders at startup
+            print("\n[BOOT] Generating mod lists for all loaders...")
+            try:
+                mod_lists = generate_mod_lists_for_loaders(cfg.get("mc_version", "1.21.11"), limit=100)
+                cfg["mod_lists"] = mod_lists
+                log_event("BOOT", "Mod lists generated: neoforge + fabric")
+            except Exception as e:
+                log_event("ERROR", f"Failed to generate mod lists: {e}")
             
             # Start services
             threading.Thread(target=http_server, args=(cfg["http_port"], cfg["mods_dir"]), daemon=True).start()

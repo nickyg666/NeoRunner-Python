@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NeoRunner - Server Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #333;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+        
+        header h1 {
+            color: #2a5298;
+            margin-bottom: 10px;
+        }
+        
+        header p {
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 20px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        
+        .card h2 {
+            color: #2a5298;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        
+        .stat {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .stat:last-child {
+            border-bottom: none;
+        }
+        
+        .stat-label {
+            color: #666;
+            font-weight: 500;
+        }
+        
+        .stat-value {
+            color: #2a5298;
+            font-weight: bold;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        
+        .status-running {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-stopped {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        button {
+            background: #2a5298;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+            margin-top: 10px;
+            margin-right: 10px;
+        }
+        
+        button:hover {
+            background: #1e3c72;
+        }
+        
+        button.danger {
+            background: #dc3545;
+        }
+        
+        button.danger:hover {
+            background: #c82333;
+        }
+        
+        button.success {
+            background: #28a745;
+        }
+        
+        button.success:hover {
+            background: #218838;
+        }
+        
+        input, select, textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin: 8px 0;
+            font-family: inherit;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #333;
+            font-weight: 500;
+        }
+        
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #eee;
+        }
+        
+        .tab-button {
+            background: none;
+            border: none;
+            color: #666;
+            padding: 10px 20px;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s;
+            margin: 0;
+        }
+        
+        .tab-button.active {
+            color: #2a5298;
+            border-bottom-color: #2a5298;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .mod-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .mod-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            border: 1px solid #eee;
+            margin-bottom: 5px;
+            border-radius: 4px;
+        }
+        
+        .mod-info {
+            flex: 1;
+        }
+        
+        .mod-name {
+            font-weight: bold;
+            color: #2a5298;
+        }
+        
+        .mod-size {
+            font-size: 12px;
+            color: #999;
+        }
+        
+        .logs {
+            background: #1e1e1e;
+            color: #00ff00;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            line-height: 1.4;
+            margin-top: 10px;
+        }
+        
+        .log-line {
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #2a5298;
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .alert {
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+        
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .alert-info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .tabs {
+                flex-wrap: wrap;
+            }
+            
+            button {
+                width: 100%;
+                margin-right: 0;
+                margin-bottom: 10px;
+            }
+        }
+
+        /* Mod Selection Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .modal-overlay.active {
+            display: flex;
+        }
+        .modal {
+            background: white;
+            border-radius: 12px;
+            max-width: 800px;
+            width: 100%;
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+        }
+        .modal-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .modal-header h2 {
+            color: #2a5298;
+            margin: 0;
+        }
+        .modal-header .close-btn {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #999;
+            padding: 0;
+            margin: 0;
+            line-height: 1;
+        }
+        .modal-header .close-btn:hover {
+            color: #333;
+        }
+        .modal-toolbar {
+            padding: 12px 24px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .modal-toolbar button {
+            margin: 0;
+            padding: 6px 14px;
+            font-size: 13px;
+        }
+        .modal-toolbar .search-box {
+            flex: 1;
+            min-width: 200px;
+            margin: 0;
+        }
+        .modal-toolbar .selected-count {
+            color: #666;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .modal-body {
+            overflow-y: auto;
+            padding: 0;
+            flex: 1;
+        }
+        .modal-mod-item {
+            display: flex;
+            align-items: center;
+            padding: 10px 24px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .modal-mod-item:hover {
+            background: #f5f8ff;
+        }
+        .modal-mod-item input[type="checkbox"] {
+            width: auto;
+            margin: 0 12px 0 0;
+            cursor: pointer;
+        }
+        .modal-mod-item .mod-title {
+            font-weight: 600;
+            color: #333;
+            flex: 1;
+        }
+        .modal-mod-item .mod-downloads {
+            color: #888;
+            font-size: 12px;
+        }
+        .modal-footer {
+            padding: 16px 24px;
+            border-top: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .modal-footer .footer-info {
+            color: #666;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎮 NeoRunner - Minecraft Server Dashboard</h1>
+            <p>Manage your modded server with ease</p>
+        </header>
+        
+        <div id="alerts"></div>
+        
+        <div class="grid">
+            <!-- Server Status Card -->
+            <div class="card">
+                <h2>Server Status</h2>
+                <div id="status-content">
+                    <div class="loading"></div> Loading...
+                </div>
+            </div>
+            
+            <!-- Quick Actions Card -->
+            <div class="card">
+                <h2>Quick Actions</h2>
+                <button class="success" onclick="startServer()">▶ Start Server</button>
+                <button class="danger" onclick="stopServer()">⏹ Stop Server</button>
+                <button class="success" onclick="upgradeMods()">📦 Upgrade Mods</button>
+                <button onclick="openModSelector()">📋 Browse & Add Mods</button>
+            </div>
+        </div>
+        
+        <!-- Tabbed Section -->
+        <div class="card">
+            <div class="tabs">
+                <button class="tab-button active" onclick="switchTab('mods')">📦 Mods</button>
+                <button class="tab-button" onclick="switchTab('config')">⚙️ Configuration</button>
+                <button class="tab-button" onclick="switchTab('logs')">📝 Logs</button>
+            </div>
+            
+            <!-- Mods Tab -->
+            <div id="mods" class="tab-content active">
+                <h2>Installed Mods</h2>
+                <div id="mods-content">
+                    <div class="loading"></div> Loading mods...
+                </div>
+            </div>
+            
+            <!-- Configuration Tab -->
+            <div id="config" class="tab-content">
+                <h2>Server Configuration</h2>
+                <div class="form-group">
+                    <label>Mod Update Frequency (hours)</label>
+                    <input type="number" id="update-freq" min="1" max="24" value="4" step="1">
+                    <small>How often to check for mod updates (1-24 hours)</small>
+                </div>
+                
+                <div class="form-group">
+                    <label>Weekly Update Day</label>
+                    <select id="weekly-day">
+                        <option value="mon">Monday</option>
+                        <option value="tue">Tuesday</option>
+                        <option value="wed">Wednesday</option>
+                        <option value="thu">Thursday</option>
+                        <option value="fri">Friday</option>
+                        <option value="sat">Saturday</option>
+                        <option value="sun">Sunday</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>Weekly Update Time (hour)</label>
+                    <input type="number" id="weekly-hour" min="0" max="23" value="2" step="1">
+                    <small>Time of day for weekly strict version check (0-23)</small>
+                </div>
+                
+                <div class="form-group">
+                    <label>Minecraft Version</label>
+                    <input type="text" id="mc-version" value="1.21.11">
+                </div>
+                
+                <button class="success" onclick="saveConfig()">💾 Save Configuration</button>
+                <button onclick="loadConfig()">🔄 Reload</button>
+            </div>
+            
+            <!-- Logs Tab -->
+            <div id="logs" class="tab-content">
+                <h2>Live Logs</h2>
+                <button onclick="refreshLogs()">🔄 Refresh Logs</button>
+                <div id="logs-content" class="logs">
+                    <div class="loading"></div> Loading logs...
+                </div>
+            </div>
+        </div>
+
+        <!-- Mod Selection Modal -->
+        <div id="mod-selector-modal" class="modal-overlay">
+            <div class="modal">
+                <div class="modal-header">
+                    <h2>Add Mods to Server</h2>
+                    <button class="close-btn" onclick="closeModSelector()">&times;</button>
+                </div>
+                <div class="modal-toolbar">
+                    <button class="success" onclick="selectAllMods()">Select All</button>
+                    <button onclick="deselectAllMods()">Deselect All</button>
+                    <input type="text" class="search-box" id="mod-search" placeholder="Search mods..." oninput="filterModList()">
+                    <span class="selected-count" id="selected-count">0 selected</span>
+                </div>
+                <div class="modal-body" id="modal-mod-list">
+                    <div style="padding: 40px; text-align: center; color: #666;">Loading mod list...</div>
+                </div>
+                <div class="modal-footer">
+                    <span class="footer-info" id="modal-footer-info">Top mods from Modrinth</span>
+                    <div>
+                        <button onclick="closeModSelector()">Cancel</button>
+                        <button class="success" onclick="installSelectedMods()" id="install-btn">Install Selected</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Auto-refresh status every 5 seconds
+        setInterval(refreshStatus, 5000);
+        setInterval(refreshMods, 30000);
+        
+        // Initial load
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshStatus();
+            loadMods();
+            loadConfig();
+            refreshLogs();
+
+            // First-visit check: show mod selector if never loaded
+            if (!localStorage.getItem('neorunner-mods-loaded')) {
+                // Delay slightly so dashboard loads first
+                setTimeout(openModSelector, 1500);
+            }
+        });
+
+        // ---- Mod Selector Modal ----
+        let cachedModList = [];
+
+        function openModSelector() {
+            document.getElementById('mod-selector-modal').classList.add('active');
+            document.getElementById('mod-search').value = '';
+            loadModListForSelector();
+        }
+
+        function closeModSelector() {
+            document.getElementById('mod-selector-modal').classList.remove('active');
+        }
+
+        function loadModListForSelector() {
+            const listEl = document.getElementById('modal-mod-list');
+            listEl.innerHTML = '<div style="padding: 40px; text-align: center; color: #666;">Loading mod list...</div>';
+
+            fetch('/api/mod-lists')
+                .then(r => {
+                    if (!r.ok) throw new Error('No mod list cached. Run: python3 run.py curator');
+                    return r.json();
+                })
+                .then(data => {
+                    // data might be {neoforge: [...], ...} or a flat list
+                    // Extract the first loader's list
+                    if (Array.isArray(data)) {
+                        cachedModList = data;
+                    } else {
+                        const loaders = Object.keys(data);
+                        cachedModList = data[loaders[0]] || [];
+                    }
+                    renderModList(cachedModList);
+                    updateSelectedCount();
+                })
+                .catch(err => {
+                    listEl.innerHTML = `<div style="padding: 40px; text-align: center; color: #c00;">${err.message}</div>`;
+                });
+        }
+
+        function renderModList(mods) {
+            const listEl = document.getElementById('modal-mod-list');
+            if (!mods.length) {
+                listEl.innerHTML = '<div style="padding: 40px; text-align: center; color: #666;">No mods found</div>';
+                return;
+            }
+            let html = '';
+            mods.forEach((mod, i) => {
+                const downloads = mod.downloads ? (mod.downloads > 1000000
+                    ? (mod.downloads / 1000000).toFixed(1) + 'M'
+                    : mod.downloads > 1000
+                        ? (mod.downloads / 1000).toFixed(0) + 'K'
+                        : mod.downloads) : '';
+                html += `<label class="modal-mod-item" data-name="${(mod.name || '').toLowerCase()}">
+                    <input type="checkbox" value="${mod.id}" onchange="updateSelectedCount()">
+                    <span class="mod-title">${mod.name || mod.id}</span>
+                    <span class="mod-downloads">${downloads} downloads</span>
+                </label>`;
+            });
+            listEl.innerHTML = html;
+        }
+
+        function filterModList() {
+            const query = document.getElementById('mod-search').value.toLowerCase();
+            document.querySelectorAll('#modal-mod-list .modal-mod-item').forEach(item => {
+                const name = item.getAttribute('data-name') || '';
+                item.style.display = name.includes(query) ? '' : 'none';
+            });
+        }
+
+        function selectAllMods() {
+            document.querySelectorAll('#modal-mod-list input[type="checkbox"]').forEach(cb => {
+                if (cb.closest('.modal-mod-item').style.display !== 'none') cb.checked = true;
+            });
+            updateSelectedCount();
+        }
+
+        function deselectAllMods() {
+            document.querySelectorAll('#modal-mod-list input[type="checkbox"]').forEach(cb => cb.checked = false);
+            updateSelectedCount();
+        }
+
+        function updateSelectedCount() {
+            const count = document.querySelectorAll('#modal-mod-list input[type="checkbox"]:checked').length;
+            document.getElementById('selected-count').textContent = count + ' selected';
+            document.getElementById('install-btn').textContent = count > 0 ? `Install ${count} Mods` : 'Install Selected';
+        }
+
+        function installSelectedMods() {
+            const selected = [];
+            document.querySelectorAll('#modal-mod-list input[type="checkbox"]:checked').forEach(cb => {
+                selected.push(cb.value);
+            });
+            if (!selected.length) {
+                showAlert('No mods selected', 'error');
+                return;
+            }
+            if (!confirm(`Install ${selected.length} mods? This will download them from Modrinth.`)) return;
+
+            document.getElementById('install-btn').textContent = 'Installing...';
+            document.getElementById('install-btn').disabled = true;
+
+            fetch('/api/install-mods', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ selected: selected })
+            })
+            .then(r => r.json())
+            .then(result => {
+                document.getElementById('install-btn').disabled = false;
+                if (result.success !== false) {
+                    const msg = `Installed ${result.downloaded || 0} mods` +
+                        (result.failed && result.failed.length ? `, ${result.failed.length} failed` : '');
+                    showAlert(msg, 'success');
+                    localStorage.setItem('neorunner-mods-loaded', 'true');
+                    closeModSelector();
+                    loadMods();
+                } else {
+                    showAlert(`Error: ${result.error}`, 'error');
+                }
+                updateSelectedCount();
+            })
+            .catch(err => {
+                document.getElementById('install-btn').disabled = false;
+                updateSelectedCount();
+                showAlert(`Error: ${err}`, 'error');
+            });
+        }
+        
+        function switchTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.tab-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            // Show selected tab
+            document.getElementById(tabName).classList.add('active');
+            event.target.classList.add('active');
+        }
+        
+        function showAlert(message, type = 'info') {
+            const alertDiv = document.getElementById('alerts');
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+            alertDiv.appendChild(alert);
+            
+            setTimeout(() => alert.remove(), 5000);
+        }
+        
+        function refreshStatus() {
+            fetch('/api/status')
+                .then(r => r.json())
+                .then(data => {
+                    let badge = `<span class="status-badge ${data.running ? 'status-running' : 'status-stopped'}">
+                        ${data.running ? '✓ RUNNING' : '✗ STOPPED'}
+                    </span>`;
+                    
+                    document.getElementById('status-content').innerHTML = `
+                        <div class="stat">
+                            <span class="stat-label">Status:</span>
+                            <span class="stat-value">${badge}</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">Modloader:</span>
+                            <span class="stat-value">${data.loader}</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">MC Version:</span>
+                            <span class="stat-value">${data.mc_version}</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">Mods Installed:</span>
+                            <span class="stat-value">${data.mod_count}</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">Players Online:</span>
+                            <span class="stat-value">${data.player_count}</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">RCON:</span>
+                            <span class="stat-value">${data.rcon_enabled ? '✓ Enabled' : '✗ Disabled'}</span>
+                        </div>
+                    `;
+                })
+                .catch(err => console.error('Status error:', err));
+        }
+        
+        function loadMods() {
+            fetch('/api/mods')
+                .then(r => r.json())
+                .then(mods => {
+                    let html = `<div class="mod-list">`;
+                    mods.forEach(mod => {
+                        html += `
+                            <div class="mod-item">
+                                <div class="mod-info">
+                                    <div class="mod-name">${mod.name}</div>
+                                    <div class="mod-size">${mod.size_mb} MB</div>
+                                </div>
+                                <div>
+                                    <button onclick="downloadMod('${mod.name}')" style="margin: 0; padding: 5px 10px; font-size: 12px;">📥</button>
+                                    <button onclick="removeMod('${mod.name}')" class="danger" style="margin: 0; padding: 5px 10px; font-size: 12px;">🗑️</button>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    html += `</div>`;
+                    
+                    document.getElementById('mods-content').innerHTML = html;
+                })
+                .catch(err => console.error('Mods error:', err));
+        }
+        
+        function refreshMods() {
+            loadMods();
+        }
+        
+        function removeMod(modName) {
+            if (!confirm(`Remove mod: ${modName}?`)) return;
+            
+            fetch(`/api/mods/${modName}`, { method: 'DELETE' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        showAlert(`Removed ${modName}`, 'success');
+                        loadMods();
+                    } else {
+                        showAlert(`Error: ${data.error}`, 'error');
+                    }
+                })
+                .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+        
+        function downloadMod(modName) {
+            window.location.href = `/api/download/${modName}`;
+        }
+        
+        function loadConfig() {
+            fetch('/api/config')
+                .then(r => r.json())
+                .then(cfg => {
+                    document.getElementById('update-freq').value = cfg.ferium_update_interval_hours || 4;
+                    document.getElementById('weekly-day').value = cfg.ferium_weekly_update_day || 'mon';
+                    document.getElementById('weekly-hour').value = cfg.ferium_weekly_update_hour || 2;
+                    document.getElementById('mc-version').value = cfg.mc_version || '1.21.11';
+                })
+                .catch(err => console.error('Config error:', err));
+        }
+        
+        function saveConfig() {
+            const data = {
+                ferium_update_interval_hours: parseInt(document.getElementById('update-freq').value),
+                ferium_weekly_update_day: document.getElementById('weekly-day').value,
+                ferium_weekly_update_hour: parseInt(document.getElementById('weekly-hour').value),
+                mc_version: document.getElementById('mc-version').value
+            };
+            
+            fetch('/api/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            })
+            .then(r => r.json())
+            .then(result => {
+                if (result.success) {
+                    showAlert('Configuration saved!', 'success');
+                } else {
+                    showAlert(`Error: ${result.error}`, 'error');
+                }
+            })
+            .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+        
+        function startServer() {
+            if (confirm('Start the server?')) {
+                fetch('/api/server/start', { method: 'POST' })
+                    .then(r => r.json())
+                    .then(result => {
+                        showAlert(result.message, result.success ? 'success' : 'error');
+                        setTimeout(refreshStatus, 2000);
+                    })
+                    .catch(err => showAlert(`Error: ${err}`, 'error'));
+            }
+        }
+        
+        function stopServer() {
+            if (confirm('Stop the server?')) {
+                fetch('/api/server/stop', { method: 'POST' })
+                    .then(r => r.json())
+                    .then(result => {
+                        showAlert(result.message, result.success ? 'success' : 'error');
+                        setTimeout(refreshStatus, 2000);
+                    })
+                    .catch(err => showAlert(`Error: ${err}`, 'error'));
+            }
+        }
+        
+        function upgradeMods() {
+            if (confirm('Upgrade all mods via ferium?')) {
+                fetch('/api/mods/upgrade', { method: 'POST' })
+                    .then(r => r.json())
+                    .then(result => {
+                        showAlert(result.message, result.success ? 'success' : 'error');
+                        setTimeout(loadMods, 2000);
+                    })
+                    .catch(err => showAlert(`Error: ${err}`, 'error'));
+            }
+        }
+        
+        function refreshLogs() {
+            fetch('/api/logs?lines=100')
+                .then(r => r.json())
+                .then(data => {
+                    let html = '';
+                    data.logs.forEach(line => {
+                        html += `<div class="log-line">${line.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`;
+                    });
+                    document.getElementById('logs-content').innerHTML = html || '<div class="log-line">No logs available</div>';
+                    
+                    // Auto-scroll to bottom
+                    document.getElementById('logs-content').scrollTop = document.getElementById('logs-content').scrollHeight;
+                })
+                .catch(err => console.error('Logs error:', err));
+        }
+    </script>
+</body>
+</html>

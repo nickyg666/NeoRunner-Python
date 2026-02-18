@@ -72,10 +72,10 @@ def parse_props():
     return props
 
 def download_loader(loader):
-    """Verify modloader is available (NeoForge uses @args files, not a JAR)"""
+    """Verify modloader is available and return the startup command"""
     
     if loader == "neoforge":
-        # Check if NeoForge libraries and args files exist
+        # NeoForge uses @args files from libraries
         neoforge_dir = os.path.join(CWD, "libraries", "net", "neoforged", "neoforge")
         if os.path.exists(neoforge_dir):
             log_event("LOADER", "NeoForge server environment ready (using @args files)")
@@ -86,27 +86,44 @@ def download_loader(loader):
             return False
     
     elif loader == "fabric":
-        # Fabric also uses libraries structure
+        # Fabric uses a server jar
+        # Check if fabric-server.jar exists or if libraries are present
+        if os.path.exists(os.path.join(CWD, "fabric-server.jar")):
+            log_event("LOADER", "Fabric server JAR found")
+            return True
+        
         fabric_dir = os.path.join(CWD, "libraries", "net", "fabricmc")
         if os.path.exists(fabric_dir):
-            log_event("LOADER", "Fabric server environment ready")
-            return True
+            log_event("LOADER", "Fabric libraries found (need to build server JAR)")
+            # Try to build/download the fabric server jar
+            return _setup_fabric_server()
         else:
-            log_event("LOADER_ERROR", f"Fabric libraries not found at {fabric_dir}")
+            log_event("LOADER_ERROR", "Fabric server JAR or libraries not found")
+            log_event("LOADER_INFO", "Download from: https://fabricmc.net/use/server/")
             return False
     
     elif loader == "forge":
-        # Forge uses libraries structure (1.20.1+)
-        forge_dir = os.path.join(CWD, "libraries", "net", "minecraftforge")
-        if os.path.exists(forge_dir):
-            log_event("LOADER", "Forge server environment ready")
+        # Forge uses a server jar
+        if os.path.exists(os.path.join(CWD, "forge-server.jar")) or os.path.exists(os.path.join(CWD, "server.jar")):
+            log_event("LOADER", "Forge server JAR found")
             return True
         else:
-            log_event("LOADER_ERROR", f"Forge libraries not found at {forge_dir}")
+            log_event("LOADER_ERROR", "Forge server JAR not found")
+            log_event("LOADER_INFO", "Download from: https://files.minecraftforge.net/")
             return False
     
     else:
         log_event("LOADER_ERROR", f"Unknown loader: {loader}")
+        return False
+
+def _setup_fabric_server():
+    """Helper to set up Fabric server if libraries exist"""
+    try:
+        # If fabric libraries exist but no server jar, user needs to download it
+        log_event("LOADER", "Fabric libraries detected - download fabric-server.jar from https://fabricmc.net/use/server/")
+        return False  # Can't auto-setup without the jar
+    except Exception as e:
+        log_event("LOADER_ERROR", f"Error setting up Fabric: {e}")
         return False
 
 def ensure_rcon_enabled(cfg):
@@ -190,6 +207,16 @@ def get_config():
             "curator_show_optional_audit": True,
             "curator_max_depth": 3
         }
+        
+        # For Fabric/Forge, ask for server jar path
+        loader = cfg.get("loader", "neoforge").lower()
+        if loader in ["fabric", "forge"]:
+            server_jar = input("Server JAR path [fabric-server.jar]: ").strip() or "fabric-server.jar"
+            cfg["server_jar"] = server_jar
+        else:
+            # NeoForge uses @args files, not a jar
+            cfg["server_jar"] = None
+        
         json.dump(cfg, open(CONFIG, "w"), indent=2)
         
         # API key setup for mod sources
@@ -538,12 +565,16 @@ def run_server(cfg):
     if loader == "neoforge":
         # NeoForge uses special args files from the installer
         java_cmd = f"java @user_jvm_args.txt @libraries/net/neoforged/neoforge/21.11.38-beta/unix_args.txt nogui"
-    elif loader == "forge":
-        # Forge typically uses server jar
-        java_cmd = f"java -jar {cfg['server_jar']} nogui"
+    elif loader in ["fabric", "forge"]:
+        # Fabric and Forge use server jars
+        server_jar = cfg.get("server_jar", "fabric-server.jar")
+        if not server_jar:
+            log_event("SERVER_ERROR", f"No server JAR configured for {loader}")
+            return False
+        java_cmd = f"java -jar {server_jar} nogui"
     else:
-        # Fabric and others
-        java_cmd = f"java -jar {cfg['server_jar']} nogui"
+        log_event("SERVER_ERROR", f"Unknown loader: {loader}")
+        return False
     
     result = run(f"cd {CWD} && tmux new-session -d -s MC '{java_cmd}'")
     if result.returncode != 0:

@@ -402,6 +402,22 @@
         .mod-source.modrinth { background: #1bd96a; }
         .mod-source.curseforge { background: #f16436; }
         .mod-source.both { background: #7c4dff; }
+        .mod-installed-badge {
+            font-size: 9px;
+            font-weight: bold;
+            padding: 1px 5px;
+            border-radius: 3px;
+            background: #2196f3;
+            color: white;
+            margin-right: 6px;
+            flex-shrink: 0;
+        }
+        .modal-mod-item.installed {
+            opacity: 0.55;
+        }
+        .modal-mod-item.installed input[type="checkbox"] {
+            cursor: not-allowed;
+        }
         .modal-mod-item .mod-downloads {
             color: #888;
             font-size: 12px;
@@ -601,7 +617,7 @@
                 listEl.innerHTML = '<div style="padding: 40px; text-align: center; color: #666;">No mods found</div>';
                 return;
             }
-            let mrCount = 0, cfCount = 0, bothCount = 0;
+            let mrCount = 0, cfCount = 0, bothCount = 0, installedCount = 0;
             let html = '';
             mods.forEach((mod, i) => {
                 const downloads = mod.downloads ? (mod.downloads > 1000000
@@ -611,6 +627,7 @@
                         : mod.downloads) : '';
                 const src = mod.source || 'modrinth';
                 const hasAlso = mod.also_on ? true : false;
+                const isInstalled = mod.installed === true;
                 let srcLabel, srcClass;
                 if (hasAlso) {
                     srcLabel = 'M+C'; srcClass = 'both'; bothCount++;
@@ -619,16 +636,20 @@
                 } else {
                     srcLabel = 'MR'; srcClass = 'modrinth'; mrCount++;
                 }
-                html += `<label class="modal-mod-item" data-name="${(mod.name || '').toLowerCase()}">
-                    <input type="checkbox" value="${mod.id}" onchange="updateSelectedCount()">
+                if (isInstalled) installedCount++;
+                const installedBadge = isInstalled ? '<span class="mod-installed-badge">INSTALLED</span>' : '';
+                const dimClass = isInstalled ? ' installed' : '';
+                html += `<label class="modal-mod-item${dimClass}" data-name="${(mod.name || '').toLowerCase()}" data-installed="${isInstalled}">
+                    <input type="checkbox" value="${mod.id}" onchange="updateSelectedCount()"${isInstalled ? ' disabled' : ''}>
                     <span class="mod-source ${srcClass}">${srcLabel}</span>
+                    ${installedBadge}
                     <span class="mod-title">${mod.name || mod.id}</span>
                     <span class="mod-downloads">${downloads} downloads</span>
                 </label>`;
             });
             listEl.innerHTML = html;
             document.getElementById('modal-footer-info').textContent =
-                `${mods.length} mods | MR: ${mrCount} | CF: ${cfCount} | Both: ${bothCount}`;
+                `${mods.length} mods | MR: ${mrCount} | CF: ${cfCount} | Both: ${bothCount} | ${installedCount} installed`;
         }
 
         function filterModList() {
@@ -641,7 +662,7 @@
 
         function selectAllMods() {
             document.querySelectorAll('#modal-mod-list input[type="checkbox"]').forEach(cb => {
-                if (cb.closest('.modal-mod-item').style.display !== 'none') cb.checked = true;
+                if (cb.closest('.modal-mod-item').style.display !== 'none' && !cb.disabled) cb.checked = true;
             });
             updateSelectedCount();
         }
@@ -666,7 +687,7 @@
                 showAlert('No mods selected', 'error');
                 return;
             }
-            if (!confirm(`Install ${selected.length} mods? This will download them from Modrinth.`)) return;
+            if (!confirm(`Install ${selected.length} mods? Already-installed mods will be skipped.`)) return;
 
             document.getElementById('install-btn').textContent = 'Installing...';
             document.getElementById('install-btn').disabled = true;
@@ -680,7 +701,8 @@
             .then(result => {
                 document.getElementById('install-btn').disabled = false;
                 if (result.success !== false) {
-                    const msg = `Installed ${result.downloaded || 0} mods` +
+                    const msg = `Downloaded ${result.downloaded || 0} mods` +
+                        (result.skipped ? `, ${result.skipped} already installed` : '') +
                         (result.failed && result.failed.length ? `, ${result.failed.length} failed` : '');
                     showAlert(msg, 'success');
                     localStorage.setItem('neorunner-mods-loaded', 'true');

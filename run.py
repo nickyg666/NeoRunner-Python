@@ -808,30 +808,58 @@ def http_server(port, mods_dir):
                 
                 @app.route("/api/mod-lists")
                 def api_mod_lists():
-                    """Return curated mod lists from cache, normalized to a list"""
+                    """Return curated mod lists from cache, with installed status for each mod"""
                     c = load_cfg()
                     loader = c.get("loader", "neoforge")
                     mc_ver = c.get("mc_version", "1.21.11")
+                    m_dir = os.path.join(CWD, c.get("mods_dir", "mods"))
                     cache_file = os.path.join(CWD, f"curator_cache_{mc_ver}_{loader}.json")
+                    
+                    # Build set of installed mod filenames for matching
+                    installed_jars = set()
+                    installed_slugs = set()
+                    if os.path.exists(m_dir):
+                        for fn in os.listdir(m_dir):
+                            if fn.endswith('.jar') and os.path.isfile(os.path.join(m_dir, fn)):
+                                installed_jars.add(fn.lower())
+                                # Normalize for fuzzy matching
+                                installed_slugs.add(re.sub(r'[^a-z0-9]', '', fn.lower().split('.jar')[0]))
+                    
+                    def _mark_installed(mod):
+                        """Add 'installed' flag to a mod dict"""
+                        name = mod.get("name", "")
+                        slug = mod.get("slug", "")
+                        mod_id = mod.get("id", "")
+                        # Check by slug, name, or id match against installed filenames
+                        for check in [name, slug, mod_id]:
+                            if check:
+                                norm = re.sub(r'[^a-z0-9]', '', check.lower())
+                                if norm and any(norm in ij for ij in installed_slugs):
+                                    mod["installed"] = True
+                                    return mod
+                        mod["installed"] = False
+                        return mod
                     
                     if os.path.exists(cache_file):
                         try:
                             with open(cache_file) as f:
                                 raw = json.load(f)
-                            # Normalize: cache may be {id: {id,name,...}} or {loader: [list]}
                             if isinstance(raw, dict):
-                                # Check if values are mod objects (have 'name' key)
                                 first_val = next(iter(raw.values()), None) if raw else None
                                 if isinstance(first_val, dict) and "name" in first_val:
-                                    # Flat dict of {mod_id: mod_obj} -> convert to list
                                     mods = sorted(raw.values(), key=lambda m: m.get("downloads", 0), reverse=True)
+                                    mods = [_mark_installed(m) for m in mods]
                                     return jsonify({loader: mods})
                                 elif isinstance(first_val, list):
-                                    # Already {loader: [list]} format
+                                    # {loader: [list]} format — mark each
+                                    for ldr in raw:
+                                        if isinstance(raw[ldr], list):
+                                            raw[ldr] = [_mark_installed(m) for m in raw[ldr]]
                                     return jsonify(raw)
                                 else:
                                     return jsonify(raw)
                             elif isinstance(raw, list):
+                                raw = [_mark_installed(m) for m in raw]
                                 return jsonify({loader: raw})
                             else:
                                 return jsonify(raw)
@@ -868,6 +896,7 @@ def http_server(port, mods_dir):
                                 pass
                         
                         downloaded = 0
+                        skipped = 0
                         failed = []
                         for mod_id in selected:
                             try:
@@ -876,13 +905,19 @@ def http_server(port, mods_dir):
                                 source = mod_data.get("source", "modrinth")
                                 
                                 if source == "curseforge":
-                                    if download_mod_from_curseforge(mod_data, m_dir, mc_ver, loader):
+                                    result = download_mod_from_curseforge(mod_data, m_dir, mc_ver, loader)
+                                    if result == "exists":
+                                        skipped += 1
+                                    elif result:
                                         downloaded += 1
                                     else:
                                         failed.append(mod_id)
                                 else:
                                     # Default: Modrinth
-                                    if download_mod_from_modrinth(mod_data, m_dir, mc_ver, loader):
+                                    result = download_mod_from_modrinth(mod_data, m_dir, mc_ver, loader)
+                                    if result == "exists":
+                                        skipped += 1
+                                    elif result:
                                         downloaded += 1
                                     else:
                                         failed.append(mod_id)
@@ -901,8 +936,9 @@ def http_server(port, mods_dir):
                         return jsonify({
                             "success": True,
                             "downloaded": downloaded,
+                            "skipped": skipped,
                             "failed": failed,
-                            "message": f"Downloaded {downloaded}/{len(selected)} mods"
+                            "message": f"Downloaded {downloaded}, skipped {skipped} already installed, {len(failed)} failed"
                         })
                     except Exception as e:
                         return jsonify({"success": False, "error": str(e)}), 400
@@ -986,35 +1022,56 @@ def _read_recent_log(lines=200):
     except Exception:
         return ""
 
-def _try_self_heal(loader_instance, crash_info, cfg):
-    """Attempt to fix a crash by fetching missing dependency from Modrinth.
-    Returns True if a fix was applied and a restart should be attempted."""
-    crash_type = crash_info.get("type", "unknown")
+def _quarantine_mod(mods_dir, mod_id_or_slug, reason="unknown"):
+    """Move a mod to quarantine directory. Searches by mod_id/slug in filenames.
+    Returns the filename that was quarantined, or None."""
+    import shutil
+    quarantine_dir = os.path.join(mods_dir, "quarantine")
+    os.makedirs(quarantine_dir, exist_ok=True)
     
-    if crash_type == "missing_dep":
-        dep_name = crash_info.get("dep", "")
-        if not dep_name or dep_name == "unknown":
-            log_event("SELF_HEAL", "Missing dependency detected but name unknown, cannot auto-fix")
-            return False
+    slug_lower = mod_id_or_slug.lower().replace('-', '').replace('_', '').replace(' ', '')
+    
+    for fn in os.listdir(mods_dir):
+        if not fn.endswith('.jar') or not os.path.isfile(os.path.join(mods_dir, fn)):
+            continue
+        fn_norm = fn.lower().replace('-', '').replace('_', '').replace(' ', '')
+        if slug_lower in fn_norm:
+            src = os.path.join(mods_dir, fn)
+            dst = os.path.join(quarantine_dir, fn)
+            try:
+                shutil.move(src, dst)
+                log_event("QUARANTINE", f"Quarantined {fn} -> quarantine/ (reason: {reason})")
+                
+                # Write reason to a sidecar file
+                reason_file = os.path.join(quarantine_dir, f"{fn}.reason.txt")
+                with open(reason_file, "w") as rf:
+                    rf.write(f"Quarantined: {datetime.now().isoformat()}\n")
+                    rf.write(f"Reason: {reason}\n")
+                    rf.write(f"Mod ID/slug: {mod_id_or_slug}\n")
+                
+                return fn
+            except Exception as e:
+                log_event("QUARANTINE", f"Failed to quarantine {fn}: {e}")
+                return None
+    
+    log_event("QUARANTINE", f"Could not find JAR matching '{mod_id_or_slug}' to quarantine")
+    return None
+
+
+def _search_and_download_dep(dep_name, mods_dir, mc_version, loader_name):
+    """Search both Modrinth and CurseForge for a missing dependency and download it.
+    Returns True if successfully downloaded, False otherwise."""
+    
+    # 1. Try Modrinth first
+    try:
+        dep_query = url_quote(dep_name)
+        search_url = f"https://api.modrinth.com/v2/search?query={dep_query}&facets=[[\"versions:{mc_version}\"],[\"categories:{loader_name}\"],[\"project_type:mod\"]]&limit=5"
+        req = urllib.request.Request(search_url, headers={"User-Agent": "NeoRunner/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            results = json.loads(resp.read().decode())
         
-        log_event("SELF_HEAL", f"Attempting to fetch missing dependency: {dep_name}")
-        mc_version = cfg.get("mc_version", "1.21.11")
-        loader_name = cfg.get("loader", "neoforge")
-        mods_dir = os.path.join(CWD, cfg.get("mods_dir", "mods"))
-        
-        # Search Modrinth for the mod by name
-        try:
-            dep_query = url_quote(dep_name)
-            search_url = f"https://api.modrinth.com/v2/search?query={dep_query}&facets=[[\"versions:{mc_version}\"],[\"categories:{loader_name}\"]]&limit=5"
-            req = urllib.request.Request(search_url, headers={"User-Agent": "NeoRunner/1.0"})
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                results = json.loads(resp.read().decode())
-            
-            hits = results.get("hits", [])
-            if not hits:
-                log_event("SELF_HEAL", f"No Modrinth results for '{dep_name}'")
-                return False
-            
+        hits = results.get("hits", [])
+        if hits:
             # Pick best match (exact slug match first, then first result)
             best = None
             for h in hits:
@@ -1024,50 +1081,230 @@ def _try_self_heal(loader_instance, crash_info, cfg):
             if not best:
                 best = hits[0]
             
-            mod_data = {"id": best["project_id"], "name": best.get("title", dep_name)}
-            if download_mod_from_modrinth(mod_data, mods_dir, mc_version, loader_name):
-                log_event("SELF_HEAL", f"Successfully downloaded {mod_data['name']} - will restart")
+            mod_data = {"id": best["project_id"], "name": best.get("title", dep_name), "slug": best.get("slug", dep_name)}
+            result = download_mod_from_modrinth(mod_data, mods_dir, mc_version, loader_name)
+            if result:
+                log_event("SELF_HEAL", f"Downloaded {mod_data['name']} from Modrinth")
                 return True
-            else:
-                log_event("SELF_HEAL", f"Failed to download {dep_name}")
-                return False
-        except Exception as e:
-            log_event("SELF_HEAL", f"Error searching Modrinth for {dep_name}: {e}")
-            return False
+    except Exception as e:
+        log_event("SELF_HEAL", f"Modrinth search failed for {dep_name}: {e}")
     
-    elif crash_type == "mod_error":
-        log_event("SELF_HEAL", f"Mod error detected: {crash_info.get('message', '')[:100]}")
-        log_event("SELF_HEAL", "Cannot auto-fix mod errors. Check logs and remove the broken mod.")
+    # 2. Try CurseForge scraper (check curator cache for CF mods)
+    try:
+        cache_file = os.path.join(CWD, f"curator_cache_{mc_version}_{loader_name}.json")
+        if os.path.exists(cache_file):
+            with open(cache_file) as f:
+                cached = json.load(f)
+            # Search cache for a mod matching the dep name
+            dep_norm = dep_name.lower().replace('-', '').replace('_', '').replace(' ', '')
+            for mod_id, mod_data in cached.items():
+                if not isinstance(mod_data, dict):
+                    continue
+                mod_norm = mod_data.get("name", "").lower().replace('-', '').replace('_', '').replace(' ', '')
+                slug_norm = mod_data.get("slug", "").lower().replace('-', '').replace('_', '')
+                if dep_norm == mod_norm or dep_norm == slug_norm or dep_norm in mod_norm:
+                    if mod_data.get("source") == "curseforge":
+                        result = download_mod_from_curseforge(mod_data, mods_dir, mc_version, loader_name)
+                        if result and result != False:
+                            log_event("SELF_HEAL", f"Downloaded {mod_data['name']} from CurseForge cache")
+                            return True
+    except Exception as e:
+        log_event("SELF_HEAL", f"CurseForge cache search failed for {dep_name}: {e}")
+    
+    log_event("SELF_HEAL", f"Could not find {dep_name} on either Modrinth or CurseForge for MC {mc_version}")
+    return False
+
+
+def _try_self_heal(loader_instance, crash_info, cfg, crash_history):
+    """Attempt to fix a crash by fetching missing deps or quarantining bad mods.
+    
+    Args:
+        loader_instance: loader class instance
+        crash_info: dict from detect_crash_reason()
+        cfg: server config
+        crash_history: dict tracking {mod_id: crash_count} across restarts
+    
+    Returns: 'fixed', 'quarantined', or False
+    """
+    crash_type = crash_info.get("type", "unknown")
+    culprit = crash_info.get("culprit")
+    mc_version = cfg.get("mc_version", "1.21.11")
+    loader_name = cfg.get("loader", "neoforge")
+    mods_dir = os.path.join(CWD, cfg.get("mods_dir", "mods"))
+    
+    if crash_type == "missing_dep":
+        dep_name = crash_info.get("dep", "")
+        if not dep_name or dep_name == "unknown":
+            log_event("SELF_HEAL", "Missing dependency detected but name unknown, cannot auto-fix")
+            return False
+        
+        log_event("SELF_HEAL", f"Missing dependency: {dep_name}" + (f" (required by {culprit})" if culprit else ""))
+        
+        # Check if we've already tried to fetch this dep before (dep loop)
+        dep_key = f"dep_{dep_name}"
+        crash_history[dep_key] = crash_history.get(dep_key, 0) + 1
+        
+        if crash_history[dep_key] > 2:
+            # We've tried fetching this dep twice and it still crashes
+            # Quarantine the culprit mod (the one requiring the dep)
+            if culprit:
+                log_event("SELF_HEAL", f"Dep {dep_name} fetched {crash_history[dep_key]} times but still crashing. Quarantining {culprit}")
+                quarantined = _quarantine_mod(mods_dir, culprit, f"Repeatedly requires unfetchable dep: {dep_name}")
+                if quarantined:
+                    return "quarantined"
+            log_event("SELF_HEAL", f"Cannot resolve dep {dep_name} after {crash_history[dep_key]} attempts")
+            return False
+        
+        # Try to download the missing dependency
+        if _search_and_download_dep(dep_name, mods_dir, mc_version, loader_name):
+            return "fixed"
+        
+        # Could not find the dep — quarantine the culprit if known
+        if culprit:
+            log_event("SELF_HEAL", f"Could not find dep {dep_name}. Quarantining {culprit}")
+            quarantined = _quarantine_mod(mods_dir, culprit, f"Missing dep '{dep_name}' not available for MC {mc_version}")
+            if quarantined:
+                return "quarantined"
+        
         return False
     
+    elif crash_type == "mod_error":
+        if culprit:
+            # Track crash count for this mod
+            crash_history[culprit] = crash_history.get(culprit, 0) + 1
+            log_event("SELF_HEAL", f"Mod error from {culprit} (crash #{crash_history[culprit]})")
+            
+            if crash_history[culprit] >= 2:
+                log_event("SELF_HEAL", f"Quarantining {culprit} after {crash_history[culprit]} crashes")
+                quarantined = _quarantine_mod(mods_dir, culprit, f"Caused {crash_history[culprit]} crashes")
+                if quarantined:
+                    return "quarantined"
+            return False
+        else:
+            log_event("SELF_HEAL", f"Mod error detected but cannot identify culprit mod")
+            return False
+    
     elif crash_type == "version_mismatch":
-        log_event("SELF_HEAL", f"Version mismatch: {crash_info.get('message', '')[:100]}")
-        log_event("SELF_HEAL", "Cannot auto-fix version mismatches. Check mod compatibility.")
+        if culprit:
+            log_event("SELF_HEAL", f"Version mismatch involving {culprit}. Quarantining (no version fallback — strict MC version matching)")
+            quarantined = _quarantine_mod(mods_dir, culprit, f"Version mismatch — no compatible build for MC {mc_version}")
+            if quarantined:
+                return "quarantined"
+        else:
+            log_event("SELF_HEAL", f"Version mismatch detected but cannot identify culprit")
         return False
     
     else:
         log_event("SELF_HEAL", f"Unknown crash type, no auto-fix available")
         return False
 
+def _preflight_dep_check(cfg):
+    """Proactive pre-flight: scan installed mods, resolve deps, download missing ones BEFORE launch.
+    Returns number of deps fetched."""
+    mc_version = cfg.get("mc_version", "1.21.11")
+    loader_name = cfg.get("loader", "neoforge")
+    mods_dir = os.path.join(CWD, cfg.get("mods_dir", "mods"))
+    
+    if not os.path.exists(mods_dir):
+        return 0
+    
+    # Load curator cache to find Modrinth project IDs for installed mods
+    cache_file = os.path.join(CWD, f"curator_cache_{mc_version}_{loader_name}.json")
+    cached_mods = {}
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file) as f:
+                cached_mods = json.load(f)
+        except:
+            pass
+    
+    # Build map of installed filenames (normalized) for quick lookup
+    installed_files = set()
+    for fn in os.listdir(mods_dir):
+        if fn.endswith('.jar') and os.path.isfile(os.path.join(mods_dir, fn)):
+            installed_files.add(fn.lower())
+    
+    if not installed_files:
+        return 0
+    
+    log_event("PREFLIGHT", f"Checking dependencies for {len(installed_files)} installed mods...")
+    
+    fetched = 0
+    checked = 0
+    
+    # For each cached mod that we have installed, check its deps
+    for mod_id, mod_data in cached_mods.items():
+        if not isinstance(mod_data, dict):
+            continue
+        
+        source = mod_data.get("source", "modrinth")
+        
+        if source == "curseforge":
+            # Check CurseForge deps from scraped data
+            for dep in mod_data.get("deps_required", []) + mod_data.get("cf_deps_required", []):
+                dep_slug = dep.get("slug", "")
+                if dep_slug and not _mod_jar_exists(mods_dir, mod_slug=dep_slug):
+                    log_event("PREFLIGHT", f"Missing CF dep: {dep.get('name', dep_slug)}")
+                    # Try to find it in cache and download
+                    for cid, cdata in cached_mods.items():
+                        if isinstance(cdata, dict) and cdata.get("slug") == dep_slug:
+                            result = download_mod_from_curseforge(cdata, mods_dir, mc_version, loader_name)
+                            if result and result != False:
+                                fetched += 1
+                            break
+        else:
+            # Check Modrinth deps via API
+            if mod_data.get("id") and not mod_data.get("id", "").startswith("cf_"):
+                try:
+                    deps = get_mod_version_dependencies(mod_data["id"], mc_version, loader_name)
+                    for dep in deps:
+                        if dep.get("dependency_type") == "required":
+                            dep_id = dep.get("project_id")
+                            if dep_id and not _mod_jar_exists(mods_dir, mod_slug=dep_id):
+                                # Check if the dep exists in our mods dir by any other name
+                                log_event("PREFLIGHT", f"Checking required dep {dep_id} for {mod_data.get('name', mod_id)}")
+                                if _search_and_download_dep(dep_id, mods_dir, mc_version, loader_name):
+                                    fetched += 1
+                except Exception as e:
+                    pass  # Non-fatal — preflight is best-effort
+        
+        checked += 1
+        if checked >= 50:  # Don't spend forever on preflight
+            break
+    
+    if fetched > 0:
+        log_event("PREFLIGHT", f"Pre-flight fetched {fetched} missing dependencies")
+    else:
+        log_event("PREFLIGHT", "All dependencies satisfied")
+    
+    return fetched
+
+
 def run_server(cfg):
-    """Start Minecraft server in tmux with crash detection and self-healing.
+    """Start Minecraft server in tmux with crash detection, self-healing, and quarantine.
     
     Uses loader abstraction classes for:
     - build_java_command() — loader-specific JVM args
-    - detect_crash_reason() — parse crash logs
+    - detect_crash_reason() — parse crash logs (now with culprit extraction)
     
-    Self-healing loop:
-    1. Start server
-    2. Monitor tmux session
-    3. If session dies, read crash log
-    4. If crash is a missing dep, try to fetch it from Modrinth
-    5. Restart (up to MAX_RESTART_ATTEMPTS)
+    Pipeline:
+    1. Pre-flight dep check (proactive — fetch missing deps before launch)
+    2. Start server
+    3. Monitor tmux session
+    4. If session dies, read crash log
+    5. If crash: try self-heal (fetch dep / quarantine bad mod)
+    6. Restart (up to MAX_RESTART_ATTEMPTS)
+    
+    Quarantine: mods/quarantine/ — bad mods moved there with reason files.
+    No version fallback — strict MC version matching only.
     """
-    MAX_RESTART_ATTEMPTS = 3
-    RESTART_COOLDOWN = 30  # seconds between restart attempts
+    MAX_RESTART_ATTEMPTS = 5
+    RESTART_COOLDOWN = 15  # seconds between restart attempts
+    MONITOR_TIMEOUT = 3600 * 6  # 6 hours — kill zombie tmux if no activity
     
     loader_name = cfg.get("loader", "neoforge").lower()
     mc_version = cfg.get("mc_version", "1.21.11")
+    mods_dir = os.path.join(CWD, cfg.get("mods_dir", "mods"))
     
     # Get loader instance
     try:
@@ -1083,7 +1320,19 @@ def run_server(cfg):
     log_event("SERVER_START", f"Starting {loader_instance.get_loader_display_name()} server (MC {mc_version})")
     log_event("SERVER_START", f"Java command: {java_cmd}")
     
+    # ---- PRE-FLIGHT: check deps before launching ----
+    try:
+        preflight_fetched = _preflight_dep_check(cfg)
+        if preflight_fetched > 0:
+            log_event("SERVER_START", f"Pre-flight fetched {preflight_fetched} missing deps")
+    except Exception as e:
+        log_event("SERVER_START", f"Pre-flight check failed (non-fatal): {e}")
+    
+    # Ensure quarantine dir exists
+    os.makedirs(os.path.join(mods_dir, "quarantine"), exist_ok=True)
+    
     restart_count = 0
+    crash_history = {}  # Track {mod_id: crash_count} across restarts
     
     while restart_count <= MAX_RESTART_ATTEMPTS:
         # Check if tmux session already exists (leftover from previous run)
@@ -1102,7 +1351,6 @@ def run_server(cfg):
             pass
         
         # Launch in tmux
-        # Use stdbuf to disable buffering so pipe-pane gets output immediately
         tmux_cmd = f"cd '{CWD}' && stdbuf -oL -eL {java_cmd}"
         result = run(f"tmux new-session -d -s MC \"{tmux_cmd}\"")
         if result.returncode != 0:
@@ -1116,14 +1364,19 @@ def run_server(cfg):
         else:
             log_event("SERVER_RUNNING", f"Server restarted (attempt {restart_count}/{MAX_RESTART_ATTEMPTS})")
         
-        # Monitor loop — wait for server to stop
+        # Monitor loop — wait for server to stop (with timeout)
+        monitor_start = time.time()
         while True:
             check = run("tmux has-session -t MC 2>/dev/null")
             if check.returncode != 0:
                 break
+            if time.time() - monitor_start > MONITOR_TIMEOUT:
+                log_event("SERVER_TIMEOUT", f"Server tmux session alive for >{MONITOR_TIMEOUT}s without crash — assuming hung, killing")
+                run("tmux kill-session -t MC 2>/dev/null")
+                break
             time.sleep(5)
         
-        log_event("SERVER_STOPPED", "Server process ended, analyzing crash...")
+        log_event("SERVER_STOPPED", "Server process ended, analyzing...")
         time.sleep(2)  # Let log flush
         
         # Read log output since we started
@@ -1144,28 +1397,41 @@ def run_server(cfg):
         # Analyze crash
         crash_info = loader_instance.detect_crash_reason(new_log)
         crash_type = crash_info.get("type", "unknown")
-        log_event("CRASH_DETECT", f"Crash type: {crash_type}")
+        culprit = crash_info.get("culprit")
+        log_event("CRASH_DETECT", f"Crash type: {crash_type}" + (f", culprit: {culprit}" if culprit else ""))
         if crash_info.get("message"):
             log_event("CRASH_DETECT", f"Details: {crash_info['message'][:200]}")
         
         # Attempt self-healing
         if restart_count < MAX_RESTART_ATTEMPTS:
-            healed = _try_self_heal(loader_instance, crash_info, cfg)
-            if healed:
+            heal_result = _try_self_heal(loader_instance, crash_info, cfg, crash_history)
+            
+            if heal_result == "fixed":
                 restart_count += 1
                 log_event("SELF_HEAL", f"Fix applied, restarting in {RESTART_COOLDOWN}s...")
                 time.sleep(RESTART_COOLDOWN)
                 continue
-            elif crash_type == "unknown":
-                # Unknown crash — still restart, but don't try to fix
+            elif heal_result == "quarantined":
                 restart_count += 1
+                log_event("SELF_HEAL", f"Bad mod quarantined, restarting in {RESTART_COOLDOWN}s...")
+                time.sleep(RESTART_COOLDOWN)
+                continue
+            elif crash_type == "unknown":
+                # Unknown crash — still restart, but track it
+                restart_count += 1
+                crash_history["_unknown"] = crash_history.get("_unknown", 0) + 1
+                if crash_history["_unknown"] >= 3:
+                    log_event("SELF_HEAL", "Too many unknown crashes. Server will not restart.")
+                    return False
                 log_event("SELF_HEAL", f"Unknown crash, restarting in {RESTART_COOLDOWN}s (attempt {restart_count}/{MAX_RESTART_ATTEMPTS})")
                 time.sleep(RESTART_COOLDOWN)
                 continue
             else:
-                # Known crash type but can't auto-fix
-                log_event("SELF_HEAL", "Cannot auto-fix this crash type. Server will not restart.")
-                return False
+                # Known crash type but can't auto-fix (no culprit to quarantine, dep not found)
+                restart_count += 1
+                log_event("SELF_HEAL", f"Cannot auto-fix, restarting anyway (attempt {restart_count}/{MAX_RESTART_ATTEMPTS})")
+                time.sleep(RESTART_COOLDOWN)
+                continue
         else:
             log_event("SELF_HEAL", f"Max restart attempts ({MAX_RESTART_ATTEMPTS}) reached. Server will not restart.")
             return False
@@ -1376,11 +1642,23 @@ def download_selected_mods(selected_indices, mod_list, cfg, player):
         send_chat_message(f"✗ Failed to download mods!")
 
 def restart_server_for_mods(cfg):
-    """Restart MC server after mods downloaded"""
+    """Restart MC server after mods downloaded.
+    Sends 'stop' command and waits for clean shutdown.
+    systemd will auto-restart the server (Restart=always),
+    which re-runs run.py run and starts the MC server again."""
     time.sleep(2)
     send_server_command("stop")
-    log_event("SERVER_RESTART", "Server stopping for mod update...")
-    time.sleep(15)
+    log_event("SERVER_RESTART", "Server stopping for mod update (systemd will auto-restart)...")
+    # Wait for tmux session to die (server stopping)
+    for _ in range(30):
+        check = run("tmux has-session -t MC 2>/dev/null")
+        if check.returncode != 0:
+            log_event("SERVER_RESTART", "Server stopped. systemd will restart it.")
+            return True
+        time.sleep(1)
+    log_event("SERVER_RESTART", "Server didn't stop within 30s, forcing kill")
+    run("tmux kill-session -t MC 2>/dev/null")
+    return True
 
 class EventHook:
     """Base class for event handlers"""
@@ -1873,6 +2151,7 @@ def download_mod_from_curseforge(mod_info, mods_dir, mc_version, loader):
     1. API URL: /api/v1/mods/<modId>/files/<fileId>/download
     2. Redirects to edge.forgecdn.net -> mediafilez.forgecdn.net
     
+    Returns: 'downloaded', 'exists', or False
     Falls back to Playwright to extract numeric modId if not available.
     """
     mod_name = mod_info.get("name", "unknown")
@@ -1883,6 +2162,12 @@ def download_mod_from_curseforge(mod_info, mods_dir, mc_version, loader):
     if not file_id:
         log.warning(f"CurseForge download: no file_id for {mod_name}")
         return False
+    
+    # Check if we already have this mod by slug match before even hitting the API
+    existing = _mod_jar_exists(mods_dir, mod_slug=slug)
+    if existing:
+        log.info(f"CurseForge: {mod_name} already installed as {existing}, skipping")
+        return "exists"
     
     # If we have the numeric mod_id, use the direct API download URL
     if mod_id:
@@ -1898,16 +2183,16 @@ def download_mod_from_curseforge(mod_info, mods_dir, mc_version, loader):
                     filename = f"{slug}-{file_id}.jar"
                 
                 file_path = os.path.join(mods_dir, filename)
-                if os.path.exists(file_path):
+                if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
                     log.info(f"CurseForge: {filename} already exists, skipping")
-                    return True
+                    return "exists"
                 
                 data = response.read()
                 with open(file_path, "wb") as f:
                     f.write(data)
                 
                 log.info(f"CurseForge: downloaded {filename} ({len(data)/1024:.0f} KB)")
-                return True
+                return "downloaded"
         except Exception as e:
             log.warning(f"CurseForge: API download failed for {mod_name}: {e}")
     
@@ -2023,20 +2308,18 @@ def get_mod_version_dependencies(mod_id, mc_version, loader):
             if versions:
                 return versions[0].get("dependencies", [])
         
-        # Last fallback: get latest versions and check
+        # Last fallback: get latest versions and check for exact MC version match
         url = f'{base_url}/project/{mod_id}/version?limit=10'
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req, timeout=30) as response:
             versions = json.loads(response.read().decode())
-            # Find a recent version that has mc_version
+            # Find a recent version that has exact mc_version match
             for v in versions:
                 if mc_version in v.get("game_versions", []):
                     return v.get("dependencies", [])
-            # If none match, just return from first version
-            if versions:
-                return versions[0].get("dependencies", [])
+            # Do NOT fall back to wrong MC version — strict matching only
     except Exception as e:
-        pass
+        log_event("DEPS", f"Error fetching deps for {mod_id}: {e}")
     
     return []
 
@@ -2055,6 +2338,10 @@ def is_library(mod_name, required_dep=False):
     """
     if not mod_name:
         return True  # Filter out mods with no name
+    
+    # Required dependencies bypass the library filter — they must be installed
+    if required_dep:
+        return False
     
     name_lower = mod_name.lower()
     
@@ -2123,6 +2410,7 @@ def resolve_mod_dependencies_modrinth(mod_id, mc_version, loader, resolved=None,
     Recursively resolve mod dependencies from Modrinth
     
     Tracks required vs optional separately. Only fetches required deps automatically.
+    Returns (resolved, optional_deps) tuple so callers always get both.
     """
     if resolved is None:
         resolved = {"required": {}, "optional": {}}
@@ -2130,7 +2418,7 @@ def resolve_mod_dependencies_modrinth(mod_id, mc_version, loader, resolved=None,
         optional_deps = {}
     
     if depth > max_depth or mod_id in resolved.get("required", {}):
-        return resolved
+        return resolved, optional_deps
     
     deps = get_mod_version_dependencies(mod_id, mc_version, loader)
     
@@ -2165,7 +2453,7 @@ def resolve_mod_dependencies_modrinth(mod_id, mc_version, loader, resolved=None,
                 if mod_id not in optional_deps[dep_mod_id].get("requested_by", []):
                     optional_deps[dep_mod_id]["requested_by"].append(mod_id)
     
-    return resolved
+    return resolved, optional_deps
 
 def curate_mod_list(mods, mc_version, loader, include_required_deps=True, optional_dep_audit=None):
     """
@@ -2207,10 +2495,10 @@ def curate_mod_list(mods, mc_version, loader, include_required_deps=True, option
         
         # Resolve dependencies
         if include_required_deps:
-            deps_result = resolve_mod_dependencies_modrinth(mod_id, mc_version, loader)
+            deps_result, opt_deps = resolve_mod_dependencies_modrinth(mod_id, mc_version, loader)
             curated[mod_id]["dependencies"]["required"] = list(deps_result["required"].keys())
             all_required_deps.update(deps_result["required"])
-            all_optional_deps.update(deps_result.get("optional", {}))
+            all_optional_deps.update(opt_deps)
     
     # Auto-fetch required dependencies that aren't already in curated list
     if include_required_deps:
@@ -2384,85 +2672,166 @@ def rcon_interactive_mod_menu(cfg, mods_dict):
     
     return selected
 
-def download_mod_from_modrinth(mod_data, mods_dir, mc_version, loader):
-    """Download mod JAR from Modrinth"""
-    mod_name = mod_data.get("name")
-    mod_id = mod_data.get("id")
+def _get_installed_mod_slugs(mods_dir):
+    """Build a dict of normalized mod name -> (filename, file_size) for installed mods.
+    Used to detect if we already have a mod installed."""
+    installed = {}
+    if not os.path.exists(mods_dir):
+        return installed
+    for fn in os.listdir(mods_dir):
+        if fn.endswith('.jar') and os.path.isfile(os.path.join(mods_dir, fn)):
+            # Normalize: lowercase, strip version-like suffixes for fuzzy matching
+            norm = re.sub(r'[^a-z0-9]', '', fn.lower().split('.jar')[0])
+            installed[norm] = fn
+            # Also store the raw filename for exact match
+            installed[fn] = fn
+    return installed
+
+
+def _mod_jar_exists(mods_dir, filename=None, mod_slug=None):
+    """Check if a mod JAR already exists in the mods directory.
+    Checks by exact filename first, then by slug/name prefix match."""
+    if not os.path.exists(mods_dir):
+        return None
     
-    try:
-        # Get latest file for this mod
-        base_url = "https://api.modrinth.com/v2"
-        loader_lower = loader.lower()
-        
-        # Try with both game version and loader filters
-        url = f'{base_url}/project/{mod_id}/version?loaders=["{loader_lower}"]&game_versions=["{mc_version}"]&limit=5'
-        req = urllib.request.Request(url)
-        
-        versions = []
+    # Exact filename match
+    if filename:
+        path = os.path.join(mods_dir, filename)
+        if os.path.exists(path) and os.path.isfile(path):
+            return filename
+    
+    # Fuzzy match: look for JARs whose name contains the mod slug
+    if mod_slug:
+        slug_lower = mod_slug.lower().replace('-', '').replace('_', '').replace(' ', '')
+        for fn in os.listdir(mods_dir):
+            if not fn.endswith('.jar') or not os.path.isfile(os.path.join(mods_dir, fn)):
+                continue
+            fn_norm = fn.lower().replace('-', '').replace('_', '').replace(' ', '')
+            if slug_lower in fn_norm:
+                return fn
+    
+    return None
+
+
+def download_mod_from_modrinth(mod_data, mods_dir, mc_version, loader):
+    """Download mod JAR from Modrinth.
+    
+    - Strict MC version matching only (no adjacent version fallback)
+    - Checks if mod already exists (by filename) and skips if so
+    - Returns: 'downloaded', 'exists', or False
+    """
+    mod_name = mod_data.get("name", "unknown")
+    mod_id = mod_data.get("id")
+    mod_slug = mod_data.get("slug", mod_name)
+    
+    if not mod_id:
+        log_event("CURATOR", f"No mod ID for {mod_name}, skipping")
+        return False
+    
+    base_url = "https://api.modrinth.com/v2"
+    loader_lower = loader.lower()
+    
+    # Try with both game version and loader filters (most specific)
+    versions = None
+    for attempt_url in [
+        f'{base_url}/project/{mod_id}/version?loaders=["{loader_lower}"]&game_versions=["{mc_version}"]&limit=5',
+        f'{base_url}/project/{mod_id}/version?game_versions=["{mc_version}"]&limit=5',
+    ]:
         try:
+            req = urllib.request.Request(attempt_url, headers={"User-Agent": "NeoRunner/1.0"})
             with urllib.request.urlopen(req, timeout=30) as response:
-                versions = json.loads(response.read().decode())
-        except:
-            pass
-        
-        # Fallback: try just game version
-        if not versions:
-            url = f'{base_url}/project/{mod_id}/version?game_versions=["{mc_version}"]&limit=5'
-            req = urllib.request.Request(url)
-            try:
-                with urllib.request.urlopen(req, timeout=30) as response:
-                    versions = json.loads(response.read().decode())
-            except:
-                pass
-        
-        # Last fallback: get latest versions and pick first with matching MC version
-        if not versions:
-            url = f'{base_url}/project/{mod_id}/version?limit=20'
-            req = urllib.request.Request(url)
-            try:
-                with urllib.request.urlopen(req, timeout=30) as response:
-                    all_versions = json.loads(response.read().decode())
-                    # Try exact MC version match with correct loader
-                    for v in all_versions:
-                        if mc_version in v.get("game_versions", []) and loader_lower in v.get("loaders", []):
+                result = json.loads(response.read().decode())
+                if result:
+                    # Verify the version actually matches our exact MC version
+                    for v in result:
+                        if mc_version in v.get("game_versions", []):
                             versions = [v]
                             break
-                    # Try exact MC version match with any loader
-                    if not versions:
-                        for v in all_versions:
-                            if mc_version in v.get("game_versions", []):
-                                versions = [v]
-                                break
-                    # Do NOT fall back to random versions — that causes wrong MC version installs
+                    if versions:
+                        break
+        except Exception as e:
+            log_event("CURATOR", f"API request failed for {mod_name}: {e}")
+    
+    # Last resort: broad fetch, strict filter
+    if not versions:
+        try:
+            url = f'{base_url}/project/{mod_id}/version?limit=20'
+            req = urllib.request.Request(url, headers={"User-Agent": "NeoRunner/1.0"})
+            with urllib.request.urlopen(req, timeout=30) as response:
+                all_versions = json.loads(response.read().decode())
+                # Exact MC version + correct loader
+                for v in all_versions:
+                    if mc_version in v.get("game_versions", []) and loader_lower in v.get("loaders", []):
+                        versions = [v]
+                        break
+                # Exact MC version, any loader (last resort)
+                if not versions:
+                    for v in all_versions:
+                        if mc_version in v.get("game_versions", []):
+                            versions = [v]
+                            break
+                # Do NOT fall back to wrong MC version — strict matching only
+        except Exception as e:
+            log_event("CURATOR", f"Broad version fetch failed for {mod_name}: {e}")
+    
+    if not versions:
+        log_event("CURATOR", f"No version of {mod_name} found for MC {mc_version}")
+        return False
+    
+    files = versions[0].get("files", [])
+    if not files:
+        log_event("CURATOR", f"No files found for {mod_name}")
+        return False
+    
+    # Get primary file (prefer primary=True, else first)
+    file_info = files[0]
+    for fi in files:
+        if fi.get("primary", False):
+            file_info = fi
+            break
+    
+    download_url = file_info.get("url")
+    file_name = file_info.get("filename")
+    
+    if not download_url or not file_name:
+        log_event("CURATOR", f"No download URL/filename for {mod_name}")
+        return False
+    
+    # Check if this exact file already exists
+    file_path = os.path.join(mods_dir, file_name)
+    if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+        log_event("CURATOR", f"Already have {file_name}, skipping")
+        return "exists"
+    
+    # Check if an older version of this mod exists (by slug/name match)
+    existing = _mod_jar_exists(mods_dir, mod_slug=mod_slug)
+    if existing and existing != file_name:
+        # Newer version available — remove old, download new
+        old_path = os.path.join(mods_dir, existing)
+        try:
+            os.remove(old_path)
+            log_event("CURATOR", f"Removed old version: {existing}")
+        except Exception as e:
+            log_event("CURATOR", f"Failed to remove old {existing}: {e}")
+    
+    # Download with proper timeout
+    log_event("CURATOR", f"Downloading {file_name}...")
+    try:
+        req = urllib.request.Request(download_url, headers={"User-Agent": "NeoRunner/1.0"})
+        with urllib.request.urlopen(req, timeout=120) as response:
+            data = response.read()
+            with open(file_path, "wb") as f:
+                f.write(data)
+        log_event("CURATOR", f"Downloaded {file_name} ({len(data)/1024:.0f} KB)")
+        return "downloaded"
+    except Exception as e:
+        log_event("CURATOR", f"Download failed for {mod_name}: {e}")
+        # Clean up partial file
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
             except:
                 pass
-        
-        if not versions:
-            log_event("CURATOR", f"No versions found for {mod_name}")
-            return False
-        
-        files = versions[0].get("files", [])
-        if not files:
-            log_event("CURATOR", f"No files found for {mod_name}")
-            return False
-        
-        # Get primary file (first)
-        file_info = files[0]
-        download_url = file_info.get("url")
-        file_name = file_info.get("filename")
-        
-        if not download_url:
-            log_event("CURATOR", f"No download URL for {mod_name}")
-            return False
-        
-        file_path = os.path.join(mods_dir, file_name)
-        log_event("CURATOR", f"Downloading {file_name}...")
-        
-        urllib.request.urlretrieve(download_url, file_path)
-        log_event("CURATOR", f"Downloaded {file_name}")
-        return True
-    except Exception as e:
-        log_event("CURATOR", f"Error downloading {mod_name}: {e}")
         return False
 
 def generate_mod_lists_for_loaders(mc_version, limit=100, loaders=None):
@@ -2785,7 +3154,7 @@ def curator_command(cfg, limit=None, show_optional_audit=False):
         for mod in modrinth_selected:
             try:
                 opt_deps_collector = {}
-                deps = resolve_mod_dependencies_modrinth(mod['id'], mc_version, loader, optional_deps=opt_deps_collector)
+                deps, opt_collected = resolve_mod_dependencies_modrinth(mod['id'], mc_version, loader, optional_deps=opt_deps_collector)
                 modrinth_req_deps.update(deps.get("required", {}).keys())
                 # Collect optional deps with requester names
                 for opt_id, opt_info in opt_deps_collector.items():
@@ -2885,13 +3254,19 @@ def curator_command(cfg, limit=None, show_optional_audit=False):
     print(f"{'='*70}\n")
     
     downloaded_mods = []
+    skipped_mods = []
     deps_downloaded = 0
+    deps_skipped = 0
     
     # Download Modrinth mods
     if modrinth_selected:
         print(f"Downloading {len(modrinth_selected)} Modrinth mods:")
         for mod in modrinth_selected:
-            if download_mod_from_modrinth(mod, mods_dir, mc_version, loader):
+            result = download_mod_from_modrinth(mod, mods_dir, mc_version, loader)
+            if result == "exists":
+                skipped_mods.append(f"[M] {mod['name']}")
+                print(f"  SKIP [M] {mod['name']} (already installed)")
+            elif result:
                 downloaded_mods.append(f"[M] {mod['name']}")
                 print(f"  OK [M] {mod['name']}")
             else:
@@ -2901,7 +3276,11 @@ def curator_command(cfg, limit=None, show_optional_audit=False):
     if curseforge_selected:
         print(f"\nDownloading {len(curseforge_selected)} CurseForge mods:")
         for mod in curseforge_selected:
-            if download_mod_from_curseforge(mod, mods_dir, mc_version, loader):
+            result = download_mod_from_curseforge(mod, mods_dir, mc_version, loader)
+            if result == "exists":
+                skipped_mods.append(f"[C] {mod['name']}")
+                print(f"  SKIP [C] {mod['name']} (already installed)")
+            elif result:
                 downloaded_mods.append(f"[C] {mod['name']}")
                 print(f"  OK [C] {mod['name']}")
             else:
@@ -2913,7 +3292,11 @@ def curator_command(cfg, limit=None, show_optional_audit=False):
         for dep_mod_id in modrinth_req_deps:
             try:
                 dep_info = {"id": dep_mod_id, "name": dep_mod_id}
-                if download_mod_from_modrinth(dep_info, mods_dir, mc_version, loader):
+                result = download_mod_from_modrinth(dep_info, mods_dir, mc_version, loader)
+                if result == "exists":
+                    deps_skipped += 1
+                    print(f"  SKIP [dep] {dep_mod_id} (already installed)")
+                elif result:
                     deps_downloaded += 1
                     print(f"  OK [dep] {dep_mod_id}")
             except Exception as e:
@@ -2932,7 +3315,11 @@ def curator_command(cfg, limit=None, show_optional_audit=False):
                     "file_id": dep_mod.get("file_id", ""),
                     "source": "curseforge",
                 }
-                if download_mod_from_curseforge(dep_info, mods_dir, mc_version, loader):
+                result = download_mod_from_curseforge(dep_info, mods_dir, mc_version, loader)
+                if result == "exists":
+                    deps_skipped += 1
+                    print(f"  SKIP [dep] {dep_slug} (already installed)")
+                elif result:
                     deps_downloaded += 1
                     print(f"  OK [dep] {dep_slug}")
                 else:
@@ -2947,8 +3334,8 @@ def curator_command(cfg, limit=None, show_optional_audit=False):
     print(f"{'='*70}")
     print(f"  Modrinth mods:    {len(modrinth_selected)} selected")
     print(f"  CurseForge mods:  {len(curseforge_selected)} selected")
-    print(f"  Dependencies:     {deps_downloaded} auto-fetched")
-    print(f"  Total downloaded: {len(downloaded_mods) + deps_downloaded} files")
+    print(f"  Downloaded:       {len(downloaded_mods)} mods + {deps_downloaded} deps")
+    print(f"  Skipped:          {len(skipped_mods)} mods + {deps_skipped} deps (already installed)")
     if interop_flags:
         print(f"  Interop flags:    {len(interop_flags)} optional deps shared by 2+ mods")
     print()

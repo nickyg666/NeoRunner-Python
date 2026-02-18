@@ -72,42 +72,41 @@ def parse_props():
     return props
 
 def download_loader(loader):
-    """Download modloader server if not present"""
-    import urllib.request
+    """Verify modloader is available (NeoForge uses @args files, not a JAR)"""
     
-    if os.path.exists("server.jar") or os.path.exists("*.jar"):
-        return True
-    
-    log_event("LOADER", f"Downloading {loader} server...")
-    
-    try:
-        if loader == "fabric":
-            # Fabric latest
-            meta = json.loads(urllib.request.urlopen("https://meta.fabricmc.net/v2/versions/loader").read())
-            latest = meta[0]["version"]
-            url = f"https://meta.fabricmc.net/v2/versions/loader/{latest}/server/jar"
-            urllib.request.urlretrieve(url, "fabric-server.jar")
-            log_event("LOADER", "Fabric server downloaded")
-            
-        elif loader == "forge":
-            # Forge 1.21 latest
-            try:
-                data = json.loads(urllib.request.urlopen("https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json").read())
-                latest = data["promos"]["1.21-latest"]
-                url = f"https://maven.minecraftforge.net/net/minecraftforge/forge/1.21-{latest}/forge-1.21-{latest}-installer.jar"
-                urllib.request.urlretrieve(url, "forge-installer.jar")
-                subprocess.run("java -jar forge-installer.jar --installServer", shell=True)
-                log_event("LOADER", "Forge server downloaded and installed")
-            except:
-                log_event("LOADER_ERROR", "Could not download Forge, try manual installation")
-                return False
+    if loader == "neoforge":
+        # Check if NeoForge libraries and args files exist
+        neoforge_dir = os.path.join(CWD, "libraries", "net", "neoforged", "neoforge")
+        if os.path.exists(neoforge_dir):
+            log_event("LOADER", "NeoForge server environment ready (using @args files)")
+            return True
         else:
-            log_event("LOADER_ERROR", "Download NeoForge from https://neoforged.net")
+            log_event("LOADER_ERROR", f"NeoForge libraries not found at {neoforge_dir}")
+            log_event("LOADER_ERROR", "Install NeoForge from https://neoforged.net")
             return False
-        
-        return True
-    except Exception as e:
-        log_event("LOADER_ERROR", str(e))
+    
+    elif loader == "fabric":
+        # Fabric also uses libraries structure
+        fabric_dir = os.path.join(CWD, "libraries", "net", "fabricmc")
+        if os.path.exists(fabric_dir):
+            log_event("LOADER", "Fabric server environment ready")
+            return True
+        else:
+            log_event("LOADER_ERROR", f"Fabric libraries not found at {fabric_dir}")
+            return False
+    
+    elif loader == "forge":
+        # Forge uses libraries structure (1.20.1+)
+        forge_dir = os.path.join(CWD, "libraries", "net", "minecraftforge")
+        if os.path.exists(forge_dir):
+            log_event("LOADER", "Forge server environment ready")
+            return True
+        else:
+            log_event("LOADER_ERROR", f"Forge libraries not found at {forge_dir}")
+            return False
+    
+    else:
+        log_event("LOADER_ERROR", f"Unknown loader: {loader}")
         return False
 
 def ensure_rcon_enabled(cfg):
@@ -173,8 +172,9 @@ def get_config():
     if not os.path.exists(CONFIG):
         props = parse_props()
         
+        loader_default = "neoforge"
+        
         cfg = {
-            "server_jar": input("Server jar [server.jar]: ").strip() or "server.jar",
             "rcon_pass": input("RCON password [changeme]: ").strip() or "changeme",
             "rcon_port": input("RCON port [25575]: ").strip() or "25575",
             "rcon_host": "localhost",
@@ -182,7 +182,7 @@ def get_config():
             "mods_dir": input("Mods folder [mods]: ").strip() or "mods",
             "clientonly_dir": "clientonly",
             "mc_version": input("Minecraft version [1.21.11]: ").strip() or "1.21.11",
-            "loader": input("Modloader (fabric/forge/neoforge) [neoforge]: ").strip() or "neoforge",
+            "loader": input(f"Modloader (fabric/forge/neoforge) [{loader_default}]: ").strip() or loader_default,
             "max_download_mb": 600,
             "rate_limit_seconds": 2,
             "run_curator_on_startup": True,
@@ -1888,14 +1888,13 @@ def main():
                     f.write("first run complete")
                 log_event("BOOT", "Marked curator first-run complete")
             
-            # Check if server jar exists, download if needed
-            if not os.path.exists(cfg["server_jar"]):
-                print(f"\n[BOOT] Server jar not found: {cfg['server_jar']}")
-                loader_choice = cfg.get("loader", "neoforge")
-                print(f"[BOOT] Using loader: {loader_choice}")
-                if not download_loader(loader_choice):
-                    print("[ERROR] Could not obtain server jar")
-                    sys.exit(1)
+            # Check if modloader is properly configured
+            loader_choice = cfg.get("loader", "neoforge")
+            print(f"\n[BOOT] Checking modloader: {loader_choice}")
+            if not download_loader(loader_choice):
+                print("[ERROR] Modloader configuration invalid or missing")
+                print(f"For {loader_choice}, ensure libraries are installed correctly")
+                sys.exit(1)
             
             # Setup mods
             print("[BOOT] Sorting mods by type (client/server/both)...")

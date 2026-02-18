@@ -1,6 +1,8 @@
-#!/home/services/neorunner_env/bin/python3
+#!/usr/bin/env python3
 """
-Minecraft Modded Server - HTTP Mod Distribution via RCON
+NeoRunner - Minecraft Modded Server Manager
+Single-file entry point: download this file, run it, everything auto-installs.
+
 - Hosts mods on HTTP (with security checks)
 - Auto-generates install scripts for Windows/Linux/Mac
 - Daily world backups
@@ -9,7 +11,59 @@ Minecraft Modded Server - HTTP Mod Distribution via RCON
 - Full-featured hosting dashboard for server management
 """
 
-import os, json, subprocess, sys, time, threading, logging, hashlib, urllib.request, urllib.error
+# ══════════════════════════════════════════════════════════════════════════════
+# SELF-BOOTSTRAP — auto-install dependencies if missing
+# ══════════════════════════════════════════════════════════════════════════════
+import subprocess, sys, os
+
+def _ensure_deps():
+    """Auto-install required Python packages if they're missing."""
+    required = {
+        "flask": "flask",
+        "requests": "requests",
+        "playwright": "playwright",
+        "playwright_stealth": "playwright-stealth",
+    }
+    missing = []
+    for import_name, pip_name in required.items():
+        try:
+            __import__(import_name)
+        except ImportError:
+            missing.append(pip_name)
+    
+    if missing:
+        print(f"[NeoRunner] Auto-installing missing dependencies: {', '.join(missing)}")
+        pip_cmd = [sys.executable, "-m", "pip", "install",
+                   "--break-system-packages", "--quiet"] + missing
+        try:
+            subprocess.check_call(pip_cmd)
+            print(f"[NeoRunner] Installed: {', '.join(missing)}")
+        except subprocess.CalledProcessError as e:
+            print(f"[NeoRunner] WARNING: pip install failed (exit {e.returncode}). "
+                  f"Try manually: pip install {' '.join(missing)}")
+    
+    # Ensure Playwright browsers are installed
+    try:
+        import playwright
+        # Check if chromium is available by looking for the browser path
+        from playwright._impl._driver import compute_driver_executable
+        if not os.path.exists(os.path.join(os.path.dirname(compute_driver_executable()), 
+                                            ".local-browsers")):
+            raise FileNotFoundError
+    except Exception:
+        print("[NeoRunner] Installing Playwright Chromium browser...")
+        try:
+            subprocess.check_call([sys.executable, "-m", "playwright", "install", "chromium"],
+                                  timeout=300)
+            print("[NeoRunner] Playwright Chromium installed.")
+        except Exception as e:
+            print(f"[NeoRunner] WARNING: Playwright browser install failed: {e}")
+            print("           CurseForge scraping will be unavailable.")
+
+_ensure_deps()
+# ══════════════════════════════════════════════════════════════════════════════
+
+import json, time, threading, logging, hashlib, urllib.request, urllib.error
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -1152,8 +1206,11 @@ def http_server(port, mods_dir):
                         failed = []
                         for mod_id in selected:
                             try:
-                                # Look up full mod data from cache
-                                mod_data = cached_mods.get(mod_id, {"id": mod_id, "name": mod_id})
+                                # Look up full mod data from cache; if not cached (e.g. from
+                                # modpack conversion), treat as Modrinth project ID
+                                mod_data = cached_mods.get(mod_id)
+                                if not mod_data:
+                                    mod_data = {"id": mod_id, "name": mod_id, "source": "modrinth"}
                                 source = mod_data.get("source", "modrinth")
                                 
                                 if source == "curseforge":
@@ -1200,6 +1257,184 @@ def http_server(port, mods_dir):
                             "failed": failed,
                             "broadcast": broadcast_sent,
                             "message": f"Downloaded {downloaded}, skipped {skipped} already installed, {len(failed)} failed"
+                        })
+                    except Exception as e:
+                        return jsonify({"success": False, "error": str(e)}), 400
+                
+                @app.route("/api/convert-modpack", methods=["POST"])
+                def api_convert_modpack():
+                    """Modpack Conversion: accept a list of JAR filenames from another modpack
+                    (e.g. client's 1.21.4 Fabric mods folder), search Modrinth for each mod,
+                    and check if a version exists for the server's MC version + loader.
+                    
+                    Request body: {"filenames": ["mod1-1.21.4.jar", "mod2-fabric-1.21.4.jar", ...],
+                                   "source_loader": "fabric",    // optional, for display
+                                   "source_version": "1.21.4"}   // optional, for display
+                    
+                    Returns: {"results": [...], "summary": {...}}
+                    """
+                    try:
+                        data = request.json
+                        filenames = data.get("filenames", [])
+                        source_loader = data.get("source_loader", "unknown")
+                        source_version = data.get("source_version", "unknown")
+                        
+                        if not filenames:
+                            return jsonify({"success": False, "error": "No filenames provided"}), 400
+                        
+                        c = load_cfg()
+                        mc_ver = c.get("mc_version", "1.21.11")
+                        loader = c.get("loader", "neoforge")
+                        m_dir = os.path.join(CWD, c.get("mods_dir", "mods"))
+                        
+                        # Build installed index for checking what's already on the server
+                        installed_tokens, installed_jars = build_installed_index(m_dir)
+                        
+                        from urllib.parse import quote
+                        base_url = "https://api.modrinth.com/v2"
+                        loader_lower = loader.lower()
+                        
+                        results = []
+                        for fn in filenames:
+                            if not fn.endswith('.jar'):
+                                continue
+                            
+                            token = _extract_mod_token(fn)
+                            if not token or len(token) < 2:
+                                results.append({
+                                    "filename": fn,
+                                    "status": "unparseable",
+                                    "message": "Could not extract mod name from filename"
+                                })
+                                continue
+                            
+                            # Check if already installed on the server
+                            if check_installed(token, token, installed_tokens):
+                                results.append({
+                                    "filename": fn,
+                                    "token": token,
+                                    "status": "already_installed",
+                                    "message": f"Already installed on server"
+                                })
+                                continue
+                            
+                            # Search Modrinth for this mod name
+                            # Use a broader search query derived from the token
+                            search_query = re.sub(r'([a-z])([A-Z])', r'\1 \2', token)  # camelCase split
+                            # Also try the raw filename (minus version/loader noise) as search query
+                            readable_name = re.sub(r'[-_.]', ' ', fn.replace('.jar', ''))
+                            readable_name = re.sub(r'\b(neoforge|forge|fabric|quilt)\b', '', readable_name, flags=re.I)
+                            readable_name = re.sub(r'\b\d+\.\d+[\.\d]*\b', '', readable_name)
+                            readable_name = re.sub(r'\s+', ' ', readable_name).strip()
+                            
+                            found = False
+                            for query in [readable_name, token]:
+                                if found:
+                                    break
+                                # Search with server's MC version + loader facets
+                                facets = f'[["versions:{mc_ver}"],["categories:{loader_lower}"],["project_type:mod"]]'
+                                facets_enc = quote(facets)
+                                search_url = f"{base_url}/search?query={quote(query)}&facets={facets_enc}&limit=5"
+                                
+                                try:
+                                    req = urllib.request.Request(search_url, headers={"User-Agent": "NeoRunner/1.0"})
+                                    with urllib.request.urlopen(req, timeout=15) as resp:
+                                        search_data = json.loads(resp.read().decode())
+                                        hits = search_data.get("hits", [])
+                                        
+                                        if hits:
+                                            # Try to find a good match by comparing tokens
+                                            best_hit = None
+                                            best_score = 0
+                                            from difflib import SequenceMatcher
+                                            for hit in hits:
+                                                hit_slug = re.sub(r'[^a-z0-9]', '', hit.get("slug", "").lower())
+                                                hit_title = re.sub(r'[^a-z0-9]', '', hit.get("title", "").lower())
+                                                score_slug = SequenceMatcher(None, token, hit_slug).ratio()
+                                                score_title = SequenceMatcher(None, token, hit_title).ratio()
+                                                score = max(score_slug, score_title)
+                                                if score > best_score:
+                                                    best_score = score
+                                                    best_hit = hit
+                                            
+                                            # Accept if score is reasonable (>0.5) or it's the only result
+                                            if best_hit and (best_score > 0.5 or len(hits) == 1):
+                                                results.append({
+                                                    "filename": fn,
+                                                    "token": token,
+                                                    "status": "found",
+                                                    "match_score": round(best_score, 2),
+                                                    "mod_id": best_hit.get("project_id"),
+                                                    "name": best_hit.get("title"),
+                                                    "slug": best_hit.get("slug"),
+                                                    "description": best_hit.get("description", ""),
+                                                    "downloads": best_hit.get("downloads", 0),
+                                                    "icon_url": best_hit.get("icon_url", ""),
+                                                    "message": f"Found on Modrinth for {mc_ver} ({loader})"
+                                                })
+                                                found = True
+                                except Exception as e:
+                                    log_event("CONVERT", f"Search failed for '{query}': {e}")
+                            
+                            if not found:
+                                # Try a broader search WITHOUT mc version/loader facets
+                                # to tell the user the mod exists but not for their version
+                                exists_anywhere = False
+                                try:
+                                    broad_facets = '[["project_type:mod"]]'
+                                    broad_url = f"{base_url}/search?query={quote(readable_name)}&facets={quote(broad_facets)}&limit=3"
+                                    req = urllib.request.Request(broad_url, headers={"User-Agent": "NeoRunner/1.0"})
+                                    with urllib.request.urlopen(req, timeout=10) as resp:
+                                        broad_data = json.loads(resp.read().decode())
+                                        broad_hits = broad_data.get("hits", [])
+                                        if broad_hits:
+                                            from difflib import SequenceMatcher
+                                            bh = broad_hits[0]
+                                            bh_slug = re.sub(r'[^a-z0-9]', '', bh.get("slug", "").lower())
+                                            if SequenceMatcher(None, token, bh_slug).ratio() > 0.5:
+                                                exists_anywhere = True
+                                                results.append({
+                                                    "filename": fn,
+                                                    "token": token,
+                                                    "status": "not_available",
+                                                    "name": bh.get("title"),
+                                                    "slug": bh.get("slug"),
+                                                    "message": f"Exists on Modrinth but NOT available for {mc_ver} ({loader})"
+                                                })
+                                except Exception:
+                                    pass
+                                
+                                if not exists_anywhere:
+                                    results.append({
+                                        "filename": fn,
+                                        "token": token,
+                                        "status": "not_found",
+                                        "message": "Not found on Modrinth"
+                                    })
+                            
+                            # Rate-limit to avoid hammering the API
+                            time.sleep(0.3)
+                        
+                        # Summary
+                        found_count = sum(1 for r in results if r["status"] == "found")
+                        installed_count = sum(1 for r in results if r["status"] == "already_installed")
+                        not_avail_count = sum(1 for r in results if r["status"] == "not_available")
+                        not_found_count = sum(1 for r in results if r["status"] == "not_found")
+                        unparseable_count = sum(1 for r in results if r["status"] == "unparseable")
+                        
+                        return jsonify({
+                            "success": True,
+                            "source": {"loader": source_loader, "version": source_version},
+                            "target": {"loader": loader, "version": mc_ver},
+                            "results": results,
+                            "summary": {
+                                "total": len(results),
+                                "found": found_count,
+                                "already_installed": installed_count,
+                                "not_available": not_avail_count,
+                                "not_found": not_found_count,
+                                "unparseable": unparseable_count
+                            }
                         })
                     except Exception as e:
                         return jsonify({"success": False, "error": str(e)}), 400
@@ -2478,60 +2713,100 @@ def fetch_curseforge_mods_scraper(mc_version, loader, limit=100, scrape_deps=Tru
     
     return all_mods
 
+def _cf_download_jar(url, mods_dir, slug, file_id, mod_name, headers=None):
+    """Helper: download a JAR from a URL, return 'downloaded', 'exists', or False."""
+    if headers is None:
+        headers = {"User-Agent": random.choice(CF_USER_AGENTS)}
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=120) as response:
+            final_url = response.url
+            filename = os.path.basename(final_url.split("?")[0])
+            if not filename.endswith(".jar"):
+                filename = f"{slug}-{file_id}.jar"
+            
+            file_path = os.path.join(mods_dir, filename)
+            if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+                log.info(f"CurseForge: {filename} already exists, skipping")
+                return "exists"
+            
+            data = response.read()
+            if len(data) < 1000:
+                # Likely an HTML error page, not a JAR
+                log.warning(f"CurseForge: response too small ({len(data)} bytes), probably not a JAR")
+                return False
+            with open(file_path, "wb") as f:
+                f.write(data)
+            
+            log.info(f"CurseForge: downloaded {filename} ({len(data)/1024:.0f} KB)")
+            return "downloaded"
+    except Exception as e:
+        log.warning(f"CurseForge: download failed for {mod_name} from {url}: {e}")
+        return False
+
 def download_mod_from_curseforge(mod_info, mods_dir, mc_version, loader):
     """
-    Download a mod JAR from CurseForge using the CDN URL pattern.
+    Download a mod JAR from CurseForge.
     
-    Download chain:
-    1. API URL: /api/v1/mods/<modId>/files/<fileId>/download
-    2. Redirects to edge.forgecdn.net -> mediafilez.forgecdn.net
+    Attempts in order:
+    1. CDN URL pattern (no mod_id needed) — file_id split into /files/{first4}/{last3-4}/
+    2. Direct API URL (if numeric mod_id available)
+    3. Playwright scrape for numeric mod_id, then retry API
     
     Returns: 'downloaded', 'exists', or False
-    Falls back to Playwright to extract numeric modId if not available.
     """
     mod_name = mod_info.get("name", "unknown")
     slug = mod_info.get("slug", "")
-    file_id = mod_info.get("file_id", "")
+    file_id = str(mod_info.get("file_id", ""))
     mod_id = mod_info.get("mod_id", "")
     
     if not file_id:
         log.warning(f"CurseForge download: no file_id for {mod_name}")
         return False
     
-    # Check if we already have this mod by slug match before even hitting the API
+    # Check if we already have this mod by slug match before even hitting the network
     existing = _mod_jar_exists(mods_dir, mod_slug=slug)
     if existing:
         log.info(f"CurseForge: {mod_name} already installed as {existing}, skipping")
         return "exists"
     
-    # If we have the numeric mod_id, use the direct API download URL
+    # --- Strategy 1: CDN URL pattern (works without numeric mod_id) ---
+    # CurseForge CDN splits file_id: e.g. file_id=7107983 -> /files/7107/983/filename.jar
+    # We don't know the filename, but we can try the download page URL which redirects to CDN
+    if slug and file_id:
+        # Try the website download URL — it redirects to the CDN
+        dl_url = f"https://www.curseforge.com/minecraft/mc-mods/{slug}/download/{file_id}"
+        result = _cf_download_jar(dl_url, mods_dir, slug, file_id, mod_name)
+        if result:
+            return result
+        
+        # Also try with /file/ path variant
+        dl_url2 = f"https://www.curseforge.com/minecraft/mc-mods/{slug}/download/{file_id}/file"
+        result = _cf_download_jar(dl_url2, mods_dir, slug, file_id, mod_name)
+        if result:
+            return result
+    
+    # --- Strategy 2: Direct API URL (if we have numeric mod_id) ---
     if mod_id:
         api_url = f"https://www.curseforge.com/api/v1/mods/{mod_id}/files/{file_id}/download"
-        try:
-            req = urllib.request.Request(api_url, headers={
-                "User-Agent": random.choice(CF_USER_AGENTS)
-            })
-            with urllib.request.urlopen(req, timeout=60) as response:
-                final_url = response.url
-                filename = os.path.basename(final_url.split("?")[0])
-                if not filename.endswith(".jar"):
-                    filename = f"{slug}-{file_id}.jar"
-                
-                file_path = os.path.join(mods_dir, filename)
-                if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
-                    log.info(f"CurseForge: {filename} already exists, skipping")
-                    return "exists"
-                
-                data = response.read()
-                with open(file_path, "wb") as f:
-                    f.write(data)
-                
-                log.info(f"CurseForge: downloaded {filename} ({len(data)/1024:.0f} KB)")
-                return "downloaded"
-        except Exception as e:
-            log.warning(f"CurseForge: API download failed for {mod_name}: {e}")
+        result = _cf_download_jar(api_url, mods_dir, slug, file_id, mod_name)
+        if result:
+            return result
     
-    # Fallback: use Playwright to get numeric modId from download page
+    # --- Strategy 3: CDN direct URL construction ---
+    # Split file_id into path segments: 7107983 -> 7107/983
+    if len(file_id) >= 5:
+        prefix = file_id[:4]
+        suffix = file_id[4:].lstrip('0') or '0'
+        # We don't know the exact filename, but try common patterns
+        for ext_name in [f"{slug}.jar", f"{slug}-neoforge-{mc_version}.jar",
+                         f"{slug}-{mc_version}.jar", f"{slug}-forge-{mc_version}.jar"]:
+            cdn_url = f"https://mediafilez.forgecdn.net/files/{prefix}/{suffix}/{ext_name}"
+            result = _cf_download_jar(cdn_url, mods_dir, slug, file_id, mod_name)
+            if result:
+                return result
+    
+    # --- Strategy 4: Playwright to scrape numeric mod_id, then retry ---
     if PLAYWRIGHT_AVAILABLE and slug and len(file_id) >= 5:
         try:
             with Stealth().use_sync(sync_playwright()) as p:
@@ -2549,8 +2824,10 @@ def download_mod_from_curseforge(mod_info, mods_dir, mc_version, loader):
                 browser.close()
                 
                 if numeric_id:
-                    mod_info_with_id = dict(mod_info, mod_id=numeric_id)
-                    return download_mod_from_curseforge(mod_info_with_id, mods_dir, mc_version, loader)
+                    api_url = f"https://www.curseforge.com/api/v1/mods/{numeric_id}/files/{file_id}/download"
+                    result = _cf_download_jar(api_url, mods_dir, slug, file_id, mod_name)
+                    if result:
+                        return result
         except Exception as e:
             log.warning(f"CurseForge: Playwright fallback failed for {mod_name}: {e}")
     
@@ -2639,44 +2916,39 @@ def get_mod_dependencies_modrinth(mod_id):
         return None
 
 def get_mod_version_dependencies(mod_id, mc_version, loader):
-    """Get dependencies from latest version matching MC version and loader"""
-    from urllib.parse import quote
+    """Get dependencies from latest version matching MC version and loader.
+    
+    IMPORTANT: Fetches ALL versions without filter query params, then filters
+    in Python. Modrinth's loaders/game_versions query params silently return
+    empty results (known bug).
+    """
     base_url = "https://api.modrinth.com/v2"
     loader_lower = loader.lower()
     
     try:
-        # Try with both game version and loader filters
-        url = f'{base_url}/project/{mod_id}/version?loaders=["{loader_lower}"]&game_versions=["{mc_version}"]&limit=5'
-        req = urllib.request.Request(url)
+        # Fetch ALL versions — do NOT use loaders= or game_versions= params
+        url = f'{base_url}/project/{mod_id}/version'
+        req = urllib.request.Request(url, headers={"User-Agent": "NeoRunner/1.0"})
         with urllib.request.urlopen(req, timeout=30) as response:
-            versions = json.loads(response.read().decode())
-            if versions:
-                return versions[0].get("dependencies", [])
-        
-        # Fallback: try just the game version
-        url = f'{base_url}/project/{mod_id}/version?game_versions=["{mc_version}"]&limit=5'
-        req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=30) as response:
-            versions = json.loads(response.read().decode())
-            if versions:
-                return versions[0].get("dependencies", [])
-        
-        # Last fallback: get latest versions and check for exact MC version match
-        url = f'{base_url}/project/{mod_id}/version?limit=10'
-        req = urllib.request.Request(url)
-        with urllib.request.urlopen(req, timeout=30) as response:
-            versions = json.loads(response.read().decode())
-            # Find a recent version that has exact mc_version match
-            for v in versions:
+            all_versions = json.loads(response.read().decode())
+            
+            # Priority 1: Exact MC version + exact loader
+            for v in all_versions:
+                if mc_version in v.get("game_versions", []) and loader_lower in [l.lower() for l in v.get("loaders", [])]:
+                    return v.get("dependencies", [])
+            
+            # Priority 2: Exact MC version, any loader
+            for v in all_versions:
                 if mc_version in v.get("game_versions", []):
                     return v.get("dependencies", [])
+            
             # Do NOT fall back to wrong MC version — strict matching only
     except Exception as e:
         log_event("DEPS", f"Error fetching deps for {mod_id}: {e}")
     
     return []
 
-def is_library(mod_name, required_dep=False):
+def is_library(mod_name, required_dep=False, mod_data=None):
     """
     Check if mod is a library/API/dependency (not a user-facing gameplay mod)
     
@@ -2685,6 +2957,8 @@ def is_library(mod_name, required_dep=False):
     Args:
         mod_name: name of the mod
         required_dep: if True, don't filter (required deps override library status)
+        mod_data: optional dict with 'description', 'categories', 'project_type',
+                  'slug' fields for deeper inspection
     
     Returns:
         True if should be filtered (is a library/API), False if user-facing
@@ -2696,7 +2970,8 @@ def is_library(mod_name, required_dep=False):
     if required_dep:
         return False
     
-    name_lower = mod_name.lower()
+    name_lower = mod_name.lower().strip()
+    slug_lower = (mod_data.get("slug", "") if mod_data else "").lower().strip()
     
     # Exact name matches for known libraries/APIs/dependencies
     lib_exact = {
@@ -2725,9 +3000,37 @@ def is_library(mod_name, required_dep=False):
         "completeconfig", "complete config",
         "parchment", "mixinextras",
         "connector", "panorama api",
+        # Additional known libraries that slip through pattern checks
+        "glitchcore", "glitch core",
+        "moonlight lib", "moonlight",
+        "spectrelib", "spectre lib",
+        "blueprint", "citadel",
+        "flywheel", "caelus api",
+        "bookshelf", "pollen",
+        "structure gel api", "playeranimator",
+        "cofh core", "cofhcore",
+        "curios", "autoreglib",
+        "mantle", "titanium",
+        "l2library", "l2lib",
+        "fusion (connected textures)",
+        "shedaniel's cloth config",
+        "neoforged", "lexforge",
+        "kiwi", "u_team_core",
+        "catalogue", "configured",
     }
     
-    if name_lower.strip() in lib_exact:
+    if name_lower in lib_exact:
+        return True
+    
+    # Also check slug (catches cases like "glitchcore" slug with different display name)
+    lib_slug_exact = {
+        "glitchcore", "moonlight", "spectrelib", "cofhcore",
+        "autoreglib", "mantle", "titanium", "citadel",
+        "flywheel", "caelus", "bookshelf", "pollen",
+        "blueprint", "kiwi", "u-team-core", "catalogue",
+        "configured", "l2library",
+    }
+    if slug_lower in lib_slug_exact:
         return True
     
     # Substring patterns that indicate a library/API
@@ -2755,6 +3058,45 @@ def is_library(mod_name, required_dep=False):
         # Catch "geckolib", "malilib" but not short words
         if name_lower not in {"toolib"}:  # whitelist real mods ending in lib
             return True
+    if name_lower.endswith("core") and len(name_lower) > 6:
+        # Catch "glitchcore", "cofhcore", "creativecore" etc.
+        # Whitelist actual gameplay mods that happen to end in "core"
+        core_whitelist = {"hardcore", "voidcore", "deepcore", "reactorcore"}
+        if name_lower not in core_whitelist:
+            return True
+    
+    # Check mod_data fields for deeper library detection
+    if mod_data:
+        # Modrinth project_type: "mod" vs explicit library markers
+        categories = [c.lower() for c in mod_data.get("categories", [])]
+        if "library" in categories or "utility" in categories:
+            return True
+        
+        # Check Modrinth project_type field
+        ptype = mod_data.get("project_type", "").lower()
+        if ptype == "library":
+            return True
+        
+        # Scan description for library indicators
+        desc = (mod_data.get("description") or "").lower()
+        lib_desc_phrases = [
+            "library for",
+            "a library",
+            "an api for",
+            "utility library",
+            "core library",
+            "dependency for",
+            "required by other mods",
+            "used as a dependency",
+            "provides api",
+            "provides an api",
+            "shared code",
+            "helper library",
+            "framework for",
+        ]
+        for phrase in lib_desc_phrases:
+            if phrase in desc:
+                return True
     
     return False  # User-facing mod
 
@@ -2832,7 +3174,7 @@ def curate_mod_list(mods, mc_version, loader, include_required_deps=True, option
         mod_name = mod.get("title")
         download_count = mod.get("downloads", 0)
         
-        if is_library(mod_name, required_dep=False):
+        if is_library(mod_name, required_dep=False, mod_data=mod):
             log_event("CURATOR", f"Skipping library: {mod_name}")
             continue
         
@@ -3041,9 +3383,13 @@ def _get_installed_mod_slugs(mods_dir):
     return installed
 
 
-def _mod_jar_exists(mods_dir, filename=None, mod_slug=None):
+def _mod_jar_exists(mods_dir, filename=None, mod_slug=None, mod_name=None):
     """Check if a mod JAR already exists in the mods directory.
-    Checks by exact filename first, then by slug/name prefix match."""
+    Uses the same smart matching as installed detection (tokens + aliases + fuzzy).
+    
+    Checks by exact filename first, then by smart token matching.
+    Returns the matching filename if found, else None.
+    """
     if not os.path.exists(mods_dir):
         return None
     
@@ -3053,15 +3399,32 @@ def _mod_jar_exists(mods_dir, filename=None, mod_slug=None):
         if os.path.exists(path) and os.path.isfile(path):
             return filename
     
-    # Fuzzy match: look for JARs whose name contains the mod slug
-    if mod_slug:
-        slug_lower = mod_slug.lower().replace('-', '').replace('_', '').replace(' ', '')
-        for fn in os.listdir(mods_dir):
-            if not fn.endswith('.jar') or not os.path.isfile(os.path.join(mods_dir, fn)):
-                continue
-            fn_norm = fn.lower().replace('-', '').replace('_', '').replace(' ', '')
-            if slug_lower in fn_norm:
-                return fn
+    # Smart match using the installed detection system
+    if mod_slug or mod_name:
+        installed_tokens, installed_jars = build_installed_index(mods_dir)
+        if check_installed(mod_name or "", mod_slug or "", installed_tokens):
+            # Found a match — figure out which JAR it is for potential replacement
+            search_norm = re.sub(r'[^a-z0-9]', '', (mod_slug or mod_name or "").lower())
+            if search_norm:
+                for fn in os.listdir(mods_dir):
+                    if not fn.endswith('.jar') or not os.path.isfile(os.path.join(mods_dir, fn)):
+                        continue
+                    token = _extract_mod_token(fn)
+                    if token and (search_norm in token or token in search_norm):
+                        return fn
+                # Check aliases too
+                for alias, canonical in MOD_ALIASES.items():
+                    if search_norm.startswith(alias):
+                        alt = canonical + search_norm[len(alias):]
+                        for fn in os.listdir(mods_dir):
+                            if not fn.endswith('.jar'):
+                                continue
+                            token = _extract_mod_token(fn)
+                            if token and (alt in token or token in alt):
+                                return fn
+            # We know it's installed but couldn't pinpoint the exact JAR — 
+            # return a truthy sentinel so callers know it exists
+            return "__installed__"
     
     return None
 
@@ -3069,6 +3432,9 @@ def _mod_jar_exists(mods_dir, filename=None, mod_slug=None):
 def download_mod_from_modrinth(mod_data, mods_dir, mc_version, loader):
     """Download mod JAR from Modrinth.
     
+    - Fetches ALL versions (no filter query params — Modrinth silently returns
+      empty results when loaders/game_versions params are used)
+    - Filters in Python for exact MC version + loader match
     - Strict MC version matching only (no adjacent version fallback)
     - Checks if mod already exists (by filename) and skips if so
     - Returns: 'downloaded', 'exists', or False
@@ -3084,48 +3450,33 @@ def download_mod_from_modrinth(mod_data, mods_dir, mc_version, loader):
     base_url = "https://api.modrinth.com/v2"
     loader_lower = loader.lower()
     
-    # Try with both game version and loader filters (most specific)
+    # IMPORTANT: Do NOT use loaders= or game_versions= query params.
+    # Modrinth's version endpoint silently returns empty results when these
+    # filters are used (regardless of encoding). Instead, fetch ALL versions
+    # and filter in Python.
     versions = None
-    for attempt_url in [
-        f'{base_url}/project/{mod_id}/version?loaders=["{loader_lower}"]&game_versions=["{mc_version}"]&limit=5',
-        f'{base_url}/project/{mod_id}/version?game_versions=["{mc_version}"]&limit=5',
-    ]:
-        try:
-            req = urllib.request.Request(attempt_url, headers={"User-Agent": "NeoRunner/1.0"})
-            with urllib.request.urlopen(req, timeout=30) as response:
-                result = json.loads(response.read().decode())
-                if result:
-                    # Verify the version actually matches our exact MC version
-                    for v in result:
-                        if mc_version in v.get("game_versions", []):
-                            versions = [v]
-                            break
-                    if versions:
-                        break
-        except Exception as e:
-            log_event("CURATOR", f"API request failed for {mod_name}: {e}")
-    
-    # Last resort: broad fetch, strict filter
-    if not versions:
-        try:
-            url = f'{base_url}/project/{mod_id}/version?limit=20'
-            req = urllib.request.Request(url, headers={"User-Agent": "NeoRunner/1.0"})
-            with urllib.request.urlopen(req, timeout=30) as response:
-                all_versions = json.loads(response.read().decode())
-                # Exact MC version + correct loader
+    try:
+        url = f'{base_url}/project/{mod_id}/version'
+        req = urllib.request.Request(url, headers={"User-Agent": "NeoRunner/1.0"})
+        with urllib.request.urlopen(req, timeout=30) as response:
+            all_versions = json.loads(response.read().decode())
+            
+            # Priority 1: Exact MC version + exact loader match
+            for v in all_versions:
+                if mc_version in v.get("game_versions", []) and loader_lower in [l.lower() for l in v.get("loaders", [])]:
+                    versions = [v]
+                    break
+            
+            # Priority 2: Exact MC version, any loader (some mods only publish under generic name)
+            if not versions:
                 for v in all_versions:
-                    if mc_version in v.get("game_versions", []) and loader_lower in v.get("loaders", []):
+                    if mc_version in v.get("game_versions", []):
                         versions = [v]
                         break
-                # Exact MC version, any loader (last resort)
-                if not versions:
-                    for v in all_versions:
-                        if mc_version in v.get("game_versions", []):
-                            versions = [v]
-                            break
-                # Do NOT fall back to wrong MC version — strict matching only
-        except Exception as e:
-            log_event("CURATOR", f"Broad version fetch failed for {mod_name}: {e}")
+            
+            # Do NOT fall back to wrong MC version — strict matching only
+    except Exception as e:
+        log_event("CURATOR", f"Version fetch failed for {mod_name}: {e}")
     
     if not versions:
         log_event("CURATOR", f"No version of {mod_name} found for MC {mc_version}")
@@ -3157,8 +3508,8 @@ def download_mod_from_modrinth(mod_data, mods_dir, mc_version, loader):
         return "exists"
     
     # Check if an older version of this mod exists (by slug/name match)
-    existing = _mod_jar_exists(mods_dir, mod_slug=mod_slug)
-    if existing and existing != file_name:
+    existing = _mod_jar_exists(mods_dir, mod_slug=mod_slug, mod_name=mod_name)
+    if existing and existing != file_name and existing != "__installed__":
         # Newer version available — remove old, download new
         old_path = os.path.join(mods_dir, existing)
         try:
@@ -3239,7 +3590,7 @@ def generate_mod_lists_for_loaders(mc_version, limit=100, loaders=None, sort="do
             mod_id = mod.get("project_id")
             mod_name = mod.get("title")
             mod_slug = mod.get("slug", "")
-            if is_library(mod_name):
+            if is_library(mod_name, mod_data=mod):
                 continue
             if _is_installed(mod_name, mod_slug):
                 installed_skipped_mr += 1
@@ -3266,7 +3617,7 @@ def generate_mod_lists_for_loaders(mc_version, limit=100, loaders=None, sort="do
                     break
                 mod_name = mod.get("name", "")
                 slug = mod.get("slug", "")
-                if not slug or is_library(mod_name):
+                if not slug or is_library(mod_name, mod_data=mod):
                     continue
                 if _is_installed(mod_name, slug):
                     installed_skipped_cf += 1
@@ -3390,7 +3741,7 @@ def curator_command(cfg, limit=None, show_optional_audit=False, sort="downloads"
             break
         mod_id = mod.get("project_id")
         mod_name = mod.get("title")
-        if not is_library(mod_name):
+        if not is_library(mod_name, mod_data=mod):
             modrinth_mods[mod_id] = {
                 "id": mod_id,
                 "name": mod_name,
@@ -3416,7 +3767,7 @@ def curator_command(cfg, limit=None, show_optional_audit=False, sort="downloads"
     cf_mods = {}
     for mod in cf_raw:
         mod_name = mod.get("name", "")
-        if not is_library(mod_name):
+        if not is_library(mod_name, mod_data=mod):
             slug = mod.get("slug", "")
             if slug:
                 cf_mods[f"cf_{slug}"] = {

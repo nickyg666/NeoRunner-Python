@@ -853,6 +853,7 @@ def http_server(port, mods_dir):
                         mc_ver = c.get("mc_version", "1.21.11")
                         loader = c.get("loader", "neoforge")
                         m_dir = os.path.join(CWD, c.get("mods_dir", "mods"))
+                        os.makedirs(m_dir, exist_ok=True)
                         
                         # Load the full curator cache to get mod details (source, slug, file_id, etc.)
                         cache_file = os.path.join(CWD, f"curator_cache_{mc_ver}_{loader}.json")
@@ -887,6 +888,15 @@ def http_server(port, mods_dir):
                                         failed.append(mod_id)
                             except Exception as e:
                                 failed.append(mod_id)
+                        
+                        # Regenerate zip + install scripts so clients get the updated pack
+                        if downloaded > 0:
+                            try:
+                                sort_mods_by_type(m_dir)
+                                create_install_scripts(m_dir, c)
+                                create_mod_zip(m_dir)
+                            except Exception as e:
+                                log_event("API", f"Post-install regeneration error: {e}")
                         
                         return jsonify({
                             "success": True,
@@ -2457,7 +2467,8 @@ def download_mod_from_modrinth(mod_data, mods_dir, mc_version, loader):
 
 def generate_mod_lists_for_loaders(mc_version, limit=100, loaders=None):
     """
-    Generate and cache mod lists for specified loaders (or just the active one).
+    Generate and cache dual-source mod lists for specified loaders.
+    Fetches from Modrinth API + CurseForge scraper, deduplicates, saves curator cache.
     Returns dict keyed by loader name, each containing list of mods.
     """
     if loaders is None:
@@ -2465,38 +2476,96 @@ def generate_mod_lists_for_loaders(mc_version, limit=100, loaders=None):
     mod_lists = {}
     
     for loader in loaders:
-        print(f"\nGenerating {loader.upper()} mod list ({limit} mods)...")
+        print(f"\nGenerating {loader.upper()} mod list (up to {limit} per source, dual-source)...")
         
-        # Fetch more than limit to account for libs filtered out
+        # ---- SOURCE 1: MODRINTH ----
         scan_limit = min(limit * 5, 500)
-        all_mods = []
-        
-        # Fetch in batches
+        modrinth_raw = []
         for offset in range(0, scan_limit, 100):
             batch_limit = min(100, scan_limit - offset)
             mods = fetch_modrinth_mods(mc_version, loader, limit=batch_limit, offset=offset)
             if mods:
-                all_mods.extend(mods)
+                modrinth_raw.extend(mods)
             else:
                 break
         
-        # Filter to user-facing only
-        user_facing = []
-        for mod in all_mods:
-            if len(user_facing) >= limit:
+        modrinth_mods = {}
+        for mod in modrinth_raw:
+            if len(modrinth_mods) >= limit:
                 break
-            
             mod_id = mod.get("project_id")
             mod_name = mod.get("title")
             if not is_library(mod_name):
-                user_facing.append({
+                modrinth_mods[mod_id] = {
                     "id": mod_id,
                     "name": mod_name,
-                    "downloads": mod.get("downloads", 0)
-                })
+                    "downloads": mod.get("downloads", 0),
+                    "description": mod.get("description", "No description"),
+                    "source": "modrinth"
+                }
         
-        mod_lists[loader] = user_facing
-        print(f"  {len(user_facing)} {loader} mods ready")
+        print(f"  Modrinth: {len(modrinth_mods)} user-facing mods")
+        
+        # ---- SOURCE 2: CURSEFORGE SCRAPER ----
+        cf_mods = {}
+        try:
+            cf_raw = fetch_curseforge_mods_scraper(mc_version, loader, limit=limit, scrape_deps=True)
+            for mod in cf_raw:
+                mod_name = mod.get("name", "")
+                slug = mod.get("slug", "")
+                if slug and not is_library(mod_name):
+                    cf_mods[f"cf_{slug}"] = {
+                        "id": f"cf_{slug}",
+                        "name": mod_name,
+                        "slug": slug,
+                        "downloads": mod.get("downloads", 0),
+                        "description": mod.get("description", "No description"),
+                        "file_id": mod.get("file_id", ""),
+                        "download_href": mod.get("download_href", ""),
+                        "author": mod.get("author", ""),
+                        "source": "curseforge",
+                        "deps_required": mod.get("deps_required", []),
+                        "deps_optional": mod.get("deps_optional", []),
+                    }
+            print(f"  CurseForge: {len(cf_mods)} user-facing mods")
+        except Exception as e:
+            log_event("BOOT", f"CurseForge scraper failed (non-fatal): {e}")
+            print(f"  CurseForge: scraper failed ({e}), continuing with Modrinth only")
+        
+        # ---- DEDUPLICATION ----
+        def _normalize_name(name):
+            return re.sub(r'[^a-z0-9]', '', name.lower())
+        
+        modrinth_name_map = {}
+        for mod_id, mod_data in modrinth_mods.items():
+            modrinth_name_map[_normalize_name(mod_data["name"])] = mod_id
+        
+        merged = dict(modrinth_mods)
+        cf_dupes = 0
+        cf_unique = 0
+        for cf_key, cf_mod in cf_mods.items():
+            norm = _normalize_name(cf_mod["name"])
+            if norm in modrinth_name_map:
+                mr_key = modrinth_name_map[norm]
+                if mr_key in merged:
+                    merged[mr_key]["also_on"] = "curseforge"
+                    merged[mr_key]["cf_slug"] = cf_mod.get("slug", "")
+                    merged[mr_key]["cf_file_id"] = cf_mod.get("file_id", "")
+                    merged[mr_key]["cf_deps_required"] = cf_mod.get("deps_required", [])
+                    merged[mr_key]["cf_deps_optional"] = cf_mod.get("deps_optional", [])
+                cf_dupes += 1
+            else:
+                merged[cf_key] = cf_mod
+                cf_unique += 1
+        
+        print(f"  Dedup: {cf_dupes} shared, {cf_unique} CF-only added -> {len(merged)} unique mods")
+        
+        # Save curator cache (this is what the dashboard API reads)
+        save_curator_cache(merged, {}, mc_version, loader)
+        
+        # Also return as a flat list for in-memory use
+        mod_lists[loader] = sorted(merged.values(), key=lambda m: m.get("downloads", 0), reverse=True)
+        print(f"  {len(mod_lists[loader])} {loader} mods ready")
     
     return mod_lists
 
@@ -2909,9 +2978,10 @@ def curator_command(cfg, limit=None, show_optional_audit=False):
         combined_opt_audit[f"cf_{slug}"] = {"name": info["name"], "source": "curseforge", "requested_by": info["requested_by"]}
     save_curator_cache(user_facing_mods, combined_opt_audit, mc_version, loader)
     
-    # Regenerate mod ZIP
+    # Regenerate mod ZIP + install scripts
     print("Updating mod distribution package...")
     sort_mods_by_type(mods_dir)
+    create_install_scripts(mods_dir, cfg)
     create_mod_zip(mods_dir)
     print("Done - ready for distribution on port 8000\n")
 
@@ -3068,17 +3138,15 @@ def main():
             print("[BOOT] Sorting mods by type (client/server/both)...")
             sort_mods_by_type(cfg["mods_dir"])
             
+            # Always regenerate install scripts (pick up port/IP changes)
+            create_install_scripts(cfg["mods_dir"], cfg)
+            create_mod_zip(cfg["mods_dir"])
+            
             if not is_initialized:
-                create_install_scripts(cfg["mods_dir"], cfg)
-                create_mod_zip(cfg["mods_dir"])
-                
                 # Write initialized marker
                 with open(initialized_marker, "w") as f:
                     f.write(f"initialized at {datetime.now().isoformat()}")
                 log_event("BOOT", "First-time initialization complete, marker written")
-            else:
-                # Still recreate mod zip on every boot (mods may have changed)
-                create_mod_zip(cfg["mods_dir"])
             
             # Generate mod lists for the active loader at startup
             loader = cfg.get("loader", "neoforge")

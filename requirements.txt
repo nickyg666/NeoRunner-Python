@@ -3,15 +3,51 @@ feedparser
 beautifulsoup4
 requests
 lxml
-playwright
-playwright-stealth
+selenium>=4.40.0
 
-# For ubuntu systems, you need to install the following system packages
-# not sure how this would work on windows because no x or framebuffer really.
-# maybe it will use the playwright browser, I don't know. didn't test it.
-apt get install -y xvfb calibre
-# optional, if you don't want to do venv, it didn't break MY packages
-pipx install playwright playwright-stealth --break-system-packages
-# if you ran setup script, you already use a venv
-# don't forget to add the smtp gmail you are sending 
-#from, to your allow list in amazon content settings on your amazon account!
+# ============================================================================
+# FOR LINUX HOSTS (Ubuntu 24.04 LTS - PRIMARY SUPPORT)
+# ============================================================================
+#
+# REQUIRED SYSTEM PACKAGES (install with sudo):
+# ============================================================================
+#
+# 1. Python environment & build tools:
+#    sudo apt-get install -y python3-full python3-venv build-essential
+#
+# 2. For PrimJS JavaScript engine (CurseForge scraping):
+#    sudo apt-get install -y golang-go ninja-build git curl lynx
+#    See: PRIMJS_BUILD.md for detailed instructions
+#
+# 3. For web scraping with Selenium/Firefox (fallback):
+#    sudo apt-get install -y firefox firefox-geckodriver xvfb
+#
+# FULL INSTALLATION COMMAND:
+# ============================================================================
+#
+#    sudo apt-get install -y \
+#        python3-full python3-venv build-essential \
+#        golang-go ninja-build git curl lynx \
+#        firefox firefox-geckodriver xvfb pkg-config libcurl4-openssl-dev
+#
+# SETUP PYTHON VIRTUAL ENVIRONMENT:
+# ============================================================================
+#
+#    cd /home/services
+#    python3 -m venv neorunner_env
+#    source neorunner_env/bin/activate
+#    pip install -r requirements.txt
+#
+# BUILD PRIMJS (for CurseForge scraping):
+# ============================================================================
+#
+#    bash /home/services/setup_primjs.sh
+#    # Takes 15-45 minutes first time (downloads buildtools ~500MB)
+#
+# VERIFY INSTALLATION:
+# ============================================================================
+#
+#    source /home/services/neorunner_env/bin/activate
+#    /home/services/bin/qjs --version        # Should show QuickJS version
+#    python3 -c "import selenium"             # Should have no output
+#    which lynx firefox geckodriver          # All should be in PATH

@@ -474,6 +474,10 @@
             <!-- Mods Tab -->
             <div id="mods" class="tab-content active">
                 <h2>Installed Mods</h2>
+                <div style="margin-bottom: 15px;">
+                    <button class="success" onclick="openModSelector()" style="margin-right: 8px;">+ Add Mods</button>
+                    <button onclick="broadcastModUpdate()" style="background: #e67e22; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;" title="Send clickable download link to all online players via in-game chat">Notify Players</button>
+                </div>
                 <div id="mods-content">
                     <div class="loading"></div> Loading mods...
                 </div>
@@ -482,12 +486,86 @@
             <!-- Configuration Tab -->
             <div id="config" class="tab-content">
                 <h2>Server Configuration</h2>
+                
+                <h3 style="margin-top:0;color:#4CAF50;border-bottom:1px solid #333;padding-bottom:8px;">Network</h3>
+                <div class="form-group">
+                    <label>Hostname / Public IP</label>
+                    <input type="text" id="cfg-hostname" placeholder="e.g. play.myserver.com or 192.168.0.19">
+                    <small>Public-facing address for install scripts and broadcasts. Leave blank to auto-detect from server.properties.</small>
+                </div>
+                <div class="form-group">
+                    <label>Minecraft Version</label>
+                    <input type="text" id="mc-version" value="1.21.11">
+                </div>
+                
+                <h3 style="color:#2196F3;border-bottom:1px solid #333;padding-bottom:8px;">Mod Curator</h3>
+                <div class="form-group">
+                    <label>Curator Sort Order</label>
+                    <select id="cfg-curator-sort">
+                        <option value="downloads">Downloads (most popular)</option>
+                        <option value="relevance">Relevance</option>
+                        <option value="follows">Follows</option>
+                        <option value="newest">Newest</option>
+                        <option value="updated">Recently Updated</option>
+                    </select>
+                    <small>Default sort for Modrinth/CurseForge mod searches</small>
+                </div>
+                <div class="form-group">
+                    <label>Curator Limit (per source)</label>
+                    <input type="number" id="cfg-curator-limit" min="10" max="200" value="100" step="10">
+                    <small>Max mods to fetch from each source (10-200)</small>
+                </div>
+                
+                <h3 style="color:#FF9800;border-bottom:1px solid #333;padding-bottom:8px;">Broadcasts &amp; Notifications</h3>
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                        <input type="checkbox" id="cfg-broadcast-enabled" style="width:auto;margin:0;">
+                        Enable In-Game Broadcasts
+                    </label>
+                    <small>Master toggle for all tellraw broadcasts to players</small>
+                </div>
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                        <input type="checkbox" id="cfg-broadcast-auto" style="width:auto;margin:0;">
+                        Auto-Broadcast After Mod Install
+                    </label>
+                    <small>Automatically notify players when new mods are installed via dashboard</small>
+                </div>
+                
+                <h3 style="color:#9C27B0;border-bottom:1px solid #333;padding-bottom:8px;">Nag Screens</h3>
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                        <input type="checkbox" id="cfg-nag-modlist" style="width:auto;margin:0;">
+                        Show Mod List on Player Join
+                    </label>
+                    <small>Send mod list via tellraw when a player joins the server</small>
+                </div>
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                        <input type="checkbox" id="cfg-nag-firstvisit" style="width:auto;margin:0;">
+                        First-Visit Mod Selector
+                    </label>
+                    <small>Auto-open mod selector on first dashboard visit</small>
+                </div>
+                
+                <h3 style="color:#00BCD4;border-bottom:1px solid #333;padding-bottom:8px;">Install Scripts</h3>
+                <div class="form-group">
+                    <label>Script Types to Generate</label>
+                    <select id="cfg-script-types">
+                        <option value="all">All (.bat + .ps1 + .sh)</option>
+                        <option value="bat">Windows .bat only</option>
+                        <option value="ps1">PowerShell .ps1 only</option>
+                        <option value="sh">Linux/Mac .sh only</option>
+                    </select>
+                    <small>Which install scripts to generate for players</small>
+                </div>
+                
+                <h3 style="color:#607D8B;border-bottom:1px solid #333;padding-bottom:8px;">Update Schedule</h3>
                 <div class="form-group">
                     <label>Mod Update Frequency (hours)</label>
                     <input type="number" id="update-freq" min="1" max="24" value="4" step="1">
                     <small>How often to check for mod updates (1-24 hours)</small>
                 </div>
-                
                 <div class="form-group">
                     <label>Weekly Update Day</label>
                     <select id="weekly-day">
@@ -500,20 +578,16 @@
                         <option value="sun">Sunday</option>
                     </select>
                 </div>
-                
                 <div class="form-group">
                     <label>Weekly Update Time (hour)</label>
                     <input type="number" id="weekly-hour" min="0" max="23" value="2" step="1">
                     <small>Time of day for weekly strict version check (0-23)</small>
                 </div>
                 
-                <div class="form-group">
-                    <label>Minecraft Version</label>
-                    <input type="text" id="mc-version" value="1.21.11">
+                <div style="margin-top:20px;display:flex;gap:10px;">
+                    <button class="success" onclick="saveConfig()">Save Configuration</button>
+                    <button onclick="loadConfig()">Reload</button>
                 </div>
-                
-                <button class="success" onclick="saveConfig()">💾 Save Configuration</button>
-                <button onclick="loadConfig()">🔄 Reload</button>
             </div>
             
             <!-- Logs Tab -->
@@ -565,10 +639,16 @@
             loadConfig();
             refreshLogs();
 
-            // First-visit check: show mod selector if never loaded
+            // First-visit check: show mod selector if never loaded AND config allows it
             if (!localStorage.getItem('neorunner-mods-loaded')) {
-                // Delay slightly so dashboard loads first
-                setTimeout(openModSelector, 1500);
+                fetch('/api/config').then(r => r.json()).then(cfg => {
+                    if (cfg.nag_first_visit_modal !== false) {
+                        setTimeout(openModSelector, 1500);
+                    }
+                }).catch(() => {
+                    // If config fetch fails, still show modal (safe default)
+                    setTimeout(openModSelector, 1500);
+                });
             }
         });
 
@@ -701,9 +781,10 @@
             .then(result => {
                 document.getElementById('install-btn').disabled = false;
                 if (result.success !== false) {
-                    const msg = `Downloaded ${result.downloaded || 0} mods` +
+                    let msg = `Downloaded ${result.downloaded || 0} mods` +
                         (result.skipped ? `, ${result.skipped} already installed` : '') +
                         (result.failed && result.failed.length ? `, ${result.failed.length} failed` : '');
+                    if (result.broadcast) msg += ' | Players notified!';
                     showAlert(msg, 'success');
                     localStorage.setItem('neorunner-mods-loaded', 'true');
                     closeModSelector();
@@ -720,6 +801,20 @@
             });
         }
         
+        function broadcastModUpdate() {
+            if (!confirm('Send mod update notification to all online players?')) return;
+            fetch('/api/broadcast', { method: 'POST' })
+                .then(r => r.json())
+                .then(result => {
+                    if (result.success) {
+                        showAlert(result.message, 'success');
+                    } else {
+                        showAlert('Broadcast failed: ' + (result.error || 'Unknown error'), 'error');
+                    }
+                })
+                .catch(err => showAlert('Broadcast error: ' + err, 'error'));
+        }
+
         function switchTab(tabName) {
             // Hide all tabs
             document.querySelectorAll('.tab-content').forEach(tab => {
@@ -836,20 +931,48 @@
             fetch('/api/config')
                 .then(r => r.json())
                 .then(cfg => {
+                    // Network
+                    document.getElementById('cfg-hostname').value = cfg.hostname || '';
+                    document.getElementById('mc-version').value = cfg.mc_version || '1.21.11';
+                    // Curator
+                    document.getElementById('cfg-curator-sort').value = cfg.curator_sort || 'downloads';
+                    document.getElementById('cfg-curator-limit').value = cfg.curator_limit || 100;
+                    // Broadcasts
+                    document.getElementById('cfg-broadcast-enabled').checked = cfg.broadcast_enabled !== false;
+                    document.getElementById('cfg-broadcast-auto').checked = cfg.broadcast_auto_on_install !== false;
+                    // Nag screens
+                    document.getElementById('cfg-nag-modlist').checked = cfg.nag_show_mod_list_on_join !== false;
+                    document.getElementById('cfg-nag-firstvisit').checked = cfg.nag_first_visit_modal !== false;
+                    // Scripts
+                    document.getElementById('cfg-script-types').value = cfg.install_script_types || 'all';
+                    // Schedule
                     document.getElementById('update-freq').value = cfg.ferium_update_interval_hours || 4;
                     document.getElementById('weekly-day').value = cfg.ferium_weekly_update_day || 'mon';
                     document.getElementById('weekly-hour').value = cfg.ferium_weekly_update_hour || 2;
-                    document.getElementById('mc-version').value = cfg.mc_version || '1.21.11';
                 })
                 .catch(err => console.error('Config error:', err));
         }
         
         function saveConfig() {
             const data = {
+                // Network
+                hostname: document.getElementById('cfg-hostname').value.trim(),
+                mc_version: document.getElementById('mc-version').value.trim(),
+                // Curator
+                curator_sort: document.getElementById('cfg-curator-sort').value,
+                curator_limit: parseInt(document.getElementById('cfg-curator-limit').value),
+                // Broadcasts
+                broadcast_enabled: document.getElementById('cfg-broadcast-enabled').checked,
+                broadcast_auto_on_install: document.getElementById('cfg-broadcast-auto').checked,
+                // Nag screens
+                nag_show_mod_list_on_join: document.getElementById('cfg-nag-modlist').checked,
+                nag_first_visit_modal: document.getElementById('cfg-nag-firstvisit').checked,
+                // Scripts
+                install_script_types: document.getElementById('cfg-script-types').value,
+                // Schedule
                 ferium_update_interval_hours: parseInt(document.getElementById('update-freq').value),
                 ferium_weekly_update_day: document.getElementById('weekly-day').value,
                 ferium_weekly_update_hour: parseInt(document.getElementById('weekly-hour').value),
-                mc_version: document.getElementById('mc-version').value
             };
             
             fetch('/api/config', {

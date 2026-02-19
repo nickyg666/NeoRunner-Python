@@ -1,11 +1,14 @@
 # NeoRunner-Python
 Built for a linux host, this (vibe-coded) program will download/run the latest neoforged server (others supported as well) and try to sync mods it finds into client side to sidestep modloader swaps and client/server upgrades. I am a huge fan of the automodpack mod for what it's worth, and this is nowhere near complete. it does kind of work, but xvfb is not required, some deps may be missing. some documentation may be erroneous, it is mostly ai driven, and I largely did not check it for accuracy. I typically focus on good docs after everything works and I'm in a feature freeze, but I keep spiraling past any stopping point. the project is rather unfinished and a mess of things at this point. 
+- Added EC2/amazonlinux compatibility
+- # Quickstart
+- ```curl -fsSL https://raw.githubusercontent.com/nickyg666/NeoRunner-Python/master/install.sh | sudo bash```
 
 ## shout-out to skidam for making that mod and giving me the idea. 
 This has spiraled into a whole expansive hosting and mod management console, dependent on Ferium to manage downloads, uses a stealth browser to check curseforge, and modrinths super cool API that's free to use for the modrinth side. Should give you top 100 non-lib/api downloads from either suppier by default, but you can sort but other criteria in the settings.
 there are many more features I didn't mention, check it out!
 
-## I burned up all my copilot tokens on this in a day, may slowly edit until they replenish next month. You can sponsor the repo if you like what I'm doing and are feeling generous. $10 gets me a month of anthropic's claude + GitHub copilot in my favorite program: opencode.ai editor! 
+## I burned up all my copilot tokens on this in a day, may slowly edit until they replenish next month. You can sponsor the repo if you like what I'm doing and are feeling generous. $10 gets me a month of anthropic's claude + GitHub copilot in my favorite program: opencode.ai editor! I'm still using it, just with an arguably less skilled agent (GLM-5) with free tier.
 
 As always, big shout-out to 
 

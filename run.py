@@ -198,8 +198,239 @@ def parse_props():
                 props[k] = v
     return props
 
+def install_neoforge(mc_version):
+    """Download and install NeoForge server for the given MC version."""
+    log_event("LOADER_INSTALL", f"Installing NeoForge for MC {mc_version}...")
+    
+    neoforge_dir = os.path.join(CWD, "libraries", "net", "neoforged", "neoforge")
+    if os.path.exists(neoforge_dir):
+        log_event("LOADER_INSTALL", "NeoForge already installed")
+        return True
+    
+    # NeoForge version schema: MC 1.21.11 -> NeoForge 21.11.xx-beta
+    mc_parts = mc_version.split(".")
+    if len(mc_parts) >= 3:
+        major = mc_parts[1] if len(mc_parts) > 1 else "21"
+        minor = mc_parts[2] if len(mc_parts) > 2 else "1"
+        prefix = f"{major}.{minor}"
+    else:
+        prefix = "21.11"
+    
+    # Fetch latest version from Maven
+    neo_version = None
+    try:
+        versions_url = "https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge"
+        req = urllib.request.Request(versions_url, headers={"User-Agent": "NeoRunner/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            versions_data = json.loads(resp.read().decode())
+            versions = versions_data.get("versions", [])
+            matching = [v for v in versions if v.startswith(prefix)]
+            if matching:
+                neo_version = matching[-1]
+    except Exception as e:
+        log_event("LOADER_INSTALL", f"Version lookup failed: {e}")
+    
+    if not neo_version:
+        log_event("LOADER_INSTALL_ERROR", f"No NeoForge version found for MC {mc_version}")
+        return False
+    
+    installer_jar = f"neoforge-{neo_version}-installer.jar"
+    installer_url = f"https://maven.neoforged.net/releases/net/neoforged/neoforge/{neo_version}/{installer_jar}"
+    installer_path = os.path.join(CWD, installer_jar)
+    
+    try:
+        log_event("LOADER_INSTALL", f"Downloading NeoForge {neo_version}...")
+        req = urllib.request.Request(installer_url, headers={"User-Agent": "NeoRunner/1.0"})
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            data = resp.read()
+            if len(data) < 10000:
+                log_event("LOADER_INSTALL_ERROR", "Download too small, likely 404")
+                return False
+            with open(installer_path, "wb") as f:
+                f.write(data)
+        
+        log_event("LOADER_INSTALL", "Running installer (this takes a minute)...")
+        result = subprocess.run(
+            ["java", "-jar", installer_path, "--installServer"],
+            cwd=CWD, capture_output=True, text=True, timeout=600
+        )
+        
+        os.remove(installer_path)
+        
+        if os.path.exists(neoforge_dir):
+            log_event("LOADER_INSTALL", f"NeoForge {neo_version} installed")
+            return True
+        else:
+            log_event("LOADER_INSTALL_ERROR", f"Install failed: {result.stderr[:500]}")
+            return False
+    except Exception as e:
+        log_event("LOADER_INSTALL_ERROR", f"Failed: {e}")
+        if os.path.exists(installer_path):
+            os.remove(installer_path)
+        return False
+
+def install_fabric(mc_version):
+    """Download and install Fabric server for the given MC version."""
+    log_event("LOADER_INSTALL", f"Installing Fabric for MC {mc_version}...")
+    
+    fabric_jar = os.path.join(CWD, "fabric-server-launch.jar")
+    if os.path.exists(fabric_jar):
+        log_event("LOADER_INSTALL", "Fabric already installed")
+        return True
+    
+    # Check if MC version is supported by Fabric
+    try:
+        versions_url = "https://meta.fabricmc.net/v2/versions/game"
+        req = urllib.request.Request(versions_url, headers={"User-Agent": "NeoRunner/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            games = json.loads(resp.read().decode())
+            stable_versions = [g["version"] for g in games if g.get("stable")]
+            if mc_version not in stable_versions:
+                log_event("LOADER_INSTALL_ERROR", f"MC {mc_version} not supported by Fabric")
+                return False
+    except Exception as e:
+        log_event("LOADER_INSTALL", f"Could not verify MC version: {e}")
+    
+    # Get latest Fabric loader version
+    loader_version = None
+    try:
+        loader_url = "https://meta.fabricmc.net/v2/versions/loader"
+        req = urllib.request.Request(loader_url, headers={"User-Agent": "NeoRunner/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            loaders = json.loads(resp.read().decode())
+            if loaders:
+                loader_version = loaders[0]["version"]
+    except Exception as e:
+        log_event("LOADER_INSTALL", f"Could not get loader version: {e}")
+    
+    if not loader_version:
+        loader_version = "0.18.4"  # Fallback
+    
+    # Download Fabric installer and run it
+    installer_url = "https://maven.fabricmc.net/net/fabricmc/fabric-installer/1.0.1/fabric-installer-1.0.1.jar"
+    installer_path = os.path.join(CWD, "fabric-installer.jar")
+    
+    try:
+        log_event("LOADER_INSTALL", f"Downloading Fabric installer...")
+        req = urllib.request.Request(installer_url, headers={"User-Agent": "NeoRunner/1.0"})
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            with open(installer_path, "wb") as f:
+                f.write(resp.read())
+        
+        log_event("LOADER_INSTALL", "Running Fabric installer...")
+        result = subprocess.run(
+            ["java", "-jar", installer_path, "server", "-mcversion", mc_version, 
+             "-loader", loader_version, "-dir", CWD],
+            cwd=CWD, capture_output=True, text=True, timeout=300
+        )
+        
+        os.remove(installer_path)
+        
+        if os.path.exists(fabric_jar):
+            log_event("LOADER_INSTALL", f"Fabric {loader_version} installed for MC {mc_version}")
+            return True
+        else:
+            log_event("LOADER_INSTALL_ERROR", f"Install failed: {result.stderr[:500]}")
+            return False
+    except Exception as e:
+        log_event("LOADER_INSTALL_ERROR", f"Failed: {e}")
+        if os.path.exists(installer_path):
+            os.remove(installer_path)
+        return False
+
+def install_forge(mc_version):
+    """Download and install Forge server for the given MC version."""
+    log_event("LOADER_INSTALL", f"Installing Forge for MC {mc_version}...")
+    
+    forge_dir = os.path.join(CWD, "libraries", "net", "minecraftforge", "forge")
+    if os.path.exists(forge_dir):
+        log_event("LOADER_INSTALL", "Forge already installed")
+        return True
+    
+    # Get Forge version for this MC version
+    forge_version = None
+    try:
+        promo_url = "https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json"
+        req = urllib.request.Request(promo_url, headers={"User-Agent": "NeoRunner/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            promos = json.loads(resp.read().decode()).get("promos", {})
+            # Try recommended first, then latest
+            key = f"{mc_version}-recommended"
+            if key in promos:
+                forge_version = promos[key]
+            else:
+                key = f"{mc_version}-latest"
+                if key in promos:
+                    forge_version = promos[key]
+    except Exception as e:
+        log_event("LOADER_INSTALL", f"Could not get Forge version: {e}")
+    
+    if not forge_version:
+        log_event("LOADER_INSTALL_ERROR", f"No Forge version found for MC {mc_version}")
+        log_event("LOADER_INSTALL_ERROR", "Forge may not support this MC version yet")
+        return False
+    
+    installer_jar = f"forge-{mc_version}-{forge_version}-installer.jar"
+    installer_url = f"https://maven.minecraftforge.net/net/minecraftforge/forge/{mc_version}-{forge_version}/{installer_jar}"
+    installer_path = os.path.join(CWD, installer_jar)
+    
+    try:
+        log_event("LOADER_INSTALL", f"Downloading Forge {mc_version}-{forge_version}...")
+        req = urllib.request.Request(installer_url, headers={"User-Agent": "NeoRunner/1.0"})
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            data = resp.read()
+            if len(data) < 10000:
+                log_event("LOADER_INSTALL_ERROR", "Download too small, likely 404")
+                return False
+            with open(installer_path, "wb") as f:
+                f.write(data)
+        
+        log_event("LOADER_INSTALL", "Running installer (this takes a minute)...")
+        result = subprocess.run(
+            ["java", "-jar", installer_path, "--installServer"],
+            cwd=CWD, capture_output=True, text=True, timeout=600
+        )
+        
+        os.remove(installer_path)
+        
+        if os.path.exists(forge_dir):
+            log_event("LOADER_INSTALL", f"Forge {forge_version} installed")
+            return True
+        else:
+            log_event("LOADER_INSTALL_ERROR", f"Install failed: {result.stderr[:500]}")
+            return False
+    except Exception as e:
+        log_event("LOADER_INSTALL_ERROR", f"Failed: {e}")
+        if os.path.exists(installer_path):
+            os.remove(installer_path)
+        return False
+
+def ensure_loader_installed(loader, mc_version):
+    """Ensure the specified loader is installed, downloading if necessary."""
+    loader = loader.lower()
+    
+    if loader == "neoforge":
+        neoforge_dir = os.path.join(CWD, "libraries", "net", "neoforged", "neoforge")
+        if os.path.exists(neoforge_dir):
+            return True
+        return install_neoforge(mc_version)
+    
+    elif loader == "fabric":
+        if os.path.exists(os.path.join(CWD, "fabric-server-launch.jar")):
+            return True
+        return install_fabric(mc_version)
+    
+    elif loader == "forge":
+        if os.path.exists(os.path.join(CWD, "libraries", "net", "minecraftforge")):
+            return True
+        return install_forge(mc_version)
+    
+    else:
+        log_event("LOADER_ERROR", f"Unknown loader: {loader}")
+        return False
+
 def download_loader(loader):
-    """Verify modloader is available and return the startup command"""
+    """Verify modloader is available and return True if ready to use."""
     loader = loader.lower()
     
     if loader == "neoforge":
@@ -209,31 +440,22 @@ def download_loader(loader):
             return True
         else:
             log_event("LOADER_ERROR", f"{loader} libraries not found at {neoforge_dir}")
-            log_event("LOADER_ERROR", "Install NeoForge from https://neoforged.net")
             return False
     
     elif loader == "fabric":
-        if os.path.exists(os.path.join(CWD, "fabric-server.jar")):
-            log_event("LOADER", f"{loader} server JAR found")
-            return True
-        
-        fabric_dir = os.path.join(CWD, "libraries", "net", "fabricmc")
-        if os.path.exists(fabric_dir):
-            log_event("LOADER", f"{loader} libraries found (need to build server JAR)")
-            log_event("LOADER", f"{loader} libraries detected - download fabric-server.jar from https://fabricmc.net/use/server/")
-            return False
-        else:
-            log_event("LOADER_ERROR", f"{loader} server JAR or libraries not found")
-            log_event("LOADER_INFO", "Download from: https://fabricmc.net/use/server/")
-            return False
-    
-    elif loader == "forge":
-        if os.path.exists(os.path.join(CWD, "forge-server.jar")) or os.path.exists(os.path.join(CWD, "server.jar")):
+        if os.path.exists(os.path.join(CWD, "fabric-server-launch.jar")):
             log_event("LOADER", f"{loader} server JAR found")
             return True
         else:
             log_event("LOADER_ERROR", f"{loader} server JAR not found")
-            log_event("LOADER_INFO", "Download from: https://files.minecraftforge.net/")
+            return False
+    
+    elif loader == "forge":
+        if os.path.exists(os.path.join(CWD, "libraries", "net", "minecraftforge")):
+            log_event("LOADER", f"{loader} libraries found")
+            return True
+        else:
+            log_event("LOADER_ERROR", f"{loader} libraries not found")
             return False
     
     else:
@@ -349,7 +571,7 @@ def build_config_from_properties():
         "http_port": "8000",
         "mods_dir": "mods",
         "clientonly_dir": "clientonly",
-        "mc_version": mc_version or props.get("mc-version", "1.21.11"),
+        "mc_version": mc_version or props.get("mc-version", "1.21.1"),
         "loader": loader or "neoforge",
         "server_jar": props.get("server-jar", None),
         "max_download_mb": 600,
@@ -407,7 +629,7 @@ def get_config():
             "http_port": input("HTTP mod port [8000]: ").strip() or "8000",
             "mods_dir": input("Mods folder [mods]: ").strip() or "mods",
             "clientonly_dir": "clientonly",
-            "mc_version": input("Minecraft version [1.21.11]: ").strip() or "1.21.11",
+            "mc_version": input("Minecraft version [1.21.1]: ").strip() or "1.21.1",
             "loader": input(f"Modloader (fabric/forge/neoforge) [{loader_default}]: ").strip() or loader_default,
             "max_download_mb": 600,
             "rate_limit_seconds": 2,
@@ -5448,124 +5670,122 @@ def main():
             curator_command(cfg, limit=curator_limit, show_optional_audit=show_optional_audit)
             return
         elif cmd == "run":
-            print("[BOOT] Starting server automation...")
-            
-            # Check if server is already initialized (skip regeneration)
-            initialized_marker = os.path.join(CWD, ".initialized")
-            is_initialized = os.path.exists(initialized_marker)
-            
-            if is_initialized:
-                log_event("BOOT", "Server already initialized, skipping regeneration")
-            else:
-                # First-time setup: generate systemd service and install scripts
-                create_systemd_service(cfg)
-            
-            # Check if first run and offer curator
-            first_run_marker = os.path.join(CWD, ".curator_first_run")
-            if not os.path.exists(first_run_marker) and cfg.get("run_curator_on_startup", False):
-                # Only prompt if running interactively (not in systemd)
-                if sys.stdin.isatty():
-                    print("\n" + "="*70)
-                    print("FIRST RUN: MOD CURATOR SETUP")
-                    print("="*70)
-                    print("\nWould you like to discover and add the top 100 mods")
-                    print(f"for {cfg['loader']} {cfg['mc_version']} right now?")
-                    print("\nThis will fetch mods from Modrinth and let you select")
-                    print("which ones to add to your server.\n")
-                    
-                    response = input("Run mod curator now? [y/n]: ").strip().lower()
-                    if response == "y":
-                        print("\nLaunching curator...")
-                        curator_command(cfg)
-                        print("\nCurator complete! Starting server...\n")
-                else:
-                    # Running as systemd service - skip interactive prompt
-                    log_event("BOOT", "Skipping interactive curator setup (running as service)")
-                
-                # Mark that we've run curator setup
-                with open(first_run_marker, "w") as f:
-                    f.write("first run complete")
-                log_event("BOOT", "Marked curator first-run complete")
-            
-            # Check if modloader is properly configured
-            loader_choice = cfg.get("loader", "neoforge")
-            print(f"\n[BOOT] Checking modloader: {loader_choice}")
-            if not download_loader(loader_choice):
-                print("[ERROR] Modloader configuration invalid or missing")
-                print(f"For {loader_choice}, ensure libraries are installed correctly")
-                sys.exit(1)
-            
-            # Setup mods
-            print("[BOOT] Sorting mods by type (client/server/both)...")
-            sort_mods_by_type(cfg["mods_dir"])
-            
-            # Pre-launch compatibility check: validate loader + MC version for all mods
-            print("[BOOT] Checking mod compatibility (loader/version)...")
-            compat = preflight_mod_compatibility_check(cfg["mods_dir"], cfg)
-            if compat["quarantined"]:
-                print(f"[BOOT] WARNING: {len(compat['quarantined'])} incompatible mod(s) quarantined:")
-                for fn in compat["quarantined"]:
-                    print(f"  - {fn}")
-            if compat["compatible"]:
-                print(f"[BOOT] {len(compat['compatible'])} mods passed compatibility check")
-            
-            # Always regenerate install scripts (pick up port/IP changes)
-            create_install_scripts(cfg["mods_dir"], cfg)
-            create_mod_zip(cfg["mods_dir"])
-            
-            if not is_initialized:
-                # Write initialized marker
-                with open(initialized_marker, "w") as f:
-                    f.write(f"initialized at {datetime.now().isoformat()}")
-                log_event("BOOT", "First-time initialization complete, marker written")
-            
-            # Generate mod lists for the active loader at startup
-            loader = cfg.get("loader", "neoforge")
-            mc_version = cfg.get("mc_version", "1.21.11")
-            curator_limit = cfg.get("curator_limit", 100)
-            print(f"\n[BOOT] Generating mod list for {loader}...")
-            try:
-                mod_lists = generate_mod_lists_for_loaders(mc_version, limit=curator_limit, loaders=[loader])
-                cfg["mod_lists"] = mod_lists
-                log_event("BOOT", f"Mod list generated for {loader}")
-            except Exception as e:
-                log_event("ERROR", f"Failed to generate mod lists: {e}")
-            
-            # Start services
-            threading.Thread(target=http_server, args=(cfg["http_port"], cfg["mods_dir"]), daemon=True).start()
-            threading.Thread(target=backup_scheduler, args=(cfg,), daemon=True).start()
-            threading.Thread(target=monitor_players, args=(cfg,), daemon=True).start()
-            
-            # Initialize ferium scheduler for automatic mod updates
-            ferium_mgr = init_ferium_scheduler(cfg)
-            
-            # Start server with crash detection
-            run_server(cfg)
-            
-            try:
-                while True:
-                    time.sleep(60)
-            except KeyboardInterrupt:
-                log_event("SHUTDOWN", "Server stopping")
-                run("tmux send-keys -t MC 'stop' Enter")
-                time.sleep(10)
+            run_neorunner(cfg)
     else:
-        # Show client instructions
-        props = parse_props()
-        server_ip = props.get("server-ip", "YOURSERVER")
-        server_port = props.get("server-port", "25565")
+        # No args = run (unified install + start)
+        run_neorunner(cfg)
+
+def run_neorunner(cfg):
+    """Main entry point: install loader if needed, then run server."""
+    print("\n" + "="*70)
+    print("  NeoRunner - Minecraft Modded Server Manager")
+    print("="*70 + "\n")
+    
+    # Check if server is already initialized
+    initialized_marker = os.path.join(CWD, ".initialized")
+    is_initialized = os.path.exists(initialized_marker)
+    
+    loader_choice = cfg.get("loader", "neoforge")
+    mc_version = cfg.get("mc_version", "1.21.11")
+    
+    # ── STEP 1: Ensure loader is installed ──
+    print(f"[BOOT] Checking modloader: {loader_choice}")
+    if not download_loader(loader_choice):
+        # Loader not found - need to install it
+        if sys.stdin.isatty():
+            print(f"\n[BOOT] {loader_choice.upper()} not installed. Installing now...")
+        else:
+            log_event("BOOT", f"{loader_choice} not installed, auto-installing...")
         
-        print(f"\n{'='*50}")
-        print(f"Server IP: {server_ip}:{server_port}")
-        print(f"Mod HTTP: http://{server_ip}:{cfg['http_port']}")
-        print(f"\nClient Installation:")
-        print(f"\n  Windows (PowerShell):")
-        print(f"    powershell -ExecutionPolicy Bypass -File install-mods.ps1 -ServerIP {server_ip} -Port {cfg['http_port']}")
-        print(f"\n  Linux/Mac (Bash):")
-        print(f"    bash install-mods.sh {server_ip} {cfg['http_port']}")
-        print(f"\n  Direct ZIP:")
-        print(f"    http://{server_ip}:{cfg['http_port']}/mods_latest.zip")
-        print(f"{'='*50}\n")
+        if not ensure_loader_installed(loader_choice, mc_version):
+            print(f"\n[ERROR] Failed to install {loader_choice}")
+            print("Please install manually and try again.")
+            sys.exit(1)
+        
+        # Verify installation
+        if not download_loader(loader_choice):
+            print(f"\n[ERROR] {loader_choice} installation failed")
+            sys.exit(1)
+        
+        print(f"[BOOT] {loader_choice.upper()} installed successfully!\n")
+    
+    if not is_initialized:
+        # First-time setup
+        log_event("BOOT", "First-time initialization...")
+        create_systemd_service(cfg)
+    
+    # ── STEP 2: Check for curator first run ──
+    first_run_marker = os.path.join(CWD, ".curator_first_run")
+    if not os.path.exists(first_run_marker) and cfg.get("run_curator_on_startup", False):
+        if sys.stdin.isatty():
+            print("\n" + "="*70)
+            print("FIRST RUN: MOD CURATOR SETUP")
+            print("="*70)
+            print(f"\nWould you like to discover and add the top 100 mods")
+            print(f"for {loader_choice} {mc_version} right now?")
+            print("\nThis will fetch mods from Modrinth and let you select")
+            print("which ones to add to your server.\n")
+            
+            response = input("Run mod curator now? [y/n]: ").strip().lower()
+            if response == "y":
+                print("\nLaunching curator...")
+                curator_command(cfg)
+                print("\nCurator complete! Starting server...\n")
+        else:
+            log_event("BOOT", "Skipping interactive curator setup (running as service)")
+        
+        with open(first_run_marker, "w") as f:
+            f.write("first run complete")
+    
+    # ── STEP 3: Setup mods ──
+    print("[BOOT] Sorting mods by type (client/server/both)...")
+    sort_mods_by_type(cfg["mods_dir"])
+    
+    print("[BOOT] Checking mod compatibility (loader/version)...")
+    compat = preflight_mod_compatibility_check(cfg["mods_dir"], cfg)
+    if compat["quarantined"]:
+        print(f"[BOOT] WARNING: {len(compat['quarantined'])} incompatible mod(s) quarantined")
+    if compat["compatible"]:
+        print(f"[BOOT] {len(compat['compatible'])} mods passed compatibility check")
+    
+    # Regenerate install scripts
+    create_install_scripts(cfg["mods_dir"], cfg)
+    create_mod_zip(cfg["mods_dir"])
+    
+    if not is_initialized:
+        with open(initialized_marker, "w") as f:
+            f.write(f"initialized at {datetime.now().isoformat()}")
+        log_event("BOOT", "Initialization complete")
+    
+    # ── STEP 4: Generate mod lists ──
+    print(f"\n[BOOT] Generating mod list for {loader_choice}...")
+    try:
+        mod_lists = generate_mod_lists_for_loaders(mc_version, limit=cfg.get("curator_limit", 100), loaders=[loader_choice])
+        cfg["mod_lists"] = mod_lists
+    except Exception as e:
+        log_event("ERROR", f"Failed to generate mod lists: {e}")
+    
+    # ── STEP 5: Start services ──
+    print(f"\n[BOOT] Starting services...")
+    print(f"  Dashboard: http://localhost:{cfg['http_port']}")
+    print(f"  MC Server: starting in tmux session 'MC'\n")
+    
+    threading.Thread(target=http_server, args=(cfg["http_port"], cfg["mods_dir"]), daemon=True).start()
+    threading.Thread(target=backup_scheduler, args=(cfg,), daemon=True).start()
+    threading.Thread(target=monitor_players, args=(cfg,), daemon=True).start()
+    
+    ferium_mgr = init_ferium_scheduler(cfg)
+    
+    # Start Minecraft server
+    run_server(cfg)
+    
+    try:
+        while True:
+            time.sleep(60)
+    except KeyboardInterrupt:
+        log_event("SHUTDOWN", "Server stopping")
+        run("tmux send-keys -t MC 'stop' Enter")
+        time.sleep(10)
 
 if __name__ == "__main__":
     main()

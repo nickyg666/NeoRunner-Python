@@ -3516,10 +3516,10 @@ def run_server(cfg):
             log_event("SERVER_ERROR", f"Failed to start tmux session: {result.stderr}")
             return False
         
-        # Make socket dir readable so other users can attach
+        # Make socket dir accessible (700 for security)
         try:
-            os.chmod(socket_dir, 0o777)
-            os.chmod(tmux_socket, 0o777)
+            os.chmod(socket_dir, 0o700)
+            os.chmod(tmux_socket, 0o700)
         except Exception:
             pass
         

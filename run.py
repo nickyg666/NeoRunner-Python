@@ -23,6 +23,8 @@ def _ensure_deps():
         "requests": "requests",
         "playwright": "playwright",
         "playwright_stealth": "playwright-stealth",
+        "apscheduler": "apscheduler",
+        "tomli": "tomli",
     }
     missing = []
     for import_name, pip_name in required.items():
@@ -74,6 +76,11 @@ from ferium_manager import FeriumManager, setup_ferium_wizard
 from loaders.neoforge import NeoForgeLoader
 from loaders.forge import ForgeLoader
 from loaders.fabric import FabricLoader
+
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib
 
 LOADER_CLASSES = {
     "neoforge": NeoForgeLoader,
@@ -251,7 +258,7 @@ def install_neoforge(mc_version):
         
         log_event("LOADER_INSTALL", "Running installer (this takes a minute)...")
         result = subprocess.run(
-            ["java", "-jar", installer_path, "--installServer"],
+            ["java", "-jar", installer_jar, "--installServer"],
             cwd=CWD, capture_output=True, text=True, timeout=600
         )
         
@@ -319,8 +326,8 @@ def install_fabric(mc_version):
         
         log_event("LOADER_INSTALL", "Running Fabric installer...")
         result = subprocess.run(
-            ["java", "-jar", installer_path, "server", "-mcversion", mc_version, 
-             "-loader", loader_version, "-dir", CWD],
+            ["java", "-jar", "fabric-installer.jar", "server", "-mcversion", mc_version, 
+             "-loader", loader_version, "-dir", "."],
             cwd=CWD, capture_output=True, text=True, timeout=300
         )
         
@@ -387,7 +394,7 @@ def install_forge(mc_version):
         
         log_event("LOADER_INSTALL", "Running installer (this takes a minute)...")
         result = subprocess.run(
-            ["java", "-jar", installer_path, "--installServer"],
+            ["java", "-jar", installer_jar, "--installServer"],
             cwd=CWD, capture_output=True, text=True, timeout=600
         )
         
@@ -717,7 +724,6 @@ def _parse_mod_manifest(jar_path):
     }
     """
     import zipfile
-    import tomllib
     
     result = {
         "mod_id": None, "display_name": None,
@@ -2827,7 +2833,6 @@ def _preflight_dep_check(cfg):
         - fetched: number of deps fetched
         - optional_interop: list of {dep_id, requested_by} for shared optional deps"""
     import zipfile
-    import tomllib
     
     mc_version = cfg.get("mc_version", "1.21.11")
     loader_name = cfg.get("loader", "neoforge")

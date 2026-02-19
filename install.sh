@@ -15,7 +15,7 @@
 # What this does:
 #   1. Installs system deps (Java 21, Python 3, pip, git, tmux, xvfb)
 #   2. Creates 'services' user if needed
-#   3. Clones NeoRunner into /home/services
+#   3. Clones NeoRunner into /home/services, downloads ferium for mod management
 #   4. Sets up Python venv + pip packages (Flask, Playwright, etc.)
 #   5. Installs Playwright Chromium (for CurseForge scraping)
 #   6. Creates + enables systemd service (auto-start on boot)
@@ -47,11 +47,10 @@ fi
 
 REPO="https://github.com/nickyg666/NeoRunner-Python.git"
 BRANCH="master"
-INSTALL_DIR="/home/services"
-SERVICE_USER="services"
+INSTALL_DIR="/opt/NeoRunner"
+SERVICE_USER="ec2user"
 SERVICE_NAME="mcserver"
 VENV_DIR="$INSTALL_DIR/neorunner_env"
-
 echo -e "${BOLD}"
 echo "╔══════════════════════════════════════════════════════════╗"
 echo "║           NeoRunner — Modded MC Server Manager          ║"
@@ -124,33 +123,35 @@ else
     ok "User '$SERVICE_USER' created"
 fi
 
-# ── 3. Clone repo ───────────────────────────────────────────────────
+# ── 3. Clone repos ───────────────────────────────────────────────────
 step "3/7  Cloning NeoRunner"
 
-if [[ -d "$INSTALL_DIR/.git" ]]; then
-    info "Existing repo found, pulling latest..."
-    su - "$SERVICE_USER" -c "cd $INSTALL_DIR && git pull origin $BRANCH" 2>&1 | tail -3
-    ok "Repository updated"
+
+if [[ -d "$INSTALL_DIR" ]] && [[ "$(ls -A $INSTALL_DIR 2>/dev/null)" ]]; then
+    # Home dir exists with stuff in it but no git repo
+    info "Existing files found in $INSTALL_DIR, cloning into temp and merging..."
+    TMPDIR=$(mktemp -d)
+    git clone --branch "$BRANCH" "$REPO" "$TMPDIR" 2>&1 | tail -6
+
+    # Copy repo files (don't overwrite existing config/mods)
+    cp -rn "$TMPDIR/." "$INSTALL_DIR/" 2>/dev/null || true
+    # Make sure .git is there
+    cp -r "$TMPDIR/.git" "$INSTALL_DIR/.git"
+    rm -rf "$TMPDIR"
+    chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
+    ok "Repo merged into existing directory"
 else
-    if [[ -d "$INSTALL_DIR" ]] && [[ "$(ls -A $INSTALL_DIR 2>/dev/null)" ]]; then
-        # Home dir exists with stuff in it but no git repo
-        info "Existing files found in $INSTALL_DIR, cloning into temp and merging..."
-        TMPDIR=$(mktemp -d)
-        git clone --branch "$BRANCH" "$REPO" "$TMPDIR" 2>&1 | tail -3
-        # Copy repo files (don't overwrite existing config/mods)
-        cp -rn "$TMPDIR/." "$INSTALL_DIR/" 2>/dev/null || true
-        # Make sure .git is there
-        cp -r "$TMPDIR/.git" "$INSTALL_DIR/.git"
-        rm -rf "$TMPDIR"
-        chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
-        ok "Repo merged into existing directory"
-    else
-        info "Cloning fresh..."
-        git clone --branch "$BRANCH" "$REPO" "$INSTALL_DIR" 2>&1 | tail -3
-        chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
+    info "Cloning fresh..."
+    git clone --branch "$BRANCH" "$REPO" "$INSTALL_DIR" 2>&1 | tail -6
+    chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
+    if
         ok "Repository cloned to $INSTALL_DIR"
     fi
 fi
+#download UNZIP AND move FERIUM
+wget https://github.com/gorilla-devs/ferium/releases/download/v4.7.1/ferium-linux-nogui.zip
+unzip ferium*.zip
+mv ferium/ferium .
 
 # ── 4. Python venv + packages ───────────────────────────────────────
 step "4/7  Setting up Python environment"

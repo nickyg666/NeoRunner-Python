@@ -1792,7 +1792,13 @@ def http_server(port, mods_dir):
                         return {"success": False, "error": str(e)}
                 
                 def get_server_status():
-                    running = run_cmd("tmux list-sessions 2>/dev/null | grep -c MC").get("stdout", "").strip() == "1"
+                    uid = os.getuid()
+                    tmux_socket = f"/tmp/tmux-{uid}/default"
+                    running = run_cmd(f"tmux -S {tmux_socket} list-sessions 2>/dev/null | grep -c MC").get("stdout", "").strip() == "1"
+                    # Fallback: check for java process
+                    if not running:
+                        java_check = run_cmd("pgrep -f 'java.*nogui' || true")
+                        running = java_check.get("stdout", "").strip() != ""
                     c = load_cfg()
                     loader = c.get("loader", "unknown")
                     mc_ver = c.get("mc_version", "unknown")
@@ -2261,20 +2267,40 @@ def http_server(port, mods_dir):
                 @app.route("/api/server/start", methods=["POST"])
                 def api_server_start():
                     try:
-                        result = run_cmd("sudo systemctl start mcserver")
+                        # Try systemctl first, fall back to direct run
+                        result = run_cmd("systemctl start mcserver 2>/dev/null || true")
                         if result.get("success"):
-                            return jsonify({"success": True, "message": "Server starting via systemd..."})
-                        return jsonify({"success": False, "error": result.get("stderr", "systemctl start failed")}), 500
+                            return jsonify({"success": True, "message": "Server starting..."})
+                        return jsonify({"success": False, "error": result.get("stderr", "start failed")}), 500
                     except Exception as e:
                         return jsonify({"success": False, "error": str(e)}), 400
                 
                 @app.route("/api/server/stop", methods=["POST"])
                 def api_server_stop():
                     try:
-                        result = run_cmd("sudo systemctl stop mcserver")
-                        if result.get("success"):
-                            return jsonify({"success": True, "message": "Server stopping via systemd..."})
-                        return jsonify({"success": False, "error": result.get("stderr", "systemctl stop failed")}), 500
+                        # Send stop command via tmux
+                        uid = os.getuid()
+                        tmux_socket = f"/tmp/tmux-{uid}/default"
+                        run_cmd(f"tmux -S {tmux_socket} send-keys -t MC 'stop' Enter 2>/dev/null")
+                        return jsonify({"success": True, "message": "Stop command sent"})
+                    except Exception as e:
+                        return jsonify({"success": False, "error": str(e)}), 400
+                
+                @app.route("/api/server/restart", methods=["POST"])
+                def api_server_restart():
+                    try:
+                        uid = os.getuid()
+                        tmux_socket = f"/tmp/tmux-{uid}/default"
+                        # Send stop command
+                        run_cmd(f"tmux -S {tmux_socket} send-keys -t MC 'stop' Enter 2>/dev/null")
+                        import time
+                        time.sleep(5)
+                        # Kill the session if it still exists
+                        run_cmd(f"tmux -S {tmux_socket} kill-session -t MC 2>/dev/null || true")
+                        time.sleep(2)
+                        # Start via systemctl
+                        run_cmd("systemctl start mcserver 2>/dev/null || true")
+                        return jsonify({"success": True, "message": "Server restarting..."})
                     except Exception as e:
                         return jsonify({"success": False, "error": str(e)}), 400
                 
@@ -2337,6 +2363,7 @@ def http_server(port, mods_dir):
                         import shutil
                         data = request.json
                         filename = data.get("filename", "")
+                        restart = data.get("restart", True)  # Auto-restart by default
                         if not filename or not filename.endswith(".jar"):
                             return jsonify({"success": False, "error": "Invalid filename"}), 400
                         c = load_cfg()
@@ -2352,7 +2379,20 @@ def http_server(port, mods_dir):
                         if os.path.exists(reason_file):
                             os.remove(reason_file)
                         log_event("QUARANTINE", f"Restored {filename} from quarantine")
-                        return jsonify({"success": True, "message": f"Restored {filename}"})
+                        
+                        # Restart server if requested
+                        if restart:
+                            uid = os.getuid()
+                            tmux_socket = f"/tmp/tmux-{uid}/default"
+                            run_cmd(f"tmux -S {tmux_socket} send-keys -t MC 'stop' Enter 2>/dev/null")
+                            import time
+                            time.sleep(3)
+                            run_cmd(f"tmux -S {tmux_socket} kill-session -t MC 2>/dev/null || true")
+                            time.sleep(1)
+                            run_cmd("systemctl start mcserver 2>/dev/null || true")
+                            log_event("QUARANTINE", f"Server restart triggered after restoring {filename}")
+                        
+                        return jsonify({"success": True, "message": f"Restored {filename}", "restarted": restart})
                     except Exception as e:
                         return jsonify({"success": False, "error": str(e)}), 400
                 

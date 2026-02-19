@@ -64,9 +64,16 @@ def run_command(cmd):
 
 def get_server_status():
     """Get server status (running, player count, etc)"""
-    # Check if tmux session exists and is running
-    result = run_command("tmux list-sessions 2>/dev/null | grep -c MC")
+    # Check if tmux session exists on the shared socket
+    uid = os.getuid()
+    tmux_socket = f"/tmp/tmux-{uid}/default"
+    result = run_command(f"tmux -S {tmux_socket} list-sessions 2>/dev/null | grep -c MC")
     running = result["stdout"].strip() == "1"
+    
+    # Also check for java process as backup
+    if not running:
+        java_check = run_command("pgrep -f 'java.*neoforge.*nogui' || pgrep -f 'java.*forge.*nogui' || pgrep -f 'java.*fabric.*nogui'")
+        running = java_check["stdout"].strip() != ""
     
     cfg = load_config()
     

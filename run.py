@@ -72,7 +72,7 @@ def _ensure_deps():
 _ensure_deps()
 # ══════════════════════════════════════════════════════════════════════════════
 
-import json, time, threading, logging, hashlib, urllib.request, urllib.error
+import json, time, threading, logging, hashlib, urllib.request, urllib.error, socket
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -1306,16 +1306,68 @@ def check_installed(name, slug, installed_tokens, threshold=0.82):
 def get_server_hostname(cfg):
     """Resolve the public-facing hostname/IP for the server.
     
-    Priority: cfg['hostname'] > server.properties server-ip > 'localhost'
+    Priority: cfg['hostname'] > cloud metadata > local IP > server.properties > hostname
     """
+    # 1. Explicit config override
     hostname = cfg.get("hostname", "")
     if hostname:
         return hostname
+    
+    # 2. Try cloud metadata services for public IP
+    metadata_endpoints = [
+        ("EC2", "http://169.254.169.254/latest/meta-data/public-ipv4", {}),
+        ("GCP", "http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip", {"Metadata-Flavor": "Google"}),
+        ("Azure", "http://169.254.254.254/metadata/instance/network/interface/0/ipv4/ipAddress/0/publicIpAddress?api-version=2021-02-01&format=text", {"Metadata": "true"}),
+    ]
+    
+    for cloud_name, url, headers in metadata_endpoints:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "NeoRunner/1.0", **headers})
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                ip = resp.read().decode().strip()
+                if ip and ip != "" and not ip.startswith("127."):
+                    log_event("NETWORK", f"Detected {cloud_name} public IP: {ip}")
+                    return ip
+        except Exception:
+            pass
+    
+    # 3. Try hostname -I to get local IPs (pick first non-localhost)
+    try:
+        result = subprocess.run(["hostname", "-I"], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            ips = result.stdout.strip().split()
+            for ip in ips:
+                if not ip.startswith("127.") and not ip.startswith("::") and "." in ip:
+                    return ip.split("/")[0]
+    except Exception:
+        pass
+    
+    # 4. Try ip addr show as fallback
+    try:
+        result = subprocess.run(["ip", "addr", "show"], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            import re as _re
+            matches = _re.findall(r"inet (\d+\.\d+\.\d+\.\d+)", result.stdout)
+            for ip in matches:
+                if not ip.startswith("127."):
+                    return ip
+    except Exception:
+        pass
+    
+    # 5. Try server.properties
     props = parse_props()
     server_ip = props.get("server-ip", "")
-    if server_ip:
+    if server_ip and server_ip != "0.0.0.0" and not server_ip.startswith("127."):
         return server_ip
-    return "localhost"
+    
+    # 6. Try system hostname
+    try:
+        return socket.gethostname()
+    except Exception:
+        pass
+    
+    # 7. Last resort
+    return "YOUR_SERVER_IP"
 
 def create_install_scripts(mods_dir, cfg=None):
     """Generate client install scripts (.bat, .ps1, .sh) with correct IP/port from config.
@@ -2935,6 +2987,28 @@ def _preflight_dep_check(cfg):
         "quilt_loader", "javafml", "lowcodefml", "mixin", "mixinextras",
     }
     
+    # Loader-incompatible deps - skip these to avoid downloading wrong mods
+    # NeoForge/Forge server should not try to fetch Fabric deps, and vice versa
+    LOADER_INCOMPATIBLE_DEPS = {
+        "neoforge": {"fabric", "fabricloader", "fabric-api", "fabric-api-base", 
+                     "fabric-resource-loader-v0", "fabric-screen-api-v1", 
+                     "fabric-networking-api-v1", "fabric-object-builder-api-v1",
+                     "fabric-rendering-fluids-v1", "fabric-rendering-data-attachment-v1",
+                     "fabric-item-api-v1", "fabric-item-group-api-v1", "fabric-command-api-v2",
+                     "fabric-content-registries-v0", "fabric-block-api-v1", "fabric-loot-api-v2",
+                     "fabric-model-loading-api-v1", "fabric-particles-v1", "fabric-recipe-api-v1",
+                     "fabric-registry-sync-v0", "fabric-rendering-v1", "fabric-sound-api-v1",
+                     "fabric-transfer-api-v1", "fabric-convention-tags-v1", "fabric-data-attachment-api-v1",
+                     "fabric-dimensions-v1", "fabric-entity-events-v1", "fabric-game-rule-api-v1",
+                     "fabric-lifecycle-events-v1", "fabric-message-api-v1", "fabric-mining-level-api-v1",
+                     "fabric-screen-handler-api-v1", "fabric-textures-v0", "fabric-transitive-access-wideners-v1",
+                     "fabric-key-binding-api-v1", "fabric-client-tags-api-v1"},
+        "forge": {"fabric", "fabricloader", "fabric-api"},  # Same as neoforge
+        "fabric": {"neoforge", "forge", "fml"},
+    }
+    
+    incompatible_deps = LOADER_INCOMPATIBLE_DEPS.get(loader_name, set())
+    
     log_event("PREFLIGHT", f"Scanning {len(installed_mod_ids)} installed mods for missing dependencies ({len(jij_provided)} JiJ-provided)...")
     
     # ── Phase 1: Extract all required AND optional deps from all installed JARs ──
@@ -3007,6 +3081,9 @@ def _preflight_dep_check(cfg):
     # ── Phase 2: Check which deps are missing ──
     missing = {}  # dep_modId -> set of jar filenames that need it
     for dep_id, requesters in required_deps.items():
+        # Skip loader-incompatible deps (e.g., fabric-api on neoforge server)
+        if dep_id in incompatible_deps or dep_id in BUILTIN_MODS:
+            continue
         if dep_id not in installed_mod_ids:
             missing[dep_id] = requesters
     
@@ -3288,13 +3365,14 @@ def run_server(cfg):
     
     restart_count = 0
     crash_history = {}  # Track {mod_id: crash_count} across restarts
+    tmux_socket = f"/tmp/tmux-{os.getuid()}/default"
     
     while restart_count <= MAX_RESTART_ATTEMPTS:
         # Check if tmux session already exists (leftover from previous run)
-        existing = run("tmux has-session -t MC 2>/dev/null")
+        existing = run(f"tmux -S {tmux_socket} has-session -t MC 2>/dev/null")
         if existing.returncode == 0:
             log_event("SERVER_START", "Existing tmux session 'MC' found, killing it first")
-            run("tmux kill-session -t MC 2>/dev/null")
+            run(f"tmux -S {tmux_socket} kill-session -t MC 2>/dev/null")
             time.sleep(2)
         
         # Record log position before start so we can read just the new output
@@ -3305,14 +3383,24 @@ def run_server(cfg):
         except Exception:
             pass
         
-        # Launch in tmux
+        # Launch in tmux with shared socket for visibility
+        socket_dir = f"/tmp/tmux-{os.getuid()}"
+        os.makedirs(socket_dir, exist_ok=True)
+        
         tmux_cmd = f"cd '{CWD}' && stdbuf -oL -eL {java_cmd}"
-        result = run(f"tmux new-session -d -s MC \"{tmux_cmd}\"")
+        result = run(f"tmux -S {tmux_socket} new-session -d -s MC \"{tmux_cmd}\"")
         if result.returncode != 0:
             log_event("SERVER_ERROR", f"Failed to start tmux session: {result.stderr}")
             return False
         
-        run(f"tmux pipe-pane -o -t MC 'cat >> {LOG_FILE}'")
+        # Make socket dir readable so other users can attach
+        try:
+            os.chmod(socket_dir, 0o777)
+            os.chmod(tmux_socket, 0o777)
+        except Exception:
+            pass
+        
+        run(f"tmux -S {tmux_socket} pipe-pane -o -t MC 'cat >> {LOG_FILE}'")
         
         if restart_count == 0:
             log_event("SERVER_RUNNING", f"Server started in tmux session 'MC'")
@@ -3322,12 +3410,12 @@ def run_server(cfg):
         # Monitor loop — wait for server to stop (with timeout)
         monitor_start = time.time()
         while True:
-            check = run("tmux has-session -t MC 2>/dev/null")
+            check = run(f"tmux -S {tmux_socket} has-session -t MC 2>/dev/null")
             if check.returncode != 0:
                 break
             if time.time() - monitor_start > MONITOR_TIMEOUT:
                 log_event("SERVER_TIMEOUT", f"Server tmux session alive for >{MONITOR_TIMEOUT}s without crash — assuming hung, killing")
-                run("tmux kill-session -t MC 2>/dev/null")
+                run(f"tmux -S {tmux_socket} kill-session -t MC 2>/dev/null")
                 break
             time.sleep(5)
         
@@ -3395,9 +3483,9 @@ def run_server(cfg):
 
 def send_server_command(cmd):
     """Send command to tmux MC session"""
-    # Escape quotes and special chars
+    tmux_socket = f"/tmp/tmux-{os.getuid()}/default"
     cmd_safe = cmd.replace("'", "'\\''")
-    result = run(f"tmux send-keys -t MC '{cmd_safe}' Enter")
+    result = run(f"tmux -S {tmux_socket} send-keys -t MC '{cmd_safe}' Enter")
     return result.returncode == 0
 
 def send_chat_message(msg):

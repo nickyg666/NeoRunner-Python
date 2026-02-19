@@ -1405,17 +1405,37 @@ set "MC=%APPDATA%\\.minecraft"
 set "MODS=%MC%\\mods"
 set "OLD=%MC%\\oldmods"
 set "ZIP=%TEMP%\\mods_latest.zip"
+set "MANIFEST=%TEMP%\\mods_manifest.json"
 
 :: Create dirs
 if not exist "%MODS%" mkdir "%MODS%"
 if not exist "%OLD%" mkdir "%OLD%"
 
-:: Back up existing jars to oldmods
-echo Backing up old mods...
+:: Download manifest first
+echo Fetching mod list from server...
+curl.exe -L -s -o "%MANIFEST%" "http://%SERVER%:%PORT%/download/mods_manifest.json"
+if errorlevel 1 (
+    echo WARNING: Could not fetch manifest, moving all old mods
+    goto :moveall
+)
+
+:: Parse manifest and move mods not in the list
+echo Cleaning old mods not in server pack...
+for %%f in ("%MODS%\\*.jar") do (
+    findstr /C:"%%~nxf" "%MANIFEST%" >nul 2>&1
+    if errorlevel 1 (
+        echo   Moving old: %%~nxf
+        move /Y "%%f" "%OLD%\\" >nul 2>&1
+    )
+)
+goto :download
+
+:moveall
 for %%f in ("%MODS%\\*.jar") do (
     move /Y "%%f" "%OLD%\\" >nul 2>&1
 )
 
+:download
 :: Download mod pack
 echo.
 echo Downloading mods from server...
@@ -1437,6 +1457,7 @@ if errorlevel 1 (
     powershell -Command "Expand-Archive -Path '%ZIP%' -DestinationPath '%MODS%' -Force"
 )
 del "%ZIP%" 2>nul
+del "%MANIFEST%" 2>nul
 
 :: Count installed mods
 set count=0
@@ -1458,6 +1479,7 @@ param([string]$ServerIP="{server_ip}", [int]$Port={http_port})
 $modsPath = "$env:APPDATA\\.minecraft\\mods"
 $oldmodsPath = "$env:APPDATA\\.minecraft\\oldmods"
 $zipPath = "$env:TEMP\\mods_latest.zip"
+$manifestPath = "$env:TEMP\\mods_manifest.json"
 
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "   Minecraft Mod Installer" -ForegroundColor Cyan
@@ -1466,11 +1488,33 @@ Write-Host "============================================" -ForegroundColor Cyan
 
 New-Item -ItemType Directory -Path $oldmodsPath -Force | Out-Null
 New-Item -ItemType Directory -Path $modsPath -Force | Out-Null
-if (Test-Path $modsPath) {{
+
+# Fetch manifest and clean old mods
+Write-Host "Fetching mod list from server..." -ForegroundColor Yellow
+try {{
+    $manifest = Invoke-RestMethod -Uri "http://$ServerIP`:$Port/download/mods_manifest.json" -UseBasicParsing
+    $serverMods = $manifest.mods
+    Write-Host "Server has $($serverMods.Count) mods" -ForegroundColor Gray
+    
+    # Move mods not in the manifest
+    $movedCount = 0
+    Get-ChildItem -Path $modsPath -Filter "*.jar" -ErrorAction SilentlyContinue | ForEach-Object {{
+        if ($serverMods -notcontains $_.Name) {{
+            Write-Host "  Moving old: $($_.Name)" -ForegroundColor DarkGray
+            Move-Item -Path $_.FullName -Destination $oldmodsPath -Force
+            $movedCount++
+        }}
+    }}
+    if ($movedCount -gt 0) {{
+        Write-Host "Moved $movedCount old mods to oldmods" -ForegroundColor Yellow
+    }}
+}} catch {{
+    Write-Host "WARNING: Could not fetch manifest, moving all old mods" -ForegroundColor Yellow
     Get-ChildItem -Path $modsPath -Filter "*.jar" -ErrorAction SilentlyContinue | ForEach-Object {{
         Move-Item -Path $_.FullName -Destination $oldmodsPath -Force
     }}
 }}
+
 Write-Host "Downloading mods..." -ForegroundColor Yellow
 try {{
     Invoke-WebRequest -Uri "http://$ServerIP`:$Port/download/mods_latest.zip" -OutFile $zipPath -UseBasicParsing
@@ -1530,12 +1574,14 @@ echo "Close Minecraft and relaunch to use them."
     log_event("SCRIPTS", f"Generated install-mods.bat/.ps1/.sh (ip={server_ip}, port={http_port})")
 
 def create_mod_zip(mods_dir):
-    """Create mods_latest.zip with all mods (root + clientonly) in flat structure"""
+    """Create mods_latest.zip with all mods (root + clientonly) in flat structure.
+    Also creates mods_manifest.json listing all mods for client-side cleanup."""
     import shutil
     import zipfile
     
     clientonly_dir = os.path.join(mods_dir, "clientonly")
     zip_path = os.path.join(mods_dir, "mods_latest.zip")
+    manifest_path = os.path.join(mods_dir, "mods_manifest.json")
     
     try:
         # Collect all jar files with root taking precedence
@@ -1561,9 +1607,19 @@ def create_mod_zip(mods_dir):
             for filename, file_path in sorted(mods_to_zip.items()):
                 zf.write(file_path, arcname=filename)
         
+        # Create manifest JSON
+        manifest = {
+            "version": "1.0",
+            "created": datetime.now().isoformat(),
+            "mod_count": len(mods_to_zip),
+            "mods": sorted(mods_to_zip.keys())
+        }
+        with open(manifest_path, 'w') as f:
+            json.dump(manifest, f, indent=2)
+        
         size_mb = os.path.getsize(zip_path) / (1024 * 1024)
         mod_count = len(mods_to_zip)
-        log_event("MOD_ZIP", f"Created mods_latest.zip ({mod_count} mods, {size_mb:.2f} MB)")
+        log_event("MOD_ZIP", f"Created mods_latest.zip ({mod_count} mods, {size_mb:.2f} MB) + manifest")
         
     except Exception as e:
         log_event("MOD_ZIP_ERROR", f"Failed to create ZIP: {e}")
@@ -1589,7 +1645,7 @@ class SecureHTTPHandler(SimpleHTTPRequestHandler):
             return
         
         # Extension whitelist
-        allowed = [".jar", ".zip", ".ps1", ".sh"]
+        allowed = [".jar", ".zip", ".ps1", ".sh", ".json"]
         if not any(file_name.endswith(ext) for ext in allowed):
             self.send_error(403)
             return
@@ -5864,13 +5920,15 @@ def run_neorunner(cfg):
             f.write(f"initialized at {datetime.now().isoformat()}")
         log_event("BOOT", "Initialization complete")
     
-    # ── STEP 4: Generate mod lists ──
-    print(f"\n[BOOT] Generating mod list for {loader_choice}...")
-    try:
-        mod_lists = generate_mod_lists_for_loaders(mc_version, limit=cfg.get("curator_limit", 100), loaders=[loader_choice])
-        cfg["mod_lists"] = mod_lists
-    except Exception as e:
-        log_event("ERROR", f"Failed to generate mod lists: {e}")
+    # ── STEP 4: Generate mod lists (in background to not block server start) ──
+    def _generate_mod_lists_async():
+        try:
+            mod_lists = generate_mod_lists_for_loaders(mc_version, limit=cfg.get("curator_limit", 100), loaders=[loader_choice])
+            cfg["mod_lists"] = mod_lists
+        except Exception as e:
+            log_event("ERROR", f"Failed to generate mod lists: {e}")
+    
+    threading.Thread(target=_generate_mod_lists_async, daemon=True).start()
     
     # ── STEP 5: Start services ──
     print(f"\n[BOOT] Starting services...")

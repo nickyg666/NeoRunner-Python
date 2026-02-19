@@ -102,12 +102,20 @@ if [[ "$PKG" == "apt" ]]; then
         git tmux curl wget unzip \
         2>&1 | tail -5
 
+    # Install Playwright browser dependencies
+    info "Installing Playwright browser dependencies..."
+    apt-get install -y -qq \
+        libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
+        libxcursor1 libxdamage1 libxfixes3 libxi6 libxrandr2 libxss1 libxtst6 \
+        libgbm1 libpango-1.0-0 libcairo2 libasound2 libnspr4 libnss3 libgtk-3-0 \
+        2>&1 | tail -5 || warn "Some Playwright deps may be missing"
+
     # Try multiple Java 21 providers (openjdk, temurin, corretto)
     if ! java -version 2>&1 | grep -qE "21|22|23"; then
         info "Installing Java 21..."
         apt-get install -y -qq openjdk-21-jre-headless 2>&1 | tail -3 || \
             { info "Trying Eclipse Temurin..."; apt-get install -y -qq temurin-21-jre 2>&1 | tail -3; } || \
-            { info "Trying Amazon Corretto..."; apt-get install -y -qq java-21-amazon-corretto-jre 2>&1 | tail -3; } || \
+            { info "Trying Amazon Corretto..."; apt-get install -y -qq java-21-amazon-corretto-jre 2>&1 | tail-3; } || \
             warn "Could not auto-install Java 21, please install manually"
     fi
 elif [[ "$PKG" == "dnf" ]] || [[ "$PKG" == "yum" ]]; then
@@ -117,6 +125,14 @@ elif [[ "$PKG" == "dnf" ]] || [[ "$PKG" == "yum" ]]; then
         git tmux curl wget unzip \
         2>&1 | tail -5
 
+    # Install Playwright browser dependencies for RHEL/Amazon Linux 2
+    info "Installing Playwright browser dependencies..."
+    $PKG install -y --skip-broken \
+        atk at-spi2-atk cups-libs libdrm libxkbcommon libxcomposite libxcursor \
+        libxdamage libxfixes libxi libxrandr libxscrnsaver libxtst mesa-libgbm \
+        pango alsa-lib nss nspr gtk3 \
+        2>&1 | tail -5 || warn "Some Playwright deps may be missing"
+
     # Try multiple Java 21 providers for RHEL/Amazon Linux
     if ! java -version 2>&1 | grep -qE "21|22|23"; then
         info "Installing Java 21..."
@@ -124,6 +140,12 @@ elif [[ "$PKG" == "dnf" ]] || [[ "$PKG" == "yum" ]]; then
             $PKG install -y --skip-broken java-21-amazon-corretto 2>&1 | tail -3 || \
             $PKG install -y --skip-broken java-21-temurin 2>&1 | tail -3 || \
             warn "Could not auto-install Java 21, please install manually"
+    fi
+    
+    # Amazon Linux 2 extras for newer packages
+    if [[ -f /etc/system-release ]] && grep -q "Amazon Linux 2" /etc/system-release; then
+        info "Enabling Amazon Linux 2 extras..."
+        amazon-linux-extras install -y epel java-openjdk11 2>/dev/null || true
     fi
 fi
 
@@ -244,10 +266,26 @@ pip3 install --break-system-packages -q Flask requests playwright playwright-ste
 step "5/6  Installing Playwright Chromium"
 
 info "This downloads ~150 MB of Chromium for headless CurseForge scraping..."
-su - "$SERVICE_USER" -c "$VENV_DIR/bin/python3 -m playwright install chromium" 2>&1 | tail -5
-# Install system deps for Playwright
-$VENV_DIR/bin/python3 -m playwright install-deps 2>&1 | tail -5 || \
-    warn "Playwright deps install had issues (may still work)"
+# Install browser
+su - "$SERVICE_USER" -c "$VENV_DIR/bin/python3 -m playwright install chromium" 2>&1 | tail -10 || \
+    warn "Playwright browser install had issues"
+
+# Install system deps for Playwright (requires root)
+info "Installing Playwright system dependencies..."
+$VENV_DIR/bin/python3 -m playwright install-deps chromium 2>&1 | tail -5 || {
+    warn "Automatic dep install failed, trying manual packages..."
+    # Already installed above, but try again for good measure
+    if command -v apt-get &>/dev/null; then
+        apt-get install -y -qq libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 libxcomposite1 \
+            libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 \
+            libnspr4 libnss3 libgtk-3-0 2>&1 | tail -3
+    elif command -v yum &>/dev/null || command -v dnf &>/dev/null; then
+        PKG_CMD="yum"
+        command -v dnf &>/dev/null && PKG_CMD="dnf"
+        $PKG_CMD install -y --skip-broken atk at-spi2-atk cups-libs libxkbcommon libxcomposite \
+            libxdamage libxfixes libxrandr libxtst mesa-libgbm pango alsa-lib nss nspr gtk3 2>&1 | tail -3
+    fi
+}
 ok "Playwright Chromium installed"
 
 # ── 6. Systemd service ──────────────────────────────────────────────

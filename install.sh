@@ -119,33 +119,61 @@ if [[ "$PKG" == "apt" ]]; then
             warn "Could not auto-install Java 21, please install manually"
     fi
 elif [[ "$PKG" == "dnf" ]] || [[ "$PKG" == "yum" ]]; then
+    # Detect Fedora vs RHEL/Amazon Linux
+    DISTRO="rhel"
+    if [[ -f /etc/fedora-release ]]; then
+        DISTRO="fedora"
+    elif [[ -f /etc/system-release ]] && grep -q "Amazon Linux" /etc/system-release; then
+        DISTRO="amazon"
+    fi
+    
+    info "Detected distro: $DISTRO"
     info "Installing Java 21, Python 3, git, tmux..."
     $PKG install -y --skip-broken \
         python3 python3-pip \
         git tmux curl wget unzip \
         2>&1 | tail -5
 
-    # Install Playwright browser dependencies for RHEL/Amazon Linux 2
+    # Install Playwright browser dependencies
     info "Installing Playwright browser dependencies..."
-    $PKG install -y --skip-broken \
-        atk at-spi2-atk cups-libs libdrm libxkbcommon libxcomposite libxcursor \
-        libxdamage libxfixes libxi libxrandr libxscrnsaver libxtst mesa-libgbm \
-        pango alsa-lib nss nspr gtk3 \
-        2>&1 | tail -5 || warn "Some Playwright deps may be missing"
+    if [[ "$DISTRO" == "fedora" ]]; then
+        # Fedora package names
+        $PKG install -y --skip-broken \
+            atk at-spi2-atk cups-libs libdrm libxkbcommon libXcomposite libXcursor \
+            libXdamage libXfixes libXi libXrandr libXScrnSaver libXtst mesa-libgbm \
+            pango alsa-lib nss nspr gtk3 libwayland-client libwayland-egl \
+            2>&1 | tail -5 || warn "Some Playwright deps may be missing"
+    else
+        # RHEL/Amazon Linux package names (different capitalization)
+        $PKG install -y --skip-broken \
+            atk at-spi2-atk cups-libs libdrm libxkbcommon libxcomposite libxcursor \
+            libxdamage libxfixes libxi libxrandr libxscrnsaver libxtst mesa-libgbm \
+            pango alsa-lib nss nspr gtk3 \
+            2>&1 | tail -5 || warn "Some Playwright deps may be missing"
+    fi
 
-    # Try multiple Java 21 providers for RHEL/Amazon Linux
+    # Try multiple Java 21 providers
     if ! java -version 2>&1 | grep -qE "21|22|23"; then
         info "Installing Java 21..."
-        $PKG install -y --skip-broken java-21-openjdk-headless 2>&1 | tail -3 || \
-            $PKG install -y --skip-broken java-21-amazon-corretto 2>&1 | tail -3 || \
-            $PKG install -y --skip-broken java-21-temurin 2>&1 | tail -3 || \
-            warn "Could not auto-install Java 21, please install manually"
+        if [[ "$DISTRO" == "fedora" ]]; then
+            # Fedora has different java package naming
+            $PKG install -y --skip-broken java-21-openjdk-headless 2>&1 | tail -3 || \
+                $PKG install -y --skip-broken java-openjdk21 2>&1 | tail -3 || \
+                $PKG install -y --skip-broken java-latest-openjdk-headless 2>&1 | tail -3 || \
+                warn "Could not auto-install Java 21, please install manually"
+        else
+            # RHEL/Amazon Linux
+            $PKG install -y --skip-broken java-21-openjdk-headless 2>&1 | tail -3 || \
+                $PKG install -y --skip-broken java-21-amazon-corretto 2>&1 | tail -3 || \
+                $PKG install -y --skip-broken java-21-temurin 2>&1 | tail -3 || \
+                warn "Could not auto-install Java 21, please install manually"
+        fi
     fi
     
     # Amazon Linux 2 extras for newer packages
-    if [[ -f /etc/system-release ]] && grep -q "Amazon Linux 2" /etc/system-release; then
+    if [[ "$DISTRO" == "amazon" ]] && grep -q "Amazon Linux 2" /etc/system-release; then
         info "Enabling Amazon Linux 2 extras..."
-        amazon-linux-extras install -y epel java-openjdk11 2>/dev/null || true
+        amazon-linux-extras install -y epel 2>/dev/null || true
     fi
 fi
 

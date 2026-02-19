@@ -79,12 +79,11 @@ if [[ "$PKG" == "apt" ]]; then
     info "Updating apt cache..."
     apt-get update -qq
 
-    info "Installing Java 21, Python 3, git, tmux, xvfb..."
+    info "Installing Java 21, Python 3, git, tmux..."
     apt-get install -y -qq \
         openjdk-21-jre-headless \
         python3 python3-pip python3-venv \
         git tmux curl wget unzip \
-        xvfb calibre \
         2>&1 | tail -5
 
     # Java 21 might not be in default repos on older Ubuntu
@@ -96,19 +95,17 @@ if [[ "$PKG" == "apt" ]]; then
         apt-get install -y -qq openjdk-21-jre-headless 2>&1 | tail -3
     fi
 elif [[ "$PKG" == "dnf" ]] || [[ "$PKG" == "yum" ]]; then
-    info "Installing Java 21, Python 3, git, tmux, xvfb..."
-    $PKG install -y \
-        java-21-openjdk-headless \
+    info "Installing Java 21, Python 3, git, tmux..."
+    $PKG install -y --skip-broken \
+        java-21-amazon-corretto\
         python3 python3-pip \
         git tmux curl wget unzip \
-        xorg-x11-server-Xvfb \
         2>&1 | tail -5
 fi
 
 # Verify critical deps
 command -v java    &>/dev/null || fail "Java not installed"
 command -v python3 &>/dev/null || fail "Python 3 not installed"
-command -v git     &>/dev/null || fail "Git not installed"
 command -v tmux    &>/dev/null || fail "tmux not installed"
 
 JAVA_VER=$(java -version 2>&1 | head -1)

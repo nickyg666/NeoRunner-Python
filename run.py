@@ -803,9 +803,14 @@ def _parse_mod_manifest(jar_path):
                         else:
                             sides_found.append(side)
                     
-                    # If no loader detected from deps but has neoforge.mods.toml, it's neoforge
-                    if not result["loader"] and result["has_neoforge_toml"]:
-                        result["loader"] = "neoforge"
+                    # If no loader detected from deps, infer from TOML file name
+                    # ONLY set loader if we're certain. If a mod doesn't explicitly
+                    # require neoforge/forge in deps, it might be cross-compatible.
+                    if not result["loader"]:
+                        if result["has_neoforge_toml"]:
+                            result["loader"] = "neoforge"
+                        # Don't default to "forge" for mods.toml - let it pass
+                        # as loader=None (cross-compatible) unless deps say otherwise
                     
                     # Determine overall side: if ALL deps are CLIENT, mod is client-only
                     if sides_found:
@@ -3073,8 +3078,10 @@ def _preflight_dep_check(cfg):
                         fabric_data = json.loads(fabric_raw)
                         for dep_id, dep_ver in fabric_data.get("depends", {}).items():
                             dep_id_lower = dep_id.lower()
-                            if dep_id_lower not in BUILTIN_MODS:
-                                required_deps.setdefault(dep_id_lower, set()).add(fn)
+                            # Skip builtin AND loader-incompatible deps
+                            if dep_id_lower in BUILTIN_MODS or dep_id_lower in incompatible_deps:
+                                continue
+                            required_deps.setdefault(dep_id_lower, set()).add(fn)
             except Exception:
                 continue
     

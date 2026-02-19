@@ -1,17 +1,6 @@
 Flask
-feedparser
 beautifulsoup4
 requests
-lxml
 playwright
 playwright-stealth
 
-# For ubuntu systems, you need to install the following system packages
-# not sure how this would work on windows because no x or framebuffer really.
-# maybe it will use the playwright browser, I don't know. didn't test it.
-apt get install -y xvfb calibre
-# optional, if you don't want to do venv, it didn't break MY packages
-pipx install playwright playwright-stealth --break-system-packages
-# if you ran setup script, you already use a venv
-# don't forget to add the smtp gmail you are sending 
-#from, to your allow list in amazon content settings on your amazon account!

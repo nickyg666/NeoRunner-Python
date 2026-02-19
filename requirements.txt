@@ -3,4 +3,4 @@ beautifulsoup4
 requests
 playwright
 playwright-stealth
-
+apscheduler

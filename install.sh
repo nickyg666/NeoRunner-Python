@@ -316,20 +316,23 @@ $VENV_DIR/bin/python3 -m playwright install-deps chromium 2>&1 | tail -5 || {
 }
 ok "Playwright Chromium installed"
 
-# ── 6. Systemd service ──────────────────────────────────────────────
-step "6/6  Creating systemd service"
+# ── 6. Systemd user service ──────────────────────────────────────────
+step "6/6  Creating systemd user service"
 
-cat > "/etc/systemd/system/${SERVICE_NAME}.service" << SERVICEEOF
+# Create user systemd directory
+SYSTEMD_USER_DIR="/home/$SERVICE_USER/.config/systemd/user"
+su - "$SERVICE_USER" -c "mkdir -p $SYSTEMD_USER_DIR"
+
+# Write user service file (no root required to manage)
+su - "$SERVICE_USER" -c "cat > $SYSTEMD_USER_DIR/${SERVICE_NAME}.service" << SERVICEEOF
 [Unit]
 Description=NeoRunner Minecraft Server
 After=network.target
-Wants=network-online.target
 
 [Service]
 Type=simple
-User=$SERVICE_USER
 WorkingDirectory=$INSTALL_DIR
-ExecStart=/usr/bin/python3 $INSTALL_DIR/run.py run
+ExecStart=$VENV_DIR/bin/python3 $INSTALL_DIR/run.py run
 Restart=always
 RestartSec=10
 StandardOutput=append:$INSTALL_DIR/live.log
@@ -339,12 +342,17 @@ Environment="PYTHONPATH=$INSTALL_DIR"
 Environment="NEORUNNER_HOME=$INSTALL_DIR"
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
 SERVICEEOF
 
-systemctl daemon-reload
-systemctl enable "$SERVICE_NAME" 2>/dev/null
-ok "Service '$SERVICE_NAME' created and enabled"
+# Enable lingering so user services start at boot without login
+loginctl enable-linger "$SERVICE_USER" 2>/dev/null || true
+
+# Reload and enable user service
+su - "$SERVICE_USER" -c "XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user daemon-reload"
+su - "$SERVICE_USER" -c "XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user enable $SERVICE_NAME" 2>/dev/null || true
+ok "User service '$SERVICE_NAME' created and enabled"
+info "Manage with: systemctl --user start/stop/restart $SERVICE_NAME"
 
 # ── Create directories ──────────────────────────────────────────────
 su - "$SERVICE_USER" -c "mkdir -p $INSTALL_DIR/mods/clientonly"

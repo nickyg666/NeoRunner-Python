@@ -2280,20 +2280,25 @@ def http_server(port, mods_dir):
                 @app.route("/api/server/start", methods=["POST"])
                 def api_server_start():
                     try:
-                        # Try systemctl first, fall back to direct run
-                        result = run_cmd("systemctl start mcserver 2>/dev/null || true")
-                        if result.get("success"):
+                        uid = os.getuid()
+                        env = os.environ.copy()
+                        env["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
+                        result = subprocess.run(
+                            ["systemctl", "--user", "start", "mcserver"],
+                            env=env, capture_output=True, text=True
+                        )
+                        if result.returncode == 0:
                             return jsonify({"success": True, "message": "Server starting..."})
-                        return jsonify({"success": False, "error": result.get("stderr", "start failed")}), 500
+                        return jsonify({"success": False, "error": result.stderr or "start failed"}), 500
                     except Exception as e:
                         return jsonify({"success": False, "error": str(e)}), 400
                 
                 @app.route("/api/server/stop", methods=["POST"])
                 def api_server_stop():
                     try:
-                        # Send stop command via tmux
                         uid = os.getuid()
                         tmux_socket = f"/tmp/tmux-{uid}/default"
+                        # Send stop command via tmux
                         run_cmd(f"tmux -S {tmux_socket} send-keys -t MC 'stop' Enter 2>/dev/null")
                         return jsonify({"success": True, "message": "Stop command sent"})
                     except Exception as e:
@@ -2301,19 +2306,25 @@ def http_server(port, mods_dir):
                 
                 @app.route("/api/server/restart", methods=["POST"])
                 def api_server_restart():
+                    """Restart server: stop MC gracefully, then restart via systemd user service"""
                     try:
                         uid = os.getuid()
                         tmux_socket = f"/tmp/tmux-{uid}/default"
-                        # Send stop command
+                        # Send stop command to MC server
                         run_cmd(f"tmux -S {tmux_socket} send-keys -t MC 'stop' Enter 2>/dev/null")
                         import time
-                        time.sleep(5)
-                        # Kill the session if it still exists
+                        time.sleep(3)
+                        # Kill tmux session
                         run_cmd(f"tmux -S {tmux_socket} kill-session -t MC 2>/dev/null || true")
-                        time.sleep(2)
-                        # Start via systemctl
-                        run_cmd("systemctl start mcserver 2>/dev/null || true")
-                        return jsonify({"success": True, "message": "Server restarting..."})
+                        # Restart via user systemd
+                        env = os.environ.copy()
+                        env["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
+                        subprocess.run(
+                            ["systemctl", "--user", "restart", "mcserver"],
+                            env=env, capture_output=True
+                        )
+                        log_event("SERVER_RESTART", "Restart requested via dashboard")
+                        return jsonify({"success": True, "message": "Restarting..."})
                     except Exception as e:
                         return jsonify({"success": False, "error": str(e)}), 400
                 
@@ -2401,8 +2412,10 @@ def http_server(port, mods_dir):
                             import time
                             time.sleep(3)
                             run_cmd(f"tmux -S {tmux_socket} kill-session -t MC 2>/dev/null || true")
-                            time.sleep(1)
-                            run_cmd("systemctl start mcserver 2>/dev/null || true")
+                            # Restart via user systemd
+                            env = os.environ.copy()
+                            env["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
+                            subprocess.run(["systemctl", "--user", "restart", "mcserver"], env=env, capture_output=True)
                             log_event("QUARANTINE", f"Server restart triggered after restoring {filename}")
                         
                         return jsonify({"success": True, "message": f"Restored {filename}", "restarted": restart})
@@ -5805,34 +5818,62 @@ def curator_command(cfg, limit=None, show_optional_audit=False, sort="downloads"
     print("Done - ready for distribution on port 8000\n")
 
 def create_systemd_service(cfg):
-    """Generate systemd service file for auto-start"""
+    """Generate systemd user service file for auto-start (no sudo needed)"""
     loader = cfg.get("loader", "neoforge")
     mc_ver = cfg.get("mc_version", "1.21.11")
     python_bin = sys.executable or "/usr/bin/python3"
+    user = os.getenv("USER", "services")
+    
     service_content = f"""[Unit]
 Description=Minecraft {loader} {mc_ver} Server (NeoRunner)
 After=network.target
 
 [Service]
 Type=simple
-User={os.getenv('USER')}
 WorkingDirectory={CWD}
 ExecStart={python_bin} {os.path.abspath(__file__)} run
 Restart=always
 RestartSec=10
+StandardOutput=append:{CWD}/live.log
+StandardError=append:{CWD}/live.log
+Environment="NEORUNNER_HOME={CWD}"
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
 """
-    service_path = os.path.join(CWD, "mcserver.service")
+    
+    # Create user systemd directory
+    systemd_dir = os.path.expanduser("~/.config/systemd/user")
+    os.makedirs(systemd_dir, exist_ok=True)
+    
+    service_path = os.path.join(systemd_dir, "mcserver.service")
     with open(service_path, "w") as f:
         f.write(service_content)
-    log_event("SYSTEMD", f"Created {service_path}")
-    print(f"\nTo install systemd service:")
-    print(f"  sudo mv {service_path} /etc/systemd/system/")
-    print(f"  sudo systemctl daemon-reload")
-    print(f"  sudo systemctl enable mcserver")
-    print(f"  sudo systemctl start mcserver\n")
+    
+    log_event("SYSTEMD", f"Created user service at {service_path}")
+    
+    # Enable lingering so service starts at boot without login
+    try:
+        subprocess.run(["loginctl", "enable-linger", user], capture_output=True)
+    except Exception:
+        pass
+    
+    # Reload and enable
+    try:
+        uid = os.getuid()
+        run_dir = f"/run/user/{uid}"
+        env = os.environ.copy()
+        env["XDG_RUNTIME_DIR"] = run_dir
+        subprocess.run(["systemctl", "--user", "daemon-reload"], env=env, capture_output=True)
+        subprocess.run(["systemctl", "--user", "enable", "mcserver"], env=env, capture_output=True)
+    except Exception as e:
+        log_event("SYSTEMD", f"Could not auto-enable service: {e}")
+    
+    print(f"\nUser service installed! Manage with:")
+    print(f"  systemctl --user start mcserver")
+    print(f"  systemctl --user stop mcserver")
+    print(f"  systemctl --user restart mcserver")
+    print(f"  systemctl --user status mcserver")
 
 def init_ferium_scheduler(cfg):
     """Initialize ferium background scheduler for mod updates"""

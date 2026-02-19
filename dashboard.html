@@ -556,8 +556,10 @@
              <!-- Quick Actions Card -->
             <div class="card">
                 <h2>Quick Actions</h2>
-                <button id="btn-start" class="success" onclick="startServer()">▶ Start Server</button>
-                <button id="btn-stop" class="danger" onclick="stopServer()" disabled>⏹ Stop Server</button>
+                <button id="btn-start" class="success" onclick="startServer()">▶ Start</button>
+                <button id="btn-stop" class="danger" onclick="stopServer()" disabled>⏹ Stop</button>
+                <button id="btn-restart" onclick="restartServer()" style="background:#FF9800;">🔄 Restart</button>
+                <br><br>
                 <button class="success" onclick="upgradeMods()">📦 Upgrade Mods</button>
                 <button onclick="openModSelector()">📋 Browse & Add Mods</button>
                 <button onclick="openConvertModal()" style="background:#9C27B0;">🔄 Convert Modpack</button>
@@ -1228,6 +1230,21 @@
                     })
                     .catch(err => showAlert(`Error: ${err}`, 'error'));
             }
+        }
+        
+        function restartServer() {
+            if (!confirm('Restart the server? This will kick all players.')) return;
+            fetch('/api/server/restart', { method: 'POST' })
+                .then(r => r.json())
+                .then(result => {
+                    if (result.success) {
+                        showAlert('Restarting... page will reload in 10s', 'info');
+                        setTimeout(() => location.reload(), 10000);
+                    } else {
+                        showAlert(`Error: ${result.error}`, 'error');
+                    }
+                })
+                .catch(err => showAlert(`Error: ${err}`, 'error'));
         }
         
         function upgradeMods() {

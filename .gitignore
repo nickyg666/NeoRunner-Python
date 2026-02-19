@@ -27,7 +27,7 @@ usercache.json
 usernamecache.json
 whitelist.json
 user_jvm_args.txt
-player_smb.txt
+
 
 # Runtime files
 *.log
@@ -78,10 +78,8 @@ renzoshousefixedzip/
 run.bat
 run.sh
 run.v1.py
-MClisten.sh
 mc-gpio-monitor.sh
 mc-remote.sh
-neoforgedAdvanced.sh
 ovpnas.sh
 curator_cache_*.json
 curator_optional_audit_*.json

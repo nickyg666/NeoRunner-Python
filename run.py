@@ -112,7 +112,17 @@ CF_USER_AGENTS = [
 import re
 import random
 
-CWD = "/home/services"
+def _get_cwd():
+    """Determine the working directory dynamically."""
+    env_cwd = os.environ.get("NEORUNNER_HOME")
+    if env_cwd:
+        return env_cwd
+    try:
+        return os.path.dirname(os.path.abspath(__file__))
+    except NameError:
+        return os.getcwd()
+
+CWD = _get_cwd()
 CONFIG = os.path.join(CWD, "config.json")
 
 # Setup logging to file and console
@@ -467,72 +477,225 @@ def get_config():
     
     return cfg
 
-def classify_mod(jar_path):
-    """
-    Detect if a mod is client-only, server-only, or both.
-    Returns: "client", "server", or "both"
+def _parse_mod_manifest(jar_path):
+    """Extract structured manifest data from a mod JAR.
+    
+    Reads neoforge.mods.toml, mods.toml, and/or fabric.mod.json and returns a dict:
+    {
+        "mod_id": str or None,
+        "display_name": str or None,
+        "loader": "neoforge" | "forge" | "fabric" | None,
+        "loader_version_range": str or None,       # e.g. "[21.11.0-beta,)"
+        "mc_version_range": str or None,            # e.g. "[1.21.11,1.22)"
+        "side": "client" | "server" | "both" | None,  # from deps or environment
+        "display_test": str or None,                # IGNORE_ALL_VERSION, NONE, etc.
+        "environment": str or None,                 # fabric: "client", "server", "*"
+        "has_neoforge_toml": bool,
+        "has_fabric_json": bool,
+    }
     """
     import zipfile
+    import tomllib
+    
+    result = {
+        "mod_id": None, "display_name": None,
+        "loader": None, "loader_version_range": None,
+        "mc_version_range": None, "side": None,
+        "display_test": None, "environment": None,
+        "has_neoforge_toml": False, "has_fabric_json": False,
+    }
     
     try:
         with zipfile.ZipFile(jar_path, 'r') as zf:
-            # Check for client-only markers
-            has_client = False
-            has_server = False
+            names = zf.namelist()
             
-            # Check for common client packages/classes
-            for name in zf.namelist():
-                lower_name = name.lower()
-                
-                # Client-only indicators
-                if any(x in lower_name for x in ['client', 'screen', 'render', 'gui', 'shader', 'texture']):
-                    has_client = True
-                
-                # Server-only indicators  
-                if any(x in lower_name for x in ['command', 'worldgen', 'structure', 'loot']):
-                    has_server = True
+            # ── NeoForge / Forge TOML manifest ──
+            toml_file = None
+            if 'META-INF/neoforge.mods.toml' in names:
+                toml_file = 'META-INF/neoforge.mods.toml'
+                result["has_neoforge_toml"] = True
+            elif 'META-INF/mods.toml' in names:
+                toml_file = 'META-INF/mods.toml'
             
-            # Check mods.toml or fabric.mod.json for environment hints
-            try:
-                if 'META-INF/mods.toml' in zf.namelist():
-                    toml_content = zf.read('META-INF/mods.toml').decode('utf-8', errors='ignore')
-                    if 'side = "client"' in toml_content.lower():
-                        return "client"
-                    elif 'side = "server"' in toml_content.lower():
-                        return "server"
-            except:
-                pass
+            if toml_file:
+                try:
+                    raw = zf.read(toml_file).decode('utf-8', errors='ignore')
+                    # tomllib requires bytes
+                    toml_data = tomllib.loads(raw)
+                    
+                    # Extract mod ID and display name from [[mods]] table
+                    mods_list = toml_data.get("mods", [])
+                    if mods_list and isinstance(mods_list, list):
+                        first_mod = mods_list[0]
+                        result["mod_id"] = first_mod.get("modId")
+                        result["display_name"] = first_mod.get("displayName")
+                        # displayTest: IGNORE_ALL_VERSION, NONE, etc.
+                        result["display_test"] = first_mod.get("displayTest")
+                    
+                    # Determine loader from modLoader field
+                    mod_loader = toml_data.get("modLoader", "")
+                    result["loader_version_range"] = toml_data.get("loaderVersion")
+                    
+                    # Parse [[dependencies.<modid>]] for loader, MC version, and side
+                    mod_id = result["mod_id"]
+                    deps = {}
+                    # Dependencies can be under "dependencies" as a dict of lists
+                    all_deps = toml_data.get("dependencies", {})
+                    if isinstance(all_deps, dict):
+                        # dependencies.modid = [{...}, {...}]
+                        for dep_mod_id, dep_list in all_deps.items():
+                            if isinstance(dep_list, list):
+                                deps[dep_mod_id] = dep_list
+                    
+                    # Find deps for our mod
+                    mod_deps = deps.get(mod_id, []) if mod_id else []
+                    
+                    # Collect side info and version ranges from deps
+                    sides_found = []
+                    for dep in mod_deps:
+                        if not isinstance(dep, dict):
+                            continue
+                        dep_id = dep.get("modId", "").lower()
+                        side = dep.get("side", "BOTH").upper()
+                        
+                        if dep_id in ("neoforge", "forge"):
+                            result["loader"] = dep_id
+                            result["loader_version_range"] = dep.get("versionRange", result["loader_version_range"])
+                            sides_found.append(side)
+                        elif dep_id == "minecraft":
+                            result["mc_version_range"] = dep.get("versionRange")
+                            sides_found.append(side)
+                        else:
+                            sides_found.append(side)
+                    
+                    # If no loader detected from deps but has neoforge.mods.toml, it's neoforge
+                    if not result["loader"] and result["has_neoforge_toml"]:
+                        result["loader"] = "neoforge"
+                    
+                    # Determine overall side: if ALL deps are CLIENT, mod is client-only
+                    if sides_found:
+                        if all(s == "CLIENT" for s in sides_found):
+                            result["side"] = "client"
+                        elif all(s == "SERVER" for s in sides_found):
+                            result["side"] = "server"
+                        else:
+                            result["side"] = "both"
+                    
+                except Exception:
+                    pass
             
-            try:
-                if 'fabric.mod.json' in zf.namelist():
-                    fabric_content = zf.read('fabric.mod.json').decode('utf-8', errors='ignore')
-                    if '"environment": "client"' in fabric_content.lower():
-                        return "client"
-            except:
-                pass
-            
-            # Fallback: if has client markers and no server markers, it's likely client-only
-            if has_client and not has_server:
-                return "client"
-            elif has_server and not has_client:
-                return "server"
-            else:
-                return "both"
-    except:
-        # Default to "both" if we can't read the jar
-        return "both"
+            # ── Fabric mod.json ──
+            if 'fabric.mod.json' in names:
+                result["has_fabric_json"] = True
+                try:
+                    fabric_raw = zf.read('fabric.mod.json').decode('utf-8', errors='ignore')
+                    fabric_data = json.loads(fabric_raw)
+                    
+                    result["environment"] = fabric_data.get("environment", "*")
+                    
+                    if not result["mod_id"]:
+                        result["mod_id"] = fabric_data.get("id")
+                    if not result["display_name"]:
+                        result["display_name"] = fabric_data.get("name")
+                    
+                    # Fabric environment: "client", "server", "*" (both)
+                    if result["environment"] == "client" and not result["side"]:
+                        result["side"] = "client"
+                    
+                    # Extract MC version from depends
+                    fabric_deps = fabric_data.get("depends", {})
+                    if isinstance(fabric_deps, dict):
+                        mc_dep = fabric_deps.get("minecraft")
+                        if mc_dep and not result["mc_version_range"]:
+                            result["mc_version_range"] = mc_dep
+                        
+                        if not result["loader"]:
+                            if "fabricloader" in fabric_deps:
+                                result["loader"] = "fabric"
+                            elif "quilt_loader" in fabric_deps:
+                                result["loader"] = "quilt"
+                    
+                except Exception:
+                    pass
+    
+    except Exception:
+        pass
+    
+    return result
+
+
+def classify_mod(jar_path):
+    """
+    Detect if a mod is client-only, server-only, or both.
+    Uses proper manifest parsing of neoforge.mods.toml / fabric.mod.json.
+    
+    Returns: "client", "server", or "both"
+    """
+    manifest = _parse_mod_manifest(jar_path)
+    
+    # 1. Explicit side from manifest dependencies (most reliable)
+    #    If ALL deps have side="CLIENT", the mod is client-only.
+    if manifest["side"] == "client":
+        return "client"
+    if manifest["side"] == "server":
+        return "server"
+    
+    # 2. displayTest = "IGNORE_ALL_VERSION" combined with no server-side deps
+    #    is a strong client-only signal. But displayTest alone is NOT sufficient —
+    #    mods like voicechat use displayTest="NONE" while running on both sides.
+    #    Only treat as client-only if displayTest is set AND deps say CLIENT or no side info.
+    dt = (manifest.get("display_test") or "").upper()
+    if dt in ("IGNORE_ALL_VERSION", "NONE"):
+        # Only classify as client if side is explicitly client or unknown (no deps found)
+        # If side is "both" (deps explicitly say BOTH), respect that.
+        if manifest["side"] is None:
+            return "client"
+        # side is already handled above (client/server), if we get here side="both"
+        # meaning at least one dep says BOTH — keep as "both"
+    
+    # 3. Fabric environment: "client"
+    if manifest.get("environment") == "client":
+        return "client"
+    
+    # 4. Default to "both" — don't guess from class names, it's too unreliable
+    return "both"
 
 def sort_mods_by_type(mods_dir):
     """
     Scan mods directory and move client-only mods to clientonly folder.
+    Also deduplicates: if a JAR exists in both mods/ and clientonly/, remove the
+    root copy (clientonly is the correct home for client mods).
     Returns count of mods moved.
     """
+    import shutil
+    
     clientonly_dir = os.path.join(mods_dir, "clientonly")
     os.makedirs(clientonly_dir, exist_ok=True)
     
     moved_count = 0
+    dedup_count = 0
     
-    for filename in os.listdir(mods_dir):
+    # Phase 1: Deduplicate — if same filename exists in both root and clientonly, remove from root
+    clientonly_files = set()
+    if os.path.exists(clientonly_dir):
+        clientonly_files = {f for f in os.listdir(clientonly_dir) if f.endswith('.jar')}
+    
+    for filename in list(os.listdir(mods_dir)):
+        if not filename.endswith('.jar'):
+            continue
+        jar_path = os.path.join(mods_dir, filename)
+        if not os.path.isfile(jar_path):
+            continue
+        if filename in clientonly_files:
+            try:
+                os.remove(jar_path)
+                log_event("MOD_SORT", f"Dedup: removed {filename} from root (already in clientonly/)")
+                dedup_count += 1
+            except Exception as e:
+                log_event("MOD_SORT_ERROR", f"Failed to dedup {filename}: {e}")
+    
+    # Phase 2: Classify remaining root mods and move client-only ones
+    for filename in list(os.listdir(mods_dir)):
         if not filename.endswith('.jar'):
             continue
         
@@ -540,28 +703,256 @@ def sort_mods_by_type(mods_dir):
         if not os.path.isfile(jar_path):
             continue
         
-        # Skip if already in clientonly
-        if jar_path == os.path.join(clientonly_dir, filename):
-            continue
-        
         mod_type = classify_mod(jar_path)
         
         if mod_type == "client":
-            # Move to clientonly
             dest = os.path.join(clientonly_dir, filename)
             try:
                 if not os.path.exists(dest):
-                    import shutil
                     shutil.move(jar_path, dest)
-                    log_event("MOD_SORT", f"Moved {filename} to clientonly/")
+                    log_event("MOD_SORT", f"Moved {filename} to clientonly/ (manifest says client-only)")
                     moved_count += 1
+                else:
+                    # Already in clientonly, remove the root copy
+                    os.remove(jar_path)
+                    log_event("MOD_SORT", f"Dedup: removed {filename} from root (already in clientonly/)")
+                    dedup_count += 1
             except Exception as e:
                 log_event("MOD_SORT_ERROR", f"Failed to move {filename}: {e}")
     
-    if moved_count > 0:
-        log_event("MOD_SORT", f"Sorted {moved_count} client-only mods")
+    if moved_count > 0 or dedup_count > 0:
+        log_event("MOD_SORT", f"Sorted {moved_count} client-only mods, deduplicated {dedup_count}")
     
     return moved_count
+
+
+def _parse_version_range(version_range):
+    """Parse a Maven-style version range like '[1.21.11,1.22)' or '[21.0.0-beta,)'.
+    
+    Returns (lower, upper, lower_inclusive, upper_inclusive) or None if unparseable.
+    Lower/upper are version strings (or None for open-ended).
+    """
+    if not version_range or not isinstance(version_range, str):
+        return None
+    
+    vr = version_range.strip()
+    if not vr:
+        return None
+    
+    # Handle wildcard
+    if vr == "*":
+        return (None, None, True, True)
+    
+    # Handle simple version (no brackets) like ">=1.21.11"
+    if vr[0] not in ('[', '('):
+        # Treat as exact or minimum version
+        return (vr, None, True, True)
+    
+    lower_inc = vr[0] == '['
+    upper_inc = vr[-1] == ']' if vr[-1] in (']', ')') else True
+    
+    inner = vr[1:-1] if len(vr) > 2 else ""
+    
+    if ',' in inner:
+        parts = inner.split(',', 1)
+        lower = parts[0].strip() or None
+        upper = parts[1].strip() or None
+    else:
+        # Single value like "[1.21.11]" means exact match
+        lower = inner.strip() or None
+        upper = inner.strip() or None
+        lower_inc = True
+        upper_inc = True
+    
+    return (lower, upper, lower_inc, upper_inc)
+
+
+def _version_tuple(version_str):
+    """Convert version string to comparable tuple.
+    Handles: '1.21.11', '21.11.0-beta', '21.0.110-beta', etc.
+    Beta/alpha suffixes sort lower than release.
+    """
+    if not version_str:
+        return (0,)
+    
+    # Strip common suffixes for comparison
+    clean = version_str.strip().lower()
+    is_prerelease = False
+    for suffix in ('-beta', '-alpha', '-rc', '-snapshot', '+beta', '.beta'):
+        if suffix in clean:
+            clean = clean.split(suffix)[0]
+            is_prerelease = True
+    
+    parts = []
+    for p in clean.split('.'):
+        try:
+            parts.append(int(p))
+        except ValueError:
+            # Non-numeric part, try to extract leading digits
+            import re
+            m = re.match(r'(\d+)', p)
+            if m:
+                parts.append(int(m.group(1)))
+            else:
+                parts.append(0)
+    
+    # Append prerelease indicator (0 = prerelease, 1 = release)
+    parts.append(0 if is_prerelease else 1)
+    
+    return tuple(parts)
+
+
+def _version_in_range(version, version_range):
+    """Check if a version string falls within a Maven-style version range.
+    
+    Returns True if version is in range, False if not, None if can't determine.
+    """
+    parsed = _parse_version_range(version_range)
+    if parsed is None:
+        return None  # Can't parse, skip check
+    
+    lower, upper, lower_inc, upper_inc = parsed
+    
+    if lower is None and upper is None:
+        return True  # Wildcard, any version matches
+    
+    ver = _version_tuple(version)
+    
+    if lower:
+        low = _version_tuple(lower)
+        if lower_inc:
+            if ver < low:
+                return False
+        else:
+            if ver <= low:
+                return False
+    
+    if upper:
+        up = _version_tuple(upper)
+        if upper_inc:
+            if ver > up:
+                return False
+        else:
+            if ver >= up:
+                return False
+    
+    return True
+
+
+def preflight_mod_compatibility_check(mods_dir, cfg):
+    """Validate all mods in mods_dir against the configured loader and MC version.
+    
+    Checks:
+    1. Loader compatibility: mod declares a loader dep (neoforge/forge/fabric) that
+       doesn't match config.json loader. If no loader dep, skip (it's fine).
+    2. MC version compatibility: mod's minecraft version range doesn't include our version.
+       If no MC version range, skip.
+    3. Client-only mods still in root: flag but don't block (sort_mods_by_type handles moves).
+    
+    Returns dict with:
+        "compatible": list of (filename, mod_id) tuples
+        "incompatible": list of (filename, mod_id, reason) tuples  
+        "quarantined": list of filenames moved to quarantine
+        "warnings": list of warning strings
+    """
+    server_loader = cfg.get("loader", "neoforge").lower()
+    server_mc_version = cfg.get("mc_version", "1.21.11")
+    quarantine_dir = os.path.join(mods_dir, "quarantine")
+    os.makedirs(quarantine_dir, exist_ok=True)
+    
+    # Loader family mapping: neoforge and forge are NOT compatible with each other
+    # despite sharing the javafml modLoader. They use different APIs.
+    LOADER_COMPAT = {
+        "neoforge": {"neoforge"},
+        "forge": {"forge"},
+        "fabric": {"fabric", "quilt"},
+    }
+    
+    compatible_loaders = LOADER_COMPAT.get(server_loader, {server_loader})
+    
+    results = {
+        "compatible": [],
+        "incompatible": [],
+        "quarantined": [],
+        "warnings": [],
+    }
+    
+    for filename in sorted(os.listdir(mods_dir)):
+        if not filename.endswith('.jar'):
+            continue
+        jar_path = os.path.join(mods_dir, filename)
+        if not os.path.isfile(jar_path):
+            continue
+        
+        manifest = _parse_mod_manifest(jar_path)
+        mod_id = manifest.get("mod_id") or filename
+        display = manifest.get("display_name") or mod_id
+        
+        # ── Check 1: Loader compatibility ──
+        mod_loader = manifest.get("loader")
+        if mod_loader and mod_loader.lower() not in compatible_loaders:
+            reason = f"Wrong loader: mod requires {mod_loader}, server runs {server_loader}"
+            results["incompatible"].append((filename, mod_id, reason))
+            
+            # Quarantine wrong-loader mods
+            dest = os.path.join(quarantine_dir, filename)
+            reason_file = os.path.join(quarantine_dir, f"{filename}.reason.txt")
+            try:
+                import shutil
+                shutil.move(jar_path, dest)
+                with open(reason_file, "w") as f:
+                    from datetime import datetime
+                    f.write(f"Quarantined: {datetime.now().isoformat()}\n")
+                    f.write(f"Reason: {reason}\n")
+                    f.write(f"Mod ID: {mod_id}\n")
+                    f.write(f"Display Name: {display}\n")
+                results["quarantined"].append(filename)
+                log_event("COMPAT_CHECK", f"QUARANTINED {filename}: {reason}")
+            except Exception as e:
+                log_event("COMPAT_CHECK", f"Failed to quarantine {filename}: {e}")
+            continue
+        
+        # ── Check 2: MC version compatibility ──
+        mc_range = manifest.get("mc_version_range")
+        if mc_range:
+            version_ok = _version_in_range(server_mc_version, mc_range)
+            if version_ok is False:
+                reason = f"MC version mismatch: mod requires {mc_range}, server runs {server_mc_version}"
+                results["incompatible"].append((filename, mod_id, reason))
+                
+                # Quarantine version-mismatched mods
+                dest = os.path.join(quarantine_dir, filename)
+                reason_file = os.path.join(quarantine_dir, f"{filename}.reason.txt")
+                try:
+                    import shutil
+                    shutil.move(jar_path, dest)
+                    with open(reason_file, "w") as f:
+                        from datetime import datetime
+                        f.write(f"Quarantined: {datetime.now().isoformat()}\n")
+                        f.write(f"Reason: {reason}\n")
+                        f.write(f"Mod ID: {mod_id}\n")
+                        f.write(f"Display Name: {display}\n")
+                    results["quarantined"].append(filename)
+                    log_event("COMPAT_CHECK", f"QUARANTINED {filename}: {reason}")
+                except Exception as e:
+                    log_event("COMPAT_CHECK", f"Failed to quarantine {filename}: {e}")
+                continue
+        
+        # Mod passed all checks
+        results["compatible"].append((filename, mod_id))
+    
+    # Summary log
+    total = len(results["compatible"]) + len(results["incompatible"])
+    if results["incompatible"]:
+        log_event("COMPAT_CHECK", 
+                  f"Compatibility check: {len(results['compatible'])}/{total} mods OK, "
+                  f"{len(results['incompatible'])} incompatible ({len(results['quarantined'])} quarantined)")
+        for fn, mid, reason in results["incompatible"]:
+            log_event("COMPAT_CHECK", f"  FAIL: {fn} — {reason}")
+    else:
+        log_event("COMPAT_CHECK", f"All {total} mods compatible with {server_loader} {server_mc_version}")
+    
+    return results
 
 # ══════════════════════════════════════════════════════════════════════════════
 # INSTALLED MOD DETECTION — Smart matching with token extraction + fuzzy match
@@ -1522,7 +1913,8 @@ def http_server(port, mods_dir):
                 @app.route("/api/mods/upgrade", methods=["POST"])
                 def api_upgrade_mods():
                     try:
-                        result = run_cmd("/home/services/.local/bin/ferium upgrade")
+                        ferium_bin = os.path.join(CWD, ".local/bin/ferium")
+                        result = run_cmd(f"{ferium_bin} upgrade")
                         if result["success"]:
                             return jsonify({"success": True, "message": "Mods upgraded"})
                         return jsonify({"success": False, "error": result["stderr"]}), 400
@@ -1700,51 +2092,237 @@ def _quarantine_mod(mods_dir, mod_id_or_slug, reason="unknown"):
     return None
 
 
-def _search_and_download_dep(dep_name, mods_dir, mc_version, loader_name):
-    """Search both Modrinth and CurseForge for a missing dependency and download it.
-    Returns True if successfully downloaded, False otherwise."""
+def _search_curseforge_live(dep_name, mods_dir, mc_version, loader_name):
+    """Search CurseForge live for a dependency and download it.
     
-    # 1. Try Modrinth first
+    Uses Playwright stealth browser to search CurseForge, find a matching mod,
+    and download the appropriate file for the given MC version + loader.
+    
+    Returns True if successfully downloaded, False otherwise.
+    """
+    if not PLAYWRIGHT_AVAILABLE:
+        return False
+    
+    loader_id = CF_LOADER_IDS.get(loader_name.lower(), 6)
+    dep_norm = re.sub(r'[^a-z0-9]', '', dep_name.lower())
+    
     try:
-        dep_query = url_quote(dep_name)
-        search_url = f"https://api.modrinth.com/v2/search?query={dep_query}&facets=[[\"versions:{mc_version}\"],[\"categories:{loader_name}\"],[\"project_type:mod\"]]&limit=5"
-        req = urllib.request.Request(search_url, headers={"User-Agent": "NeoRunner/1.0"})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            results = json.loads(resp.read().decode())
-        
-        hits = results.get("hits", [])
-        if hits:
-            # Pick best match (exact slug match first, then first result)
-            best = None
-            for h in hits:
-                if h.get("slug", "").lower() == dep_name.lower():
-                    best = h
-                    break
-            if not best:
-                best = hits[0]
+        with Stealth().use_sync(sync_playwright()) as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]
+            )
+            context = browser.new_context(
+                user_agent=random.choice(CF_USER_AGENTS),
+                viewport={"width": 1920, "height": 1080}
+            )
+            page = context.new_page()
             
-            mod_data = {"id": best["project_id"], "name": best.get("title", dep_name), "slug": best.get("slug", dep_name)}
-            result = download_mod_from_modrinth(mod_data, mods_dir, mc_version, loader_name)
-            if result:
-                log_event("SELF_HEAL", f"Downloaded {mod_data['name']} from Modrinth")
-                return True
+            search_url = f"https://www.curseforge.com/minecraft/search?search={dep_name}&version={mc_version}&gameVersionTypeId={loader_id}"
+            log_event("SELF_HEAL", f"CurseForge search URL: {search_url}")
+            
+            try:
+                page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
+                time.sleep(5)
+                
+                title = page.title()
+                if any(kw in title.lower() for kw in ["just a moment", "attention required", "checking"]):
+                    log_event("SELF_HEAL", "CurseForge: Cloudflare challenge, waiting...")
+                    time.sleep(10)
+                
+                cards = page.query_selector_all("div.project-card")
+                if not cards:
+                    log_event("SELF_HEAL", f"CurseForge: no results for '{dep_name}'")
+                    context.close()
+                    browser.close()
+                    return False
+                
+                best_match = None
+                best_score = 0
+                
+                for card in cards[:10]:
+                    try:
+                        name_el = card.query_selector("a.name span.ellipsis")
+                        if not name_el:
+                            name_el = card.query_selector("a.name")
+                        card_name = name_el.inner_text().strip() if name_el else ""
+                        
+                        slug_el = card.query_selector("a.overlay-link")
+                        href = slug_el.get_attribute("href") if slug_el else ""
+                        slug_match = re.search(r'/minecraft/mc-mods/([^/?]+)', href) if href else None
+                        card_slug = slug_match.group(1) if slug_match else ""
+                        
+                        if not card_name or not card_slug:
+                            continue
+                        
+                        card_norm = re.sub(r'[^a-z0-9]', '', card_name.lower())
+                        slug_norm = re.sub(r'[^a-z0-9]', '', card_slug.lower())
+                        
+                        score = 0
+                        if dep_norm == card_norm or dep_norm == slug_norm:
+                            score = 100
+                        elif dep_norm in card_norm or dep_norm in slug_norm:
+                            score = 75
+                        elif card_norm in dep_norm or slug_norm in dep_norm:
+                            score = 50
+                        
+                        if score > best_score:
+                            best_score = score
+                            dl_cta = card.query_selector("a.download-cta")
+                            dl_href = dl_cta.get_attribute("href") if dl_cta else ""
+                            file_match = re.search(r'/download/(\d+)', dl_href) if dl_href else None
+                            
+                            best_match = {
+                                "name": card_name,
+                                "slug": card_slug,
+                                "file_id": file_match.group(1) if file_match else "",
+                                "download_href": dl_href,
+                            }
+                    except Exception:
+                        continue
+                
+                context.close()
+                browser.close()
+                
+                if best_match and best_score >= 50:
+                    log_event("SELF_HEAL", f"CurseForge found '{best_match['name']}' (score={best_score}) for dep '{dep_name}'")
+                    mod_info = {
+                        "name": best_match["name"],
+                        "slug": best_match["slug"],
+                        "file_id": best_match["file_id"],
+                    }
+                    result = download_mod_from_curseforge(mod_info, mods_dir, mc_version, loader_name)
+                    if result and result != False:
+                        log_event("SELF_HEAL", f"Downloaded {best_match['name']} from CurseForge live search")
+                        return True
+                else:
+                    log_event("SELF_HEAL", f"CurseForge: no good match for '{dep_name}' (best score={best_score})")
+                    
+            except PlaywrightTimeout:
+                log_event("SELF_HEAL", f"CurseForge search timeout for '{dep_name}'")
+            except Exception as e:
+                log_event("SELF_HEAL", f"CurseForge search error for '{dep_name}': {e}")
+            
+            try:
+                context.close()
+                browser.close()
+            except:
+                pass
+            
+            return False
     except Exception as e:
-        log_event("SELF_HEAL", f"Modrinth search failed for {dep_name}: {e}")
+        log_event("SELF_HEAL", f"CurseForge live search failed: {e}")
+        return False
+
+
+def _search_and_download_dep(dep_name, mods_dir, mc_version, loader_name):
+    """Search Modrinth (with fuzzy matching) and CurseForge for a missing dependency and download it.
     
-    # 2. Try CurseForge scraper (check curator cache for CF mods)
+    Handles the common case where a mod's manifest modId differs from its Modrinth slug:
+      - modId "supermartijn642corelib" -> slug "supermartijn642s-core-lib"
+      - modId "biomeswevegone" -> slug "oh-the-biomes-weve-gone"
+    
+    Strategy:
+      1. Try exact modId search on Modrinth
+      2. Try with dashes/underscores inserted (fuzzy slug variations)
+      3. Try Modrinth project lookup by modId directly (some mods use modId as project ID)
+      4. Fall back to CurseForge curator cache
+    
+    Returns True if successfully downloaded, False otherwise."""
+    from urllib.parse import quote as _url_quote
+    
+    def _modrinth_search(query):
+        """Search Modrinth and return best hit or None."""
+        try:
+            facets = f'[["versions:{mc_version}"],["categories:{loader_name}"],["project_type:mod"]]'
+            search_url = f"https://api.modrinth.com/v2/search?query={_url_quote(query)}&facets={_url_quote(facets)}&limit=10"
+            req = urllib.request.Request(search_url, headers={"User-Agent": "NeoRunner/1.0"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                results = json.loads(resp.read().decode())
+            return results.get("hits", [])
+        except Exception:
+            return []
+    
+    def _try_download_hit(hit):
+        """Try downloading a Modrinth search hit. Returns True on success."""
+        mod_data = {"id": hit["project_id"], "name": hit.get("title", dep_name), "slug": hit.get("slug", dep_name)}
+        result = download_mod_from_modrinth(mod_data, mods_dir, mc_version, loader_name)
+        if result:
+            log_event("SELF_HEAL", f"Downloaded {mod_data['name']} from Modrinth")
+            return True
+        return False
+    
+    def _pick_best_hit(hits, search_term):
+        """Pick the best Modrinth hit by matching slug/title against the search term."""
+        if not hits:
+            return None
+        search_norm = re.sub(r'[^a-z0-9]', '', search_term.lower())
+        # Priority 1: exact slug match
+        for h in hits:
+            if h.get("slug", "").lower() == search_term.lower():
+                return h
+        # Priority 2: slug contains the search term (normalized)
+        for h in hits:
+            slug_norm = re.sub(r'[^a-z0-9]', '', h.get("slug", "").lower())
+            if search_norm in slug_norm or slug_norm in search_norm:
+                return h
+        # Priority 3: title contains the search term
+        for h in hits:
+            title_norm = re.sub(r'[^a-z0-9]', '', h.get("title", "").lower())
+            if search_norm in title_norm or title_norm in search_norm:
+                return h
+        # Fallback: first result
+        return hits[0]
+    
+    # 1. Try exact modId as search query
+    hits = _modrinth_search(dep_name)
+    if hits:
+        best = _pick_best_hit(hits, dep_name)
+        if best and _try_download_hit(best):
+            return True
+    
+    # 2. Generate slug variations and try each
+    #    "supermartijn642corelib" -> "supermartijn642-core-lib", "supermartijn642s-core-lib"
+    #    "biomeswevegone" -> "biomes-weve-gone", "oh-the-biomes-weve-gone"
+    slug_variations = _generate_slug_variations(dep_name)
+    for variant in slug_variations:
+        if variant.lower() == dep_name.lower():
+            continue  # Already tried
+        hits = _modrinth_search(variant)
+        if hits:
+            best = _pick_best_hit(hits, dep_name)
+            if best and _try_download_hit(best):
+                return True
+    
+    # 3. Try direct project lookup by slug (Modrinth API)
+    for slug_try in [dep_name] + slug_variations[:3]:
+        try:
+            url = f"https://api.modrinth.com/v2/project/{_url_quote(slug_try)}"
+            req = urllib.request.Request(url, headers={"User-Agent": "NeoRunner/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                proj = json.loads(resp.read().decode())
+            if proj.get("id"):
+                mod_data = {"id": proj["id"], "name": proj.get("title", dep_name), "slug": proj.get("slug", dep_name)}
+                result = download_mod_from_modrinth(mod_data, mods_dir, mc_version, loader_name)
+                if result:
+                    log_event("SELF_HEAL", f"Downloaded {mod_data['name']} from Modrinth (direct lookup)")
+                    return True
+        except Exception:
+            pass
+    
+    # 4. Try CurseForge curator cache first
     try:
         cache_file = os.path.join(CWD, f"curator_cache_{mc_version}_{loader_name}.json")
         if os.path.exists(cache_file):
             with open(cache_file) as f:
                 cached = json.load(f)
-            # Search cache for a mod matching the dep name
-            dep_norm = dep_name.lower().replace('-', '').replace('_', '').replace(' ', '')
+            dep_norm = re.sub(r'[^a-z0-9]', '', dep_name.lower())
             for mod_id, mod_data in cached.items():
                 if not isinstance(mod_data, dict):
                     continue
-                mod_norm = mod_data.get("name", "").lower().replace('-', '').replace('_', '').replace(' ', '')
-                slug_norm = mod_data.get("slug", "").lower().replace('-', '').replace('_', '')
-                if dep_norm == mod_norm or dep_norm == slug_norm or dep_norm in mod_norm:
+                mod_norm = re.sub(r'[^a-z0-9]', '', mod_data.get("name", "").lower())
+                slug_norm = re.sub(r'[^a-z0-9]', '', mod_data.get("slug", "").lower())
+                if dep_norm == mod_norm or dep_norm == slug_norm or dep_norm in mod_norm or dep_norm in slug_norm:
                     if mod_data.get("source") == "curseforge":
                         result = download_mod_from_curseforge(mod_data, mods_dir, mc_version, loader_name)
                         if result and result != False:
@@ -1753,8 +2331,109 @@ def _search_and_download_dep(dep_name, mods_dir, mc_version, loader_name):
     except Exception as e:
         log_event("SELF_HEAL", f"CurseForge cache search failed for {dep_name}: {e}")
     
+    # 5. Try LIVE CurseForge search via scraper
+    if PLAYWRIGHT_AVAILABLE:
+        log_event("SELF_HEAL", f"Searching CurseForge live for: {dep_name}")
+        try:
+            cf_result = _search_curseforge_live(dep_name, mods_dir, mc_version, loader_name)
+            if cf_result:
+                return True
+        except Exception as e:
+            log_event("SELF_HEAL", f"CurseForge live search failed for {dep_name}: {e}")
+    
     log_event("SELF_HEAL", f"Could not find {dep_name} on either Modrinth or CurseForge for MC {mc_version}")
     return False
+
+
+def _generate_slug_variations(mod_id):
+    """Generate plausible Modrinth slug variations from a TOML modId.
+    
+    Mod manifest modIds are often camelCase or concatenated (e.g. 'supermartijn642corelib',
+    'biomeswevegone') but Modrinth slugs use dashes ('supermartijn642s-core-lib',
+    'oh-the-biomes-weve-gone'). This generates likely slug forms.
+    
+    Returns a list of slug variations to try.
+    """
+    variations = set()
+    name = mod_id.lower().strip()
+    
+    # 1. Insert dashes at camelCase boundaries: "coreLib" -> "core-lib"
+    dashed = re.sub(r'([a-z])([A-Z])', r'\1-\2', mod_id).lower()
+    if dashed != name:
+        variations.add(dashed)
+    
+    # 2. Insert dashes between word boundaries in concatenated strings
+    #    "supermartijn642corelib" -> try splitting at common word boundaries
+    #    Use a simple heuristic: split at transitions from digits to letters
+    digit_split = re.sub(r'(\d)([a-z])', r'\1-\2', name)
+    if digit_split != name:
+        variations.add(digit_split)
+    
+    # 3. Add "s" after common author prefixes (supermartijn642 -> supermartijn642s)
+    m = re.match(r'^([a-z]+\d+)(.*)', name)
+    if m:
+        prefix, rest = m.groups()
+        variations.add(f"{prefix}s-{rest}" if rest else name)
+        # Also try with dashes in the rest
+        rest_dashed = re.sub(r'([a-z]{3,})', lambda x: x.group(), rest)
+        if rest:
+            variations.add(f"{prefix}s-{'-'.join(_split_words(rest))}")
+            variations.add(f"{prefix}-{'-'.join(_split_words(rest))}")
+    
+    # 4. Split into natural English words
+    words = _split_words(name)
+    if len(words) > 1:
+        variations.add('-'.join(words))
+        # Try with common prefixes: "oh-the-", etc.
+        variations.add('oh-the-' + '-'.join(words))
+    
+    # 5. Replace underscores with dashes
+    if '_' in name:
+        variations.add(name.replace('_', '-'))
+    
+    # Remove the original and empty strings
+    variations.discard(name)
+    variations.discard('')
+    
+    return list(variations)
+
+
+def _split_words(s):
+    """Split a concatenated lowercase string into likely English words.
+    Uses a greedy approach with a dictionary of common mod-related words."""
+    _WORDS = {
+        'the', 'of', 'and', 'for', 'with', 'oh', 'weve', 'gone', 'wee', 'all',
+        'biomes', 'biome', 'trees', 'tree', 'mods', 'mod', 'core', 'lib', 'library',
+        'config', 'api', 'forge', 'fabric', 'neo', 'craft', 'mine', 'server', 'client',
+        'world', 'extra', 'plus', 'super', 'mega', 'mini', 'max', 'pro', 'lite',
+        'addons', 'addon', 'patch', 'fix', 'pack', 'packed', 'up', 'down',
+        'connected', 'glass', 'lanterns', 'additional', 'farming', 'blockheads',
+        'corgi', 'martijn', 'resourceful', 'creative', 'enchantment', 'description',
+        'descriptions', 'enchanted', 'ench', 'desc', 'prickle', 'sodium', 'lithium',
+        'iris', 'jade', 'curios', 'balm', 'framework', 'fusion', 'konkrete',
+        'puzzles', 'searchables', 'controlling', 'configured', 'collective',
+    }
+    result = []
+    i = 0
+    while i < len(s):
+        # Try longest match first
+        best = None
+        for length in range(min(12, len(s) - i), 1, -1):
+            candidate = s[i:i+length]
+            if candidate in _WORDS:
+                best = candidate
+                break
+        if best:
+            result.append(best)
+            i += len(best)
+        else:
+            # No dictionary match — consume one character and append to last word or start new
+            if result:
+                result[-1] += s[i]
+            else:
+                result.append(s[i])
+            i += 1
+    return result
 
 
 def _try_self_heal(loader_instance, crash_info, cfg, crash_history):
@@ -1836,8 +2515,31 @@ def _try_self_heal(loader_instance, crash_info, cfg, crash_history):
     
     elif crash_type == "mod_error":
         if culprit:
-            # If it's a corrupt/invalid JAR, quarantine immediately by exact filename
+            # Client-only mod crash — move to clientonly/ instead of quarantining
+            subtype = crash_info.get("subtype", "")
             bad_file = crash_info.get("bad_file")
+            if subtype == "client_only" and bad_file:
+                import shutil
+                jar_path = os.path.join(mods_dir, bad_file)
+                if os.path.exists(jar_path):
+                    clientonly_dir = os.path.join(mods_dir, "clientonly")
+                    os.makedirs(clientonly_dir, exist_ok=True)
+                    dst = os.path.join(clientonly_dir, bad_file)
+                    if not os.path.exists(dst):
+                        shutil.move(jar_path, dst)
+                        log_event("SELF_HEAL", f"Moved client-only mod {bad_file} -> clientonly/")
+                    else:
+                        # Already in clientonly, just remove from mods/
+                        os.remove(jar_path)
+                        log_event("SELF_HEAL", f"Removed duplicate client-only mod {bad_file} from mods/ (already in clientonly/)")
+                    return "fixed"
+                # If bad_file not found, quarantine by mod ID
+                quarantined = _quarantine_mod(mods_dir, culprit, f"Client-only mod — crashes server (NoClassDefFoundError: net/minecraft/client/gui/screens/Screen)")
+                if quarantined:
+                    return "quarantined"
+                return False
+            
+            # If it's a corrupt/invalid JAR, quarantine immediately by exact filename
             if bad_file:
                 import shutil
                 jar_path = os.path.join(mods_dir, bad_file)
@@ -1883,85 +2585,401 @@ def _try_self_heal(loader_instance, crash_info, cfg, crash_history):
         return False
 
 def _preflight_dep_check(cfg):
-    """Proactive pre-flight: scan installed mods, resolve deps, download missing ones BEFORE launch.
-    Returns number of deps fetched."""
+    """Proactive pre-flight: scan ALL installed mod JARs' manifests for required deps,
+    check if they're installed, and auto-fetch missing ones from Modrinth.
+    
+    This is the REAL dependency resolver — it reads each JAR's neoforge.mods.toml
+    directly rather than relying on the curator cache (which only knows about mods
+    it has seen before).
+    
+    Also scans mods/clientonly/ for deps needed on the client side.
+    
+    Handles:
+    - Standard manifest deps (modId in [[dependencies.modid]])
+    - Transitive deps (dep A requires dep B which requires dep C)
+    - modId-to-slug mismatches (via _search_and_download_dep fuzzy search)
+    - Re-downloading wrongly-quarantined deps that are now available
+    - Optional dep interop alerts when 2+ mods share the same optional dep
+    
+    Returns dict with:
+        - fetched: number of deps fetched
+        - optional_interop: list of {dep_id, requested_by} for shared optional deps"""
+    import zipfile
+    import tomllib
+    
     mc_version = cfg.get("mc_version", "1.21.11")
     loader_name = cfg.get("loader", "neoforge")
     mods_dir = os.path.join(CWD, cfg.get("mods_dir", "mods"))
+    clientonly_dir = os.path.join(mods_dir, "clientonly")
+    quarantine_dir = os.path.join(mods_dir, "quarantine")
+    
+    result = {"fetched": 0, "optional_interop": []}
     
     if not os.path.exists(mods_dir):
-        return 0
+        return result
     
-    # Load curator cache to find Modrinth project IDs for installed mods
-    cache_file = os.path.join(CWD, f"curator_cache_{mc_version}_{loader_name}.json")
-    cached_mods = {}
-    if os.path.exists(cache_file):
-        try:
-            with open(cache_file) as f:
-                cached_mods = json.load(f)
-        except:
-            pass
+    # ── Phase 0: Build index of all installed mod IDs ──
+    # Map modId -> jar filename for everything in mods/ and mods/clientonly/
+    # Also track JiJ-provided mod IDs (embedded in JARs via META-INF/jarjar/)
+    installed_mod_ids = {}  # modId -> [jar_filename, ...]
+    jij_provided = set()    # modIds provided via Jar-in-Jar (don't need fetching)
+    dirs_to_scan = [mods_dir]
+    if os.path.isdir(clientonly_dir):
+        dirs_to_scan.append(clientonly_dir)
     
-    # Build map of installed filenames (normalized) for quick lookup
-    installed_files = set()
-    for fn in os.listdir(mods_dir):
-        if fn.endswith('.jar') and os.path.isfile(os.path.join(mods_dir, fn)):
-            installed_files.add(fn.lower())
+    for scan_dir in dirs_to_scan:
+        for fn in os.listdir(scan_dir):
+            if not fn.endswith('.jar') or not os.path.isfile(os.path.join(scan_dir, fn)):
+                continue
+            jar_path = os.path.join(scan_dir, fn)
+            try:
+                with zipfile.ZipFile(jar_path, 'r') as zf:
+                    # Index the mod's own ID(s)
+                    names = zf.namelist()
+                    toml_file = None
+                    if 'META-INF/neoforge.mods.toml' in names:
+                        toml_file = 'META-INF/neoforge.mods.toml'
+                    elif 'META-INF/mods.toml' in names:
+                        toml_file = 'META-INF/mods.toml'
+                    if toml_file:
+                        raw = zf.read(toml_file).decode('utf-8', errors='ignore')
+                        toml_data = tomllib.loads(raw)
+                        for mod_entry in toml_data.get("mods", []):
+                            mid = mod_entry.get("modId", "").lower()
+                            if mid:
+                                installed_mod_ids.setdefault(mid, []).append(fn)
+                    
+                    # Scan JiJ metadata — embedded JARs provide modIds that don't
+                    # need to be fetched separately.  NeoForge extracts these at load time.
+                    if 'META-INF/jarjar/metadata.json' in names:
+                        try:
+                            jij_raw = zf.read('META-INF/jarjar/metadata.json').decode('utf-8', errors='ignore')
+                            jij_data = json.loads(jij_raw)
+                            for jij_entry in jij_data.get("jars", []):
+                                jij_path = jij_entry.get("path", "")
+                                # Read the nested JAR's manifest to get its modId
+                                if jij_path and jij_path in names:
+                                    try:
+                                        nested_data = zf.read(jij_path)
+                                        import io
+                                        with zipfile.ZipFile(io.BytesIO(nested_data), 'r') as nested_zf:
+                                            nested_names = nested_zf.namelist()
+                                            nested_toml = None
+                                            if 'META-INF/neoforge.mods.toml' in nested_names:
+                                                nested_toml = 'META-INF/neoforge.mods.toml'
+                                            elif 'META-INF/mods.toml' in nested_names:
+                                                nested_toml = 'META-INF/mods.toml'
+                                            if nested_toml:
+                                                nraw = nested_zf.read(nested_toml).decode('utf-8', errors='ignore')
+                                                ndata = tomllib.loads(nraw)
+                                                for nmod in ndata.get("mods", []):
+                                                    nmid = nmod.get("modId", "").lower()
+                                                    if nmid:
+                                                        jij_provided.add(nmid)
+                                                        installed_mod_ids.setdefault(nmid, []).append(f"JiJ:{fn}")
+                                    except Exception:
+                                        pass
+                                # Fallback: infer modId from JiJ artifact name
+                                artifact = jij_entry.get("identifier", {}).get("artifact", "")
+                                if artifact:
+                                    # "lambdynlights-runtime-neoforge" -> try "lambdynlights_runtime"
+                                    # Strip loader suffixes and convert dashes to underscores
+                                    art_clean = artifact.lower()
+                                    for suffix in ["-neoforge", "-forge", "-fabric", "-quilt"]:
+                                        art_clean = art_clean.removesuffix(suffix)
+                                    art_id = art_clean.replace("-", "_")
+                                    jij_provided.add(art_id)
+                                    installed_mod_ids.setdefault(art_id, []).append(f"JiJ:{fn}")
+                        except Exception:
+                            pass
+            except Exception:
+                continue
     
-    if not installed_files:
-        return 0
+    # Always-present mods that don't need fetching (provided by loader/game itself)
+    BUILTIN_MODS = {
+        "neoforge", "forge", "minecraft", "java", "fml", "fabricloader", 
+        "quilt_loader", "javafml", "lowcodefml", "mixin", "mixinextras",
+    }
     
-    log_event("PREFLIGHT", f"Checking dependencies for {len(installed_files)} installed mods...")
+    log_event("PREFLIGHT", f"Scanning {len(installed_mod_ids)} installed mods for missing dependencies ({len(jij_provided)} JiJ-provided)...")
     
-    fetched = 0
-    checked = 0
+    # ── Phase 1: Extract all required AND optional deps from all installed JARs ──
+    # {dep_modId: set of jar filenames that require it}
+    # Only process [[dependencies.X]] sections where X is a mod declared in the
+    # same JAR.  This avoids phantom deps (e.g. xaerominimap.jar declaring deps
+    # for xaerobetterpvp which isn't installed).
+    required_deps = {}  
+    optional_deps = {}  # {dep_modId: set of jar filenames that optionally want it}
     
-    # For each cached mod that we have installed, check its deps
-    for mod_id, mod_data in cached_mods.items():
-        if not isinstance(mod_data, dict):
-            continue
-        
-        source = mod_data.get("source", "modrinth")
-        
-        if source == "curseforge":
-            # Check CurseForge deps from scraped data
-            for dep in mod_data.get("deps_required", []) + mod_data.get("cf_deps_required", []):
-                dep_slug = dep.get("slug", "")
-                if dep_slug and not _mod_jar_exists(mods_dir, mod_slug=dep_slug):
-                    log_event("PREFLIGHT", f"Missing CF dep: {dep.get('name', dep_slug)}")
-                    # Try to find it in cache and download
-                    for cid, cdata in cached_mods.items():
-                        if isinstance(cdata, dict) and cdata.get("slug") == dep_slug:
-                            result = download_mod_from_curseforge(cdata, mods_dir, mc_version, loader_name)
-                            if result and result != False:
-                                fetched += 1
-                            break
-        else:
-            # Check Modrinth deps via API
-            if mod_data.get("id") and not mod_data.get("id", "").startswith("cf_"):
+    for scan_dir in dirs_to_scan:
+        for fn in os.listdir(scan_dir):
+            if not fn.endswith('.jar') or not os.path.isfile(os.path.join(scan_dir, fn)):
+                continue
+            jar_path = os.path.join(scan_dir, fn)
+            try:
+                with zipfile.ZipFile(jar_path, 'r') as zf:
+                    names = zf.namelist()
+                    toml_file = None
+                    if 'META-INF/neoforge.mods.toml' in names:
+                        toml_file = 'META-INF/neoforge.mods.toml'
+                    elif 'META-INF/mods.toml' in names:
+                        toml_file = 'META-INF/mods.toml'
+                    
+                    if toml_file:
+                        raw = zf.read(toml_file).decode('utf-8', errors='ignore')
+                        toml_data = tomllib.loads(raw)
+                        
+                        # Collect ALL mod IDs declared in this JAR (not just the first)
+                        mods_list = toml_data.get("mods", [])
+                        jar_mod_ids = set()
+                        for mod_entry in mods_list:
+                            mid = mod_entry.get("modId", "").lower()
+                            if mid:
+                                jar_mod_ids.add(mid)
+                        
+                        # Only process [[dependencies.X]] where X is in jar_mod_ids
+                        all_deps = toml_data.get("dependencies", {})
+                        if isinstance(all_deps, dict):
+                            for dep_parent, dep_list in all_deps.items():
+                                # Skip dep sections for mods not declared in THIS jar
+                                if dep_parent.lower() not in jar_mod_ids:
+                                    continue
+                                if not isinstance(dep_list, list):
+                                    continue
+                                for dep in dep_list:
+                                    if not isinstance(dep, dict):
+                                        continue
+                                    dep_type = dep.get("type", "required").lower()
+                                    dep_mod_id = dep.get("modId", "").lower()
+                                    if not dep_mod_id or dep_mod_id in BUILTIN_MODS or dep_mod_id in jar_mod_ids:
+                                        continue
+                                    
+                                    if dep_type == "required":
+                                        required_deps.setdefault(dep_mod_id, set()).add(fn)
+                                    elif dep_type == "optional":
+                                        optional_deps.setdefault(dep_mod_id, set()).add(fn)
+                    
+                    # Also check fabric.mod.json
+                    if 'fabric.mod.json' in names:
+                        fabric_raw = zf.read('fabric.mod.json').decode('utf-8', errors='ignore')
+                        fabric_data = json.loads(fabric_raw)
+                        for dep_id, dep_ver in fabric_data.get("depends", {}).items():
+                            dep_id_lower = dep_id.lower()
+                            if dep_id_lower not in BUILTIN_MODS:
+                                required_deps.setdefault(dep_id_lower, set()).add(fn)
+            except Exception:
+                continue
+    
+    # ── Phase 2: Check which deps are missing ──
+    missing = {}  # dep_modId -> set of jar filenames that need it
+    for dep_id, requesters in required_deps.items():
+        if dep_id not in installed_mod_ids:
+            missing[dep_id] = requesters
+    
+    # ── Phase 2.5: Re-evaluate quarantined mods ──
+    # Mods quarantined for "missing dep" or "Mod conflict (mixin)" may be safe to
+    # restore now.  For "missing dep" reasons, check if the dep is now installed
+    # or about to be fetched.  For mixin conflicts that were likely false positives
+    # (e.g. caused by a client-only mod crash), restore them since we need them.
+    import shutil
+    if os.path.isdir(quarantine_dir):
+        for qfn in list(os.listdir(quarantine_dir)):
+            if not qfn.endswith('.jar'):
+                continue
+            reason_file = os.path.join(quarantine_dir, f"{qfn}.reason.txt")
+            reason_text = ""
+            if os.path.exists(reason_file):
                 try:
-                    deps = get_mod_version_dependencies(mod_data["id"], mc_version, loader_name)
-                    for dep in deps:
-                        if dep.get("dependency_type") == "required":
-                            dep_id = dep.get("project_id")
-                            if dep_id and not _mod_jar_exists(mods_dir, mod_slug=dep_id):
-                                # Check if the dep exists in our mods dir by any other name
-                                log_event("PREFLIGHT", f"Checking required dep {dep_id} for {mod_data.get('name', mod_id)}")
-                                if _search_and_download_dep(dep_id, mods_dir, mc_version, loader_name):
-                                    fetched += 1
+                    with open(reason_file) as rf:
+                        reason_text = rf.read()
+                except Exception:
+                    pass
+            
+            # Skip mods quarantined for client-only crashes — those are correctly quarantined
+            if "client-only" in reason_text.lower() or "noclassdeffounderror" in reason_text.lower():
+                continue
+            # Skip corrupt JARs
+            if "corrupt" in reason_text.lower() or "invalid jar" in reason_text.lower() or "not a jar" in reason_text.lower():
+                continue
+            
+            qjar = os.path.join(quarantine_dir, qfn)
+            qmanifest = _parse_mod_manifest(qjar)
+            q_mod_id = qmanifest.get("mod_id", "").lower() if qmanifest else ""
+            
+            if not q_mod_id:
+                continue
+            
+            # Check if any installed mod needs this quarantined mod as a dep,
+            # OR if it was quarantined for a missing dep that's now available
+            needed_as_dep = q_mod_id in required_deps or q_mod_id in missing
+            
+            dep_now_available = False
+            if "missing dep" in reason_text.lower():
+                # Extract the dep name from the reason text
+                import re as _re
+                dep_match = _re.search(r"missing dep '(\w+)'", reason_text.lower())
+                if dep_match:
+                    needed_dep = dep_match.group(1)
+                    dep_now_available = (needed_dep in installed_mod_ids 
+                                        or needed_dep in missing)  # will be fetched
+            
+            if needed_as_dep or dep_now_available:
+                dst = os.path.join(mods_dir, qfn)
+                try:
+                    shutil.move(qjar, dst)
+                    if os.path.exists(reason_file):
+                        os.remove(reason_file)
+                    log_event("PREFLIGHT", f"Restored {qfn} from quarantine (reason was: {reason_text.split(chr(10))[1].strip() if chr(10) in reason_text else 'unknown'})")
+                    installed_mod_ids.setdefault(q_mod_id, []).append(qfn)
+                    # Remove from missing if it was there
+                    if q_mod_id in missing:
+                        del missing[q_mod_id]
                 except Exception as e:
-                    pass  # Non-fatal — preflight is best-effort
-        
-        checked += 1
-        if checked >= 50:  # Don't spend forever on preflight
+                    log_event("PREFLIGHT", f"Failed to restore {qfn}: {e}")
+    
+    # Re-check missing after quarantine restoration
+    missing = {dep_id: req for dep_id, req in missing.items() if dep_id not in installed_mod_ids}
+    
+    if not missing:
+        log_event("PREFLIGHT", "All dependencies satisfied (some restored from quarantine)")
+    
+    log_event("PREFLIGHT", f"Found {len(missing)} missing dependencies:")
+    for dep_id, requesters in missing.items():
+        req_str = ', '.join(sorted(requesters)[:3])
+        log_event("PREFLIGHT", f"  {dep_id} (required by: {req_str})")
+    
+    # ── Phase 3: Try to fetch missing deps ──
+    fetched = 0
+    fetch_failed = {}  # dep_id -> reason
+    
+    # Process deps in multiple rounds to handle transitive deps
+    MAX_ROUNDS = 3
+    for round_num in range(MAX_ROUNDS):
+        if not missing:
             break
+        
+        round_fetched = 0
+        still_missing = {}
+        
+        for dep_id, requesters in missing.items():
+            # Check quarantine one more time (for transitive deps found in later rounds)
+            restored = False
+            if os.path.isdir(quarantine_dir):
+                for qfn in list(os.listdir(quarantine_dir)):
+                    if not qfn.endswith('.jar'):
+                        continue
+                    qjar = os.path.join(quarantine_dir, qfn)
+                    if not os.path.isfile(qjar):
+                        continue
+                    qmanifest = _parse_mod_manifest(qjar)
+                    q_mod = (qmanifest.get("mod_id") or "") if qmanifest else ""
+                    if q_mod.lower() == dep_id:
+                        dst = os.path.join(mods_dir, qfn)
+                        try:
+                            shutil.move(qjar, dst)
+                            reason_file = os.path.join(quarantine_dir, f"{qfn}.reason.txt")
+                            if os.path.exists(reason_file):
+                                os.remove(reason_file)
+                            log_event("PREFLIGHT", f"Restored {qfn} from quarantine (required by {', '.join(sorted(requesters)[:2])})")
+                            installed_mod_ids.setdefault(dep_id, []).append(qfn)
+                            fetched += 1
+                            round_fetched += 1
+                            restored = True
+                        except Exception:
+                            pass
+                        break
+            
+            if restored:
+                continue
+            
+            # Try to download from Modrinth/CurseForge
+            log_event("PREFLIGHT", f"Fetching missing dep: {dep_id}")
+            if _search_and_download_dep(dep_id, mods_dir, mc_version, loader_name):
+                fetched += 1
+                round_fetched += 1
+                installed_mod_ids.setdefault(dep_id, []).append(f"<fetched:{dep_id}>")
+            else:
+                still_missing[dep_id] = requesters
+                fetch_failed[dep_id] = requesters
+        
+        missing = still_missing
+        
+        if round_fetched == 0:
+            break  # No progress, stop
+        
+        # Re-scan newly downloaded/restored JARs for THEIR deps (transitive resolution)
+        if round_num < MAX_ROUNDS - 1 and round_fetched > 0:
+            new_missing = {}
+            for fn in os.listdir(mods_dir):
+                if not fn.endswith('.jar') or not os.path.isfile(os.path.join(mods_dir, fn)):
+                    continue
+                jar_path = os.path.join(mods_dir, fn)
+                try:
+                    with zipfile.ZipFile(jar_path, 'r') as zf:
+                        names = zf.namelist()
+                        toml_file = None
+                        if 'META-INF/neoforge.mods.toml' in names:
+                            toml_file = 'META-INF/neoforge.mods.toml'
+                        elif 'META-INF/mods.toml' in names:
+                            toml_file = 'META-INF/mods.toml'
+                        if toml_file:
+                            raw = zf.read(toml_file).decode('utf-8', errors='ignore')
+                            toml_data = tomllib.loads(raw)
+                            # Get this JAR's own mod IDs
+                            jar_mod_ids = set()
+                            for mod_entry in toml_data.get("mods", []):
+                                mid = mod_entry.get("modId", "").lower()
+                                if mid:
+                                    jar_mod_ids.add(mid)
+                            all_deps = toml_data.get("dependencies", {})
+                            if isinstance(all_deps, dict):
+                                for dep_parent, dep_list in all_deps.items():
+                                    if dep_parent.lower() not in jar_mod_ids:
+                                        continue
+                                    if not isinstance(dep_list, list):
+                                        continue
+                                    for dep in dep_list:
+                                        if not isinstance(dep, dict):
+                                            continue
+                                        dep_type = dep.get("type", "required").lower()
+                                        dep_mod_id = dep.get("modId", "").lower()
+                                        if (dep_type == "required" and dep_mod_id not in BUILTIN_MODS
+                                                and dep_mod_id not in jar_mod_ids):
+                                            if dep_mod_id not in installed_mod_ids and dep_mod_id not in missing:
+                                                new_missing.setdefault(dep_mod_id, set()).add(fn)
+                except Exception:
+                    continue
+            if new_missing:
+                log_event("PREFLIGHT", f"Round {round_num + 2}: found {len(new_missing)} transitive deps to resolve")
+                missing = new_missing
+    
+    # ── Phase 4: Report unfetchable deps ──
+    if fetch_failed:
+        log_event("PREFLIGHT", f"WARNING: {len(fetch_failed)} dependencies could not be fetched:")
+        for dep_id, requesters in fetch_failed.items():
+            req_str = ', '.join(sorted(requesters)[:3])
+            log_event("PREFLIGHT", f"  {dep_id} (required by: {req_str}) — mods that need it may crash")
     
     if fetched > 0:
-        log_event("PREFLIGHT", f"Pre-flight fetched {fetched} missing dependencies")
-    else:
-        log_event("PREFLIGHT", "All dependencies satisfied")
+        log_event("PREFLIGHT", f"Pre-flight fetched/restored {fetched} dependencies")
     
-    return fetched
+    # ── Phase 5: Optional dependency interop alerts ──
+    # Report when 2+ mods share the same optional dep (installing it improves compatibility)
+    for dep_id, requesters in optional_deps.items():
+        if len(requesters) >= 2 and dep_id not in installed_mod_ids:
+            req_list = sorted(requesters)[:5]
+            result["optional_interop"].append({
+                "dep_id": dep_id,
+                "requested_by": req_list,
+                "count": len(requesters)
+            })
+            log_event("PREFLIGHT", f"OPTIONAL INTEROP: {dep_id} wanted by {len(requesters)} mods: {', '.join(req_list)}")
+    
+    if result["optional_interop"]:
+        log_event("PREFLIGHT", f"Found {len(result['optional_interop'])} shared optional dependencies - installing these may improve mod compatibility")
+    
+    result["fetched"] = fetched
+    return result
 
 
 def run_server(cfg):
@@ -2004,11 +3022,30 @@ def run_server(cfg):
     log_event("SERVER_START", f"Starting {loader_instance.get_loader_display_name()} server (MC {mc_version})")
     log_event("SERVER_START", f"Java command: {java_cmd}")
     
+    # ---- PRE-LAUNCH: sort client-only mods, check compatibility ----
+    try:
+        sort_mods_by_type(mods_dir)
+    except Exception as e:
+        log_event("SERVER_START", f"Mod sort failed (non-fatal): {e}")
+    
+    try:
+        compat = preflight_mod_compatibility_check(mods_dir, cfg)
+        if compat["quarantined"]:
+            log_event("SERVER_START", f"Quarantined {len(compat['quarantined'])} incompatible mod(s) before launch")
+            # Regenerate mod ZIP since mods changed
+            create_mod_zip(mods_dir)
+    except Exception as e:
+        log_event("SERVER_START", f"Compatibility check failed (non-fatal): {e}")
+    
     # ---- PRE-FLIGHT: check deps before launching ----
     try:
-        preflight_fetched = _preflight_dep_check(cfg)
-        if preflight_fetched > 0:
-            log_event("SERVER_START", f"Pre-flight fetched {preflight_fetched} missing deps")
+        preflight_result = _preflight_dep_check(cfg)
+        if preflight_result["fetched"] > 0:
+            log_event("SERVER_START", f"Pre-flight fetched {preflight_result['fetched']} missing deps")
+        if preflight_result["optional_interop"]:
+            log_event("SERVER_START", f"OPTIONAL DEP INTEROP: {len(preflight_result['optional_interop'])} shared optional deps found (installing may improve compatibility)")
+            for interop in preflight_result["optional_interop"][:5]:
+                log_event("SERVER_START", f"  - {interop['dep_id']} (wanted by {interop['count']} mods)")
     except Exception as e:
         log_event("SERVER_START", f"Pre-flight check failed (non-fatal): {e}")
     
@@ -2684,7 +3721,9 @@ def _scrape_cf_dependencies(page_obj, slug):
     Navigates to /minecraft/mc-mods/<slug>/relations/dependencies and extracts
     required and optional dependencies from a.related-project-card elements.
     
-    Returns dict: {"required": [{name, slug, type}], "optional": [{name, slug, type}]}
+    Also attempts to extract file_id from download links if present.
+    
+    Returns dict: {"required": [{name, slug, type, file_id}], "optional": [{name, slug, type, file_id}]}
     """
     url = f"https://www.curseforge.com/minecraft/mc-mods/{slug}/relations/dependencies"
     deps = {"required": [], "optional": []}
@@ -2708,7 +3747,15 @@ def _scrape_cf_dependencies(page_obj, slug):
                 if not dep_name:
                     continue
                 
-                dep_info = {"name": dep_name, "slug": dep_slug, "type": dep_type}
+                dep_file_id = ""
+                dl_link = card.query_selector("a[href*='/download/']")
+                if dl_link:
+                    dl_href = dl_link.get_attribute("href") or ""
+                    file_match = re.search(r'/download/(\d+)', dl_href)
+                    if file_match:
+                        dep_file_id = file_match.group(1)
+                
+                dep_info = {"name": dep_name, "slug": dep_slug, "type": dep_type, "file_id": dep_file_id}
                 
                 if "required" in dep_type.lower():
                     deps["required"].append(dep_info)
@@ -4451,6 +5498,16 @@ def main():
             # Setup mods
             print("[BOOT] Sorting mods by type (client/server/both)...")
             sort_mods_by_type(cfg["mods_dir"])
+            
+            # Pre-launch compatibility check: validate loader + MC version for all mods
+            print("[BOOT] Checking mod compatibility (loader/version)...")
+            compat = preflight_mod_compatibility_check(cfg["mods_dir"], cfg)
+            if compat["quarantined"]:
+                print(f"[BOOT] WARNING: {len(compat['quarantined'])} incompatible mod(s) quarantined:")
+                for fn in compat["quarantined"]:
+                    print(f"  - {fn}")
+            if compat["compatible"]:
+                print(f"[BOOT] {len(compat['compatible'])} mods passed compatibility check")
             
             # Always regenerate install scripts (pick up port/IP changes)
             create_install_scripts(cfg["mods_dir"], cfg)

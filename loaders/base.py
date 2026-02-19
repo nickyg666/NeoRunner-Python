@@ -5,15 +5,26 @@ import json
 from typing import List, Dict, Optional
 
 
+def _get_default_cwd():
+    """Get default working directory."""
+    env_cwd = os.environ.get("NEORUNNER_HOME")
+    if env_cwd:
+        return env_cwd
+    try:
+        return os.path.dirname(os.path.abspath(__file__))
+    except NameError:
+        return os.getcwd()
+
+
 class LoaderBase(ABC):
     """Abstract base class for modloader implementations"""
     
-    def __init__(self, cfg, cwd="/home/services"):
+    def __init__(self, cfg, cwd=None):
         self.cfg = cfg
-        self.cwd = cwd
+        self.cwd = cwd or _get_default_cwd()
         self.loader_name = cfg.get("loader", "unknown").lower()
         self.mc_version = cfg.get("mc_version", "1.21.11")
-        self.mods_dir = os.path.join(cwd, cfg.get("mods_dir", "mods"))
+        self.mods_dir = os.path.join(self.cwd, cfg.get("mods_dir", "mods"))
         
     @abstractmethod
     def prepare_environment(self) -> None:

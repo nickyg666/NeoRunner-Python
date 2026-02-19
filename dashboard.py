@@ -1,4 +1,4 @@
-#!/home/services/neorunner_env/bin/python3
+#!/usr/bin/env python3
 """
 NeoRunner Hosting Dashboard
 - Server status and control
@@ -18,9 +18,20 @@ import subprocess
 import threading
 import time
 
-CWD = os.getcwd()
+def _get_cwd():
+    """Determine the working directory dynamically."""
+    env_cwd = os.environ.get("NEORUNNER_HOME")
+    if env_cwd:
+        return env_cwd
+    try:
+        return os.path.dirname(os.path.abspath(__file__))
+    except NameError:
+        return os.getcwd()
+
+CWD = _get_cwd()
 CONFIG = os.path.join(CWD, "config.json")
 LOG_FILE = os.path.join(CWD, "live.log")
+FERIUM_BIN = os.path.join(CWD, ".local/bin/ferium")
 
 app = Flask(__name__, template_folder=CWD, static_folder=os.path.join(CWD, "static"))
 app.secret_key = os.urandom(24)
@@ -208,7 +219,7 @@ def api_remove_mod(mod_name):
 def api_server_start():
     """Start server"""
     try:
-        result = run_command("cd /home/services && python3 run.py run &")
+        result = run_command(f"cd {CWD} && python3 run.py run &")
         return jsonify({"success": True, "message": "Server starting..."})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 400
@@ -231,7 +242,7 @@ def api_server_stop():
 def api_upgrade_mods():
     """Upgrade all mods via ferium"""
     try:
-        result = run_command("/home/services/.local/bin/ferium upgrade")
+        result = run_command(f"{FERIUM_BIN} upgrade")
         if result["success"]:
             log.info("[DASHBOARD] Mods upgraded via ferium")
             return jsonify({"success": True, "message": "Mods upgraded"})

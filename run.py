@@ -1261,7 +1261,7 @@ def check_installed(name, slug, installed_tokens, threshold=0.82):
     """Check if a mod (by name and/or slug) matches any installed JAR token.
     
     Uses three strategies in order:
-    1. Exact substring match (either direction) against tokens
+    1. Exact substring match (either direction) against tokens - but NOT short common words
     2. Alias expansion (e.g. 'macaws-bridges' -> also check 'mcw' + 'bridges')  
     3. Fuzzy SequenceMatcher above threshold
     
@@ -1269,41 +1269,54 @@ def check_installed(name, slug, installed_tokens, threshold=0.82):
     """
     from difflib import SequenceMatcher
     
+    # Common words that should NOT trigger substring matches
+    COMMON_WORDS = {"biomes", "world", "armor", "tools", "food", "storage", "inventory", 
+                    "chest", "block", "item", "entity", "mob", "particle", "render", 
+                    "client", "server", "config", "api", "lib", "core", "util", "helper",
+                    "better", "simple", "advanced", "extra", "more", "ultimate", "ultimate"}
+    
     checks = []
     for raw in [name, slug]:
         if raw:
             norm = re.sub(r'[^a-z0-9]', '', raw.lower())
-            if norm:
+            if norm and norm not in COMMON_WORDS:
                 checks.append(norm)
     
     if not checks:
         return False
     
     for norm in checks:
-        # Strategy 1: substring match (bidirectional)
+        # Strategy 1: substring match (bidirectional) - but skip if norm is a common word
         for token in installed_tokens:
-            if norm in token or token in norm:
-                return True
+            # Require the match to be significant (at least 5 chars) and not just a common word
+            if len(norm) >= 5 and (norm in token or token in norm):
+                # Additional check: make sure it's not just matching a common word
+                is_common = False
+                for cw in COMMON_WORDS:
+                    if norm == cw or (cw in norm and len(norm.replace(cw, "")) < 3):
+                        is_common = True
+                        break
+                if not is_common:
+                    return True
         
         # Strategy 2: alias expansion
-        # Split the normalized name into parts and check if any alias prefix matches
         for alias, canonical in MOD_ALIASES.items():
             if norm.startswith(alias):
-                # e.g. "macawsbridges" starts with "macaws" -> try "mcwbridges"
                 expanded = canonical + norm[len(alias):]
                 for token in installed_tokens:
-                    if expanded in token or token in expanded:
+                    if len(expanded) >= 5 and (expanded in token or token in expanded):
                         return True
             if norm.startswith(canonical):
                 expanded = alias + norm[len(canonical):]
                 for token in installed_tokens:
-                    if expanded in token or token in expanded:
+                    if len(expanded) >= 5 and (expanded in token or token in expanded):
                         return True
     
-    # Strategy 3: fuzzy match with SequenceMatcher
+    # Strategy 3: fuzzy match with SequenceMatcher (higher threshold for short names)
     for norm in checks:
         for token in installed_tokens:
-            if SequenceMatcher(None, norm, token).ratio() >= threshold:
+            required_ratio = 0.90 if len(norm) < 8 else threshold
+            if SequenceMatcher(None, norm, token).ratio() >= required_ratio:
                 return True
     
     return False

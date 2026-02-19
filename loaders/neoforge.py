@@ -162,6 +162,42 @@ class NeoForgeLoader(LoaderBase):
                 "bad_file": bad_file
             }
         
+        # ---- 0.5. CLIENT-ONLY MOD CRASH ----
+        # Detect mods that reference client-side classes (Screen, MouseHandler, etc.)
+        # on a dedicated server.  These are NOT mixin conflicts — the mod simply
+        # cannot run without a client.  Must be checked BEFORE mixin conflict
+        # detection to prevent false positive quarantines.
+        client_class_patterns = [
+            r"noclassdeffounderror:\s+net/minecraft/client/",
+            r"classnotfoundexception:\s+net\.minecraft\.client\.",
+            r"noclassdeffounderror:\s+com/mojang/blaze3d/",
+            r"classnotfoundexception:\s+com\.mojang\.blaze3d\.",
+        ]
+        for cp in client_class_patterns:
+            client_match = re.search(cp, log_lower)
+            if client_match:
+                # Try to identify which mod file caused it
+                culprit_mod = None
+                culprit_file = None
+                # Look for "Mod file: /path/to/mods/X.jar" near the error
+                file_match = re.search(r"mod\s+file:\s+\S*mods/(\S+\.jar)", log_lower)
+                if file_match:
+                    culprit_file = file_match.group(1)
+                    culprit_mod = re.sub(r'[-_]?\d.*$', '', culprit_file.replace('.jar', '')).lower()
+                # Also try "Failure message: ModName (modid)"
+                fail_match = re.search(r"failure\s+message:\s+\S+\s+\((" + MOD_ID + r")\)\s+has\s+failed", log_lower)
+                if fail_match:
+                    culprit_mod = fail_match.group(1)
+                
+                return {
+                    "type": "mod_error",
+                    "subtype": "client_only",
+                    "culprit": culprit_mod,
+                    "culprits": [culprit_mod] if culprit_mod else [],
+                    "message": f"Client-only mod crash: {culprit_mod or 'unknown'} references client classes not available on server",
+                    "bad_file": culprit_file
+                }
+        
         # ---- 1. MISSING MOD DEPENDENCY ----
         missing_patterns = [
             # "mod X requires Y Z or above" — X is the culprit, Y is the missing dep
@@ -201,10 +237,14 @@ class NeoForgeLoader(LoaderBase):
             # "is already registered" patterns
             (r"(" + MOD_ID + r"[:/]" + MOD_ID + r")\s+is\s+already\s+registered", "registry"),
             # Mixin conflict: "Overwrite conflict for METHOD in MixinClass from mod A, previously written by mod B"
-            (r"overwrite\s+conflict\s+for\s+\S+\s+in\s+\S+\s+from\s+mod\s+(" + MOD_ID + r").*?previously\s+written\s+by\s+.*?(" + MOD_ID + r")", "mixin"),
-            # "Mixin apply failed" with mod name
-            (r"mixin\s+apply\s+.*?failed.*?(" + MOD_ID + r")", "mixin_fail"),
-            # "Incompatible mod set" 
+            # This is a REAL mixin overwrite conflict — two mods both @Overwrite the same method
+            (r"overwrite\s+conflict\s+for\s+\S+\s+in\s+\S+\s+from\s+(?:mod\s+)?(" + MOD_ID + r")[\s,].*?previously\s+(?:written|defined)\s+by\s+.*?(" + MOD_ID + r")", "mixin"),
+            # "Mixin apply failed" — only match if mod ID is on same line (prevents false positives
+            # from benign warnings like "Failed reading REFMAP JSON" which have "mixin" in the prefix)
+            (r"mixin\s+apply\s+for\s+mod\s+(" + MOD_ID + r")\s+failed", "mixin_fail"),
+            # MixinApplyError with specific mod
+            (r"mixinapplyerror.*?mod[:\s]+(" + MOD_ID + r")", "mixin_fail"),
+            # Incompatible mod set 
             (r"incompatible\s+mod(?:s)?\s+(?:set|found|detected)", "incompatible"),
             # "conflicts with"
             (r"(" + MOD_ID + r")\s+conflicts?\s+with\s+(" + MOD_ID + r")", "conflict"),

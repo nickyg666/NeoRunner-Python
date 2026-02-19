@@ -31,15 +31,15 @@ class ModInfo:
 class ModManager:
     """Orchestrates mod discovery, dependency resolution, and installation"""
     
-    def __init__(self, cfg, cwd="/home/services"):
+    def __init__(self, cfg, cwd=None):
         self.cfg = cfg
-        self.cwd = cwd
+        self.cwd = cwd or os.environ.get("NEORUNNER_HOME", os.path.dirname(os.path.abspath(__file__)))
         self.loader = cfg.get("loader", "neoforge")
         self.mc_version = cfg.get("mc_version", "1.21.11")
-        self.mods_dir = os.path.join(cwd, cfg.get("mods_dir", "mods"))
-        self.ferium_bin = os.path.join(cwd, ".local/bin/ferium")
-        self.cache_file = os.path.join(cwd, ".mod_cache.json")
-        self.mod_inventory = os.path.join(cwd, ".mod_inventory.json")
+        self.mods_dir = os.path.join(self.cwd, cfg.get("mods_dir", "mods"))
+        self.ferium_bin = os.path.join(self.cwd, ".local/bin/ferium")
+        self.cache_file = os.path.join(self.cwd, ".mod_cache.json")
+        self.mod_inventory = os.path.join(self.cwd, ".mod_inventory.json")
         
         os.makedirs(self.mods_dir, exist_ok=True)
     

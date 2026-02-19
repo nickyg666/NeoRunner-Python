@@ -13,9 +13,9 @@
 #   chmod +x install.sh && sudo ./install.sh
 #
 # What this does:
-#   1. Installs system deps (Java 21, Python 3, pip, git, tmux, xvfb)
-#   2. Creates 'services' user if needed
-#   3. Clones NeoRunner into /home/services, downloads ferium for mod management
+#   1. Installs system deps (Java 21, Python 3, pip, git, tmux)
+#   2. Creates service user if needed
+#   3. Clones NeoRunner, downloads ferium for mod management
 #   4. Sets up Python venv + pip packages (Flask, Playwright, etc.)
 #   5. Installs Playwright Chromium (for CurseForge scraping)
 #   6. Creates + enables systemd service (auto-start on boot)
@@ -47,16 +47,31 @@ fi
 
 REPO="https://github.com/nickyg666/NeoRunner-Python.git"
 BRANCH="master"
-INSTALL_DIR="/opt/NeoRunner"
-SERVICE_USER="ec2user"
+
+# ── Determine install directory ──────────────────────────────────────
+# Use SUDO_USER's home if available, otherwise /opt/NeoRunner
+if [[ -n "${SUDO_USER:-}" ]]; then
+    SUDO_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+    INSTALL_DIR="${SUDO_HOME}/NeoRunner"
+    SERVICE_USER="$SUDO_USER"
+else
+    INSTALL_DIR="/opt/NeoRunner"
+    SERVICE_USER="neorunner"
+fi
+
 SERVICE_NAME="mcserver"
 VENV_DIR="$INSTALL_DIR/neorunner_env"
+FERIUM_DIR="$INSTALL_DIR/.local/bin"
+
 echo -e "${BOLD}"
 echo "╔══════════════════════════════════════════════════════════╗"
 echo "║           NeoRunner — Modded MC Server Manager          ║"
 echo "║                    One-File Installer                   ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
+
+info "Installing to: $INSTALL_DIR"
+info "Service user: $SERVICE_USER"
 
 # ── 1. System packages ──────────────────────────────────────────────
 step "1/7  Installing system packages"
@@ -80,34 +95,48 @@ if [[ "$PKG" == "apt" ]]; then
 
     info "Installing Java 21, Python 3, git, tmux..."
     apt-get install -y -qq \
-        openjdk-21-jre-headless \
         python3 python3-pip python3-venv \
         git tmux curl wget unzip \
         2>&1 | tail -5
 
-    # Java 21 might not be in default repos on older Ubuntu
-    if ! java -version 2>&1 | grep -q "21\|22\|23"; then
-        warn "Java 21 not found in default repos, trying Adoptium..."
-        apt-get install -y -qq software-properties-common
-        add-apt-repository -y ppa:openjdk-r/ppa 2>/dev/null || true
-        apt-get update -qq
-        apt-get install -y -qq openjdk-21-jre-headless 2>&1 | tail -3
+    # Try multiple Java 21 providers (openjdk, temurin, corretto)
+    if ! java -version 2>&1 | grep -qE "21|22|23"; then
+        info "Installing Java 21..."
+        # Try openjdk first, then temurin, then corretto
+        apt-get install -y -qq openjdk-21-jre-headless 2>&1 | tail -3 || \
+            { info "Trying Eclipse Temurin..."; apt-get install -y -qq temurin-21-jre 2>&1 | tail -3; } || \
+            { info "Trying Amazon Corretto..."; apt-get install -y -qq java-21-amazon-corretto-jre 2>&1 | tail -3; } || \
+            warn "Could not auto-install Java 21, please install manually"
     fi
 elif [[ "$PKG" == "dnf" ]] || [[ "$PKG" == "yum" ]]; then
     info "Installing Java 21, Python 3, git, tmux..."
     $PKG install -y --skip-broken \
-        java-21-amazon-corretto\
         python3 python3-pip \
         git tmux curl wget unzip \
         2>&1 | tail -5
+
+    # Try multiple Java 21 providers for RHEL/Amazon Linux
+    if ! java -version 2>&1 | grep -qE "21|22|23"; then
+        info "Installing Java 21..."
+        $PKG install -y --skip-broken java-21-openjdk-headless 2>&1 | tail -3 || \
+            $PKG install -y --skip-broken java-21-amazon-corretto 2>&1 | tail -3 || \
+            $PKG install -y --skip-broken java-21-temurin 2>&1 | tail -3 || \
+            warn "Could not auto-install Java 21, please install manually"
+    fi
 fi
 
 # Verify critical deps
-command -v java    &>/dev/null || fail "Java not installed"
+command -v java    &>/dev/null || fail "Java not installed - please install Java 21+ manually"
 command -v python3 &>/dev/null || fail "Python 3 not installed"
 command -v tmux    &>/dev/null || fail "tmux not installed"
 
+# Verify Java version (accept any 21+)
 JAVA_VER=$(java -version 2>&1 | head -1)
+if ! echo "$JAVA_VER" | grep -qE "21|22|23|24"; then
+    warn "Java version may be too old: $JAVA_VER"
+    warn "NeoRunner requires Java 21+. Server may fail to start."
+fi
+
 PYTHON_VER=$(python3 --version)
 ok "Java:   $JAVA_VER"
 ok "Python: $PYTHON_VER"
@@ -123,35 +152,72 @@ else
     ok "User '$SERVICE_USER' created"
 fi
 
-# ── 3. Clone repos ───────────────────────────────────────────────────
+# ── 3. Clone repo ───────────────────────────────────────────────────
 step "3/7  Cloning NeoRunner"
 
-
-if [[ -d "$INSTALL_DIR" ]] && [[ "$(ls -A $INSTALL_DIR 2>/dev/null)" ]]; then
-    # Home dir exists with stuff in it but no git repo
-    info "Existing files found in $INSTALL_DIR, cloning into temp and merging..."
-    TMPDIR=$(mktemp -d)
-    git clone --branch "$BRANCH" "$REPO" "$TMPDIR" 2>&1 | tail -6
-
-    # Copy repo files (don't overwrite existing config/mods)
-    cp -rn "$TMPDIR/." "$INSTALL_DIR/" 2>/dev/null || true
-    # Make sure .git is there
-    cp -r "$TMPDIR/.git" "$INSTALL_DIR/.git"
-    rm -rf "$TMPDIR"
-    chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
-    ok "Repo merged into existing directory"
+if [[ -d "$INSTALL_DIR/.git" ]]; then
+    info "Existing repo found, pulling latest..."
+    su - "$SERVICE_USER" -c "cd $INSTALL_DIR && git pull origin $BRANCH" 2>&1 | tail -3
+    ok "Repository updated"
 else
-    info "Cloning fresh..."
-    git clone --branch "$BRANCH" "$REPO" "$INSTALL_DIR" 2>&1 | tail -6
-    chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
-    if
+    if [[ -d "$INSTALL_DIR" ]] && [[ "$(ls -A $INSTALL_DIR 2>/dev/null)" ]]; then
+        # Home dir exists with stuff in it but no git repo
+        info "Existing files found in $INSTALL_DIR, cloning into temp and merging..."
+        TMPDIR=$(mktemp -d)
+        git clone --branch "$BRANCH" "$REPO" "$TMPDIR" 2>&1 | tail -3
+        # Copy repo files (don't overwrite existing config/mods)
+        cp -rn "$TMPDIR/." "$INSTALL_DIR/" 2>/dev/null || true
+        # Make sure .git is there
+        cp -r "$TMPDIR/.git" "$INSTALL_DIR/.git"
+        rm -rf "$TMPDIR"
+        chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
+        ok "Repo merged into existing directory"
+    else
+        info "Cloning fresh..."
+        git clone --branch "$BRANCH" "$REPO" "$INSTALL_DIR" 2>&1 | tail -3
+        chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
         ok "Repository cloned to $INSTALL_DIR"
     fi
 fi
-#download UNZIP AND move FERIUM
-wget https://github.com/gorilla-devs/ferium/releases/download/v4.7.1/ferium-linux-nogui.zip
-unzip ferium*.zip
-mv ferium/ferium .
+
+# ── 3.5. Download Ferium ─────────────────────────────────────────────
+info "Downloading Ferium mod manager..."
+
+mkdir -p "$FERIUM_DIR"
+
+if [[ -x "$FERIUM_DIR/ferium" ]]; then
+    ok "Ferium already installed at $FERIUM_DIR/ferium"
+else
+    FERIUM_TMP=$(mktemp -d)
+    cd "$FERIUM_TMP"
+    
+    # Detect architecture
+    ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64)  FERIUM_ZIP="ferium-linux-nogui.zip" ;;
+        aarch64) FERIUM_ZIP="ferium-linux-armv7-nogui.zip" ;;
+        armv7l)  FERIUM_ZIP="ferium-linux-armv7-nogui.zip" ;;
+        *)       warn "Unknown arch $ARCH, trying x86_64"; FERIUM_ZIP="ferium-linux-nogui.zip" ;;
+    esac
+    
+    info "Downloading $FERIUM_ZIP for $ARCH..."
+    wget -q "https://github.com/gorilla-devs/ferium/releases/download/v4.7.1/$FERIUM_ZIP" -O ferium.zip
+    unzip -q ferium.zip
+    
+    # Find the ferium binary (might be in a subdirectory)
+    FERIUM_BIN=$(find . -name "ferium" -type f 2>/dev/null | head -1)
+    if [[ -n "$FERIUM_BIN" ]]; then
+        mv "$FERIUM_BIN" "$FERIUM_DIR/ferium"
+        chmod +x "$FERIUM_DIR/ferium"
+        chown "$SERVICE_USER:$SERVICE_USER" "$FERIUM_DIR/ferium"
+        ok "Ferium installed to $FERIUM_DIR/ferium"
+    else
+        warn "Could not find ferium binary in downloaded zip"
+    fi
+    
+    cd "$INSTALL_DIR"
+    rm -rf "$FERIUM_TMP"
+fi
 
 # ── 4. Python venv + packages ───────────────────────────────────────
 step "4/7  Setting up Python environment"
@@ -202,6 +268,7 @@ StandardOutput=append:$INSTALL_DIR/live.log
 StandardError=append:$INSTALL_DIR/live.log
 Environment="PATH=$VENV_DIR/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 Environment="PYTHONPATH=$INSTALL_DIR"
+Environment="NEORUNNER_HOME=$INSTALL_DIR"
 
 [Install]
 WantedBy=multi-user.target

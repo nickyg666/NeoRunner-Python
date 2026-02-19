@@ -19,10 +19,20 @@ from apscheduler.triggers.cron import CronTrigger
 
 log = logging.getLogger(__name__)
 
+def _get_default_cwd():
+    """Get default working directory."""
+    env_cwd = os.environ.get("NEORUNNER_HOME")
+    if env_cwd:
+        return env_cwd
+    try:
+        return os.path.dirname(os.path.abspath(__file__))
+    except NameError:
+        return os.getcwd()
+
 class FeriumManager:
-    def __init__(self, cwd="/home/services", ferium_bin="/home/services/.local/bin/ferium"):
-        self.cwd = cwd
-        self.ferium_bin = ferium_bin
+    def __init__(self, cwd=None, ferium_bin=None):
+        self.cwd = cwd or _get_default_cwd()
+        self.ferium_bin = ferium_bin or os.path.join(self.cwd, ".local/bin/ferium")
         self.ferium_config_dir = os.path.expanduser("~/.config/ferium")
         self.ferium_config_file = os.path.join(self.ferium_config_dir, "config.json")
         self.scheduler = None
@@ -228,17 +238,19 @@ class FeriumManager:
             log.error(f"[FERIUM_TASK] Weekly strict update failed: {e}")
 
 
-def setup_ferium_wizard(config, cwd="/home/services"):
+def setup_ferium_wizard(config, cwd=None):
     """
     Run ferium setup wizard during initial configuration
     
     Args:
         config: Current config dict from get_config()
-        cwd: Working directory
+        cwd: Working directory (auto-detected if None)
     
     Returns:
         Updated config dict with ferium settings
     """
+    if cwd is None:
+        cwd = _get_default_cwd()
     
     print("\n" + "="*70)
     print("FERIUM MOD MANAGER SETUP")

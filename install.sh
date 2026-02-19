@@ -18,8 +18,11 @@
 #   3. Clones NeoRunner, downloads ferium for mod management
 #   4. Sets up Python venv + pip packages (Flask, Playwright, etc.)
 #   5. Installs Playwright Chromium (for CurseForge scraping)
-#   6. Creates + enables systemd service (auto-start on boot)
-#   7. Starts NeoRunner (first run triggers interactive setup wizard)
+#   6. Creates systemd service (auto-start on boot)
+#   7. Runs NeoRunner (prompts for loader, installs it, starts server)
+#
+# The loader (NeoForge/Fabric/Forge) is installed on first run based on
+# user selection. Run again anytime to update.
 #
 # After install, open http://<your-ip>:8000 for the dashboard.
 # ══════════════════════════════════════════════════════════════════════
@@ -74,7 +77,7 @@ info "Installing to: $INSTALL_DIR"
 info "Service user: $SERVICE_USER"
 
 # ── 1. System packages ──────────────────────────────────────────────
-step "1/7  Installing system packages"
+step "1/6  Installing system packages"
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -102,7 +105,6 @@ if [[ "$PKG" == "apt" ]]; then
     # Try multiple Java 21 providers (openjdk, temurin, corretto)
     if ! java -version 2>&1 | grep -qE "21|22|23"; then
         info "Installing Java 21..."
-        # Try openjdk first, then temurin, then corretto
         apt-get install -y -qq openjdk-21-jre-headless 2>&1 | tail -3 || \
             { info "Trying Eclipse Temurin..."; apt-get install -y -qq temurin-21-jre 2>&1 | tail -3; } || \
             { info "Trying Amazon Corretto..."; apt-get install -y -qq java-21-amazon-corretto-jre 2>&1 | tail -3; } || \
@@ -142,7 +144,7 @@ ok "Java:   $JAVA_VER"
 ok "Python: $PYTHON_VER"
 
 # ── 2. Create service user ──────────────────────────────────────────
-step "2/7  Setting up '$SERVICE_USER' user"
+step "2/6  Setting up '$SERVICE_USER' user"
 
 if id "$SERVICE_USER" &>/dev/null; then
     ok "User '$SERVICE_USER' already exists"
@@ -153,7 +155,7 @@ else
 fi
 
 # ── 3. Clone repo ───────────────────────────────────────────────────
-step "3/7  Cloning NeoRunner"
+step "3/6  Cloning NeoRunner"
 
 if [[ -d "$INSTALL_DIR/.git" ]]; then
     info "Existing repo found, pulling latest..."
@@ -220,7 +222,7 @@ else
 fi
 
 # ── 4. Python venv + packages ───────────────────────────────────────
-step "4/7  Setting up Python environment"
+step "4/6  Setting up Python environment"
 
 if [[ ! -d "$VENV_DIR" ]]; then
     info "Creating virtual environment..."
@@ -239,7 +241,7 @@ pip3 install --break-system-packages -q Flask requests playwright playwright-ste
     warn "System pip install failed (non-fatal, venv will be used)"
 
 # ── 5. Playwright browser ───────────────────────────────────────────
-step "5/7  Installing Playwright Chromium"
+step "5/6  Installing Playwright Chromium"
 
 info "This downloads ~150 MB of Chromium for headless CurseForge scraping..."
 su - "$SERVICE_USER" -c "$VENV_DIR/bin/python3 -m playwright install chromium" 2>&1 | tail -5
@@ -249,7 +251,7 @@ $VENV_DIR/bin/python3 -m playwright install-deps 2>&1 | tail -5 || \
 ok "Playwright Chromium installed"
 
 # ── 6. Systemd service ──────────────────────────────────────────────
-step "6/7  Creating systemd service"
+step "6/6  Creating systemd service"
 
 cat > "/etc/systemd/system/${SERVICE_NAME}.service" << SERVICEEOF
 [Unit]
@@ -278,14 +280,9 @@ systemctl daemon-reload
 systemctl enable "$SERVICE_NAME" 2>/dev/null
 ok "Service '$SERVICE_NAME' created and enabled"
 
-# ── 7. Create mods directory ────────────────────────────────────────
-step "7/7  Final setup"
-
+# ── Create directories ──────────────────────────────────────────────
 su - "$SERVICE_USER" -c "mkdir -p $INSTALL_DIR/mods/clientonly"
 su - "$SERVICE_USER" -c "mkdir -p $INSTALL_DIR/backups"
-
-# Fix ownership
-chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
 
 # ── Accept EULA (required for MC server to start) ───────────────────
 if [[ ! -f "$INSTALL_DIR/eula.txt" ]]; then
@@ -293,33 +290,27 @@ if [[ ! -f "$INSTALL_DIR/eula.txt" ]]; then
     su - "$SERVICE_USER" -c "echo 'eula=true' > $INSTALL_DIR/eula.txt"
 fi
 
-ok "Directory structure ready"
+# Fix ownership
+chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
 
-# ── Start it ─────────────────────────────────────────────────────────
+ok "System ready"
+
+# ── Run NeoRunner ───────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}╔══════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}║${NC}  ${GREEN}Installation complete!${NC}                                  ${BOLD}║${NC}"
+echo -e "${BOLD}║${NC}  ${GREEN}System prep complete!${NC}                                   ${BOLD}║${NC}"
 echo -e "${BOLD}╠══════════════════════════════════════════════════════════╣${NC}"
 echo -e "${BOLD}║${NC}                                                          ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}  ${CYAN}Start the server:${NC}                                       ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}    sudo systemctl start $SERVICE_NAME                       ${BOLD}║${NC}"
+echo -e "${BOLD}║${NC}  NeoRunner will now:                                     ${BOLD}║${NC}"
+echo -e "${BOLD}║${NC}    • Ask you to pick a loader (NeoForge/Fabric/Forge)   ${BOLD}║${NC}"
+echo -e "${BOLD}║${NC}    • Download and install it                             ${BOLD}║${NC}"
+echo -e "${BOLD}║${NC}    • Start the Minecraft server in tmux                  ${BOLD}║${NC}"
 echo -e "${BOLD}║${NC}                                                          ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}  ${CYAN}View logs:${NC}                                              ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}    tail -f $INSTALL_DIR/live.log                  ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}                                                          ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}  ${CYAN}Dashboard:${NC}                                              ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}    http://<your-ip>:8000                                 ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}                                                          ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}  ${CYAN}Minecraft server:${NC}                                       ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}    <your-ip>:25565 (default, configurable)               ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}                                                          ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}  ${YELLOW}First run will prompt for server setup (loader,${NC}         ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}  ${YELLOW}MC version, RCON password, etc).${NC}                       ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}                                                          ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}  ${CYAN}Useful commands:${NC}                                        ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}    sudo systemctl status $SERVICE_NAME                     ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}    sudo systemctl restart $SERVICE_NAME                    ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}    sudo systemctl stop $SERVICE_NAME                       ${BOLD}║${NC}"
+echo -e "${BOLD}║${NC}  ${CYAN}After startup:${NC}                                          ${BOLD}║${NC}"
+echo -e "${BOLD}║${NC}    Dashboard: http://<your-ip>:8000                      ${BOLD}║${NC}"
+echo -e "${BOLD}║${NC}    MC Server: <your-ip>:25565                            ${BOLD}║${NC}"
+echo -e "${BOLD}║${NC}    Logs:      tail -f $INSTALL_DIR/live.log       ${BOLD}║${NC}"
+echo -e "${BOLD}║${NC}    MC Console: tmux attach -t MC                        ${BOLD}║${NC}"
 echo -e "${BOLD}║${NC}                                                          ${BOLD}║${NC}"
 echo -e "${BOLD}╚══════════════════════════════════════════════════════════╝${NC}"
 echo ""
@@ -327,18 +318,17 @@ echo ""
 read -rp "Start NeoRunner now? [Y/n] " START_NOW
 START_NOW=${START_NOW:-Y}
 if [[ "${START_NOW,,}" == "y" ]]; then
-    info "Starting $SERVICE_NAME..."
-    systemctl start "$SERVICE_NAME"
-    sleep 2
-    if systemctl is-active --quiet "$SERVICE_NAME"; then
-        ok "NeoRunner is running!"
-        info "Dashboard: http://$(hostname -I | awk '{print $1}'):8000"
-        info "Logs: tail -f $INSTALL_DIR/live.log"
-    else
-        warn "Service started but may still be initializing."
-        warn "Check: sudo systemctl status $SERVICE_NAME"
-        warn "Logs:  tail -f $INSTALL_DIR/live.log"
-    fi
+    info "Starting NeoRunner..."
+    cd "$INSTALL_DIR"
+    
+    # Run interactively so user can select loader
+    su - "$SERVICE_USER" -c "cd '$INSTALL_DIR' && NEORUNNER_HOME='$INSTALL_DIR' $VENV_DIR/bin/python3 run.py run"
+    
+    cd - > /dev/null
 else
-    info "Run 'sudo systemctl start $SERVICE_NAME' when ready."
+    info "Start manually with:"
+    info "  cd $INSTALL_DIR && $VENV_DIR/bin/python3 run.py run"
+    info ""
+    info "Or use systemd (non-interactive, uses saved config):"
+    info "  sudo systemctl start $SERVICE_NAME"
 fi

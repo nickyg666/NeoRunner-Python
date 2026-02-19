@@ -2,7 +2,8 @@
 Built for a linux host, this (vibe-coded) program will download/run the latest neoforged server (others supported as well) and try to sync mods it finds into client side to sidestep modloader swaps and client/server upgrades. I am a huge fan of the automodpack mod for what it's worth, and 
 ## shout-out to skidam for making that mod and giving me the idea. 
 This has spiraled into a whole expansive hosting and mod management console, dependent on Ferium to manage downloads, uses a stealth browser to check curseforge, and modrinths super cool API that's free to use for the modrinth side. Should give you top 100 non-lib/api downloads from either suppier by default, but you can sort but other criteria in the settings.
-
+there are many more features I didn't mention, check it out!
+## I burned up all my copilot tokens on this in a day, may slowly edit until they replenish next month. You can sponsor the repo if you like what I'm doing and are feeling generous. $10 gets me a mohth of anthropic's claude + GitHub copilot in my favorite program: opencode.ai editor!
 As always, big shout-out to 
 # My wife Sage, who understands that after I get home from work all I really want to do is more work. I love her more than trees love carbon dioxide.
 # To my son, Lorenzo, who is the whole reason I would ever touch minecraft in the first place, let alone get this involved with it.

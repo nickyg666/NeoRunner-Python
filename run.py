@@ -2994,25 +2994,22 @@ def _preflight_dep_check(cfg):
     
     # Loader-incompatible deps - skip these to avoid downloading wrong mods
     # NeoForge/Forge server should not try to fetch Fabric deps, and vice versa
-    LOADER_INCOMPATIBLE_DEPS = {
-        "neoforge": {"fabric", "fabricloader", "fabric-api", "fabric-api-base", 
-                     "fabric-resource-loader-v0", "fabric-screen-api-v1", 
-                     "fabric-networking-api-v1", "fabric-object-builder-api-v1",
-                     "fabric-rendering-fluids-v1", "fabric-rendering-data-attachment-v1",
-                     "fabric-item-api-v1", "fabric-item-group-api-v1", "fabric-command-api-v2",
-                     "fabric-content-registries-v0", "fabric-block-api-v1", "fabric-loot-api-v2",
-                     "fabric-model-loading-api-v1", "fabric-particles-v1", "fabric-recipe-api-v1",
-                     "fabric-registry-sync-v0", "fabric-rendering-v1", "fabric-sound-api-v1",
-                     "fabric-transfer-api-v1", "fabric-convention-tags-v1", "fabric-data-attachment-api-v1",
-                     "fabric-dimensions-v1", "fabric-entity-events-v1", "fabric-game-rule-api-v1",
-                     "fabric-lifecycle-events-v1", "fabric-message-api-v1", "fabric-mining-level-api-v1",
-                     "fabric-screen-handler-api-v1", "fabric-textures-v0", "fabric-transitive-access-wideners-v1",
-                     "fabric-key-binding-api-v1", "fabric-client-tags-api-v1"},
-        "forge": {"fabric", "fabricloader", "fabric-api"},  # Same as neoforge
-        "fabric": {"neoforge", "forge", "fml"},
-    }
+    # Using pattern matching to catch all fabric-* variants
+    def _is_loader_incompatible(dep_id, loader_name):
+        dep_lower = dep_id.lower()
+        if loader_name in ("neoforge", "forge"):
+            # Skip any fabric-related dep
+            if dep_lower.startswith("fabric") or "fabric" in dep_lower:
+                return True
+            if dep_lower in ("quilt_loader", "quiltloader"):
+                return True
+        elif loader_name == "fabric":
+            # Skip forge/neoforge deps
+            if dep_lower in ("neoforge", "forge", "fml", "javafml"):
+                return True
+        return False
     
-    incompatible_deps = LOADER_INCOMPATIBLE_DEPS.get(loader_name, set())
+    incompatible_deps = set()  # Will be checked dynamically
     
     log_event("PREFLIGHT", f"Scanning {len(installed_mod_ids)} installed mods for missing dependencies ({len(jij_provided)} JiJ-provided)...")
     
@@ -3079,7 +3076,7 @@ def _preflight_dep_check(cfg):
                         for dep_id, dep_ver in fabric_data.get("depends", {}).items():
                             dep_id_lower = dep_id.lower()
                             # Skip builtin AND loader-incompatible deps
-                            if dep_id_lower in BUILTIN_MODS or dep_id_lower in incompatible_deps:
+                            if dep_id_lower in BUILTIN_MODS or _is_loader_incompatible(dep_id_lower, loader_name):
                                 continue
                             required_deps.setdefault(dep_id_lower, set()).add(fn)
             except Exception:
@@ -3088,8 +3085,11 @@ def _preflight_dep_check(cfg):
     # ── Phase 2: Check which deps are missing ──
     missing = {}  # dep_modId -> set of jar filenames that need it
     for dep_id, requesters in required_deps.items():
+        # Skip builtin mods
+        if dep_id in BUILTIN_MODS:
+            continue
         # Skip loader-incompatible deps (e.g., fabric-api on neoforge server)
-        if dep_id in incompatible_deps or dep_id in BUILTIN_MODS:
+        if _is_loader_incompatible(dep_id, loader_name):
             continue
         if dep_id not in installed_mod_ids:
             missing[dep_id] = requesters

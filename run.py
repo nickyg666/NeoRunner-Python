@@ -1545,13 +1545,33 @@ echo "============================================"
 MODS="$MC_DIR/mods"
 OLD="$MC_DIR/oldmods"
 ZIP="/tmp/mods_latest.zip"
+MANIFEST="/tmp/mods_manifest.json"
 mkdir -p "$OLD" "$MODS"
-echo "Backing up old mods..."
-ls "$MODS"/*.jar 2>/dev/null && mv "$MODS"/*.jar "$OLD/" 2>/dev/null || true
+
+# Fetch manifest and clean old mods
+echo "Fetching mod list from server..."
+if curl -L -s -o "$MANIFEST" "http://$SERVER_IP:$PORT/download/mods_manifest.json" 2>/dev/null; then
+    # Move mods not in manifest
+    moved=0
+    for f in "$MODS"/*.jar; do
+        [[ -f "$f" ]] || continue
+        fname=$(basename "$f")
+        if ! grep -q "\"$fname\"" "$MANIFEST" 2>/dev/null; then
+            echo "  Moving old: $fname"
+            mv "$f" "$OLD/" 2>/dev/null
+            ((moved++))
+        fi
+    done
+    [[ $moved -gt 0 ]] && echo "Moved $moved old mods to oldmods"
+else
+    echo "WARNING: Could not fetch manifest, moving all old mods"
+    ls "$MODS"/*.jar 2>/dev/null && mv "$MODS"/*.jar "$OLD/" 2>/dev/null || true
+fi
+
 echo "Downloading mods..."
 curl -L -o "$ZIP" "http://$SERVER_IP:$PORT/download/mods_latest.zip" || {{ echo "ERROR: Download failed!"; exit 1; }}
 unzip -o -q "$ZIP" -d "$MODS"
-rm -f "$ZIP"
+rm -f "$ZIP" "$MANIFEST"
 COUNT=$(ls -1 "$MODS"/*.jar 2>/dev/null | wc -l)
 echo ""
 echo "SUCCESS: $COUNT mods installed!"

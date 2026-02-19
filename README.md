@@ -9,6 +9,7 @@ Built for a linux host, this (vibe-coded) program will download/run the latest n
 - Added EC2/amazonlinux compatibility
 - fixed required dependency fetching for mods
 - remove dead things that don't make sense anymore / from other projects
+- manually fix not downloading ANY launchers from fresh install (claude ruined in refactor)
 
   
 - ## Quickstart

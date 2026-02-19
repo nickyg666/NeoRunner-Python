@@ -35,14 +35,21 @@ def _ensure_deps():
     
     if missing:
         print(f"[NeoRunner] Auto-installing missing dependencies: {', '.join(missing)}")
-        pip_cmd = [sys.executable, "-m", "pip", "install",
-                   "--break-system-packages", "--quiet"] + missing
-        try:
-            subprocess.check_call(pip_cmd)
-            print(f"[NeoRunner] Installed: {', '.join(missing)}")
-        except subprocess.CalledProcessError as e:
-            print(f"[NeoRunner] WARNING: pip install failed (exit {e.returncode}). "
-                  f"Try manually: pip install {' '.join(missing)}")
+        # Try without --break-system-packages first (older pip), then with it (newer pip)
+        pip_base = [sys.executable, "-m", "pip", "install", "--quiet"]
+        tried = False
+        for flags in [[], ["--break-system-packages"]]:
+            pip_cmd = pip_base + flags + missing
+            try:
+                subprocess.check_call(pip_cmd)
+                print(f"[NeoRunner] Installed: {', '.join(missing)}")
+                tried = True
+                break
+            except subprocess.CalledProcessError:
+                continue
+        if not tried:
+            print(f"[NeoRunner] WARNING: pip install failed. Try manually:")
+            print(f"           pip install {' '.join(missing)}")
     
     # Ensure Playwright browsers are installed
     try:

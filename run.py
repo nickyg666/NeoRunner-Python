@@ -1432,20 +1432,39 @@ if errorlevel 1 (
     goto :moveall
 )
 
+:: Validate manifest contains JSON (basic check)
+findstr /C:"mods" "%MANIFEST%" >nul 2>&1
+if errorlevel 1 (
+    echo WARNING: Invalid manifest, moving all old mods
+    goto :moveall
+)
+
 :: Parse manifest and move mods not in the list
 echo Cleaning old mods not in server pack...
+set moved=0
 for %%f in ("%MODS%\\*.jar") do (
     findstr /C:"%%~nxf" "%MANIFEST%" >nul 2>&1
     if errorlevel 1 (
-        echo   Moving old: %%~nxf
         move /Y "%%f" "%OLD%\\" >nul 2>&1
+        if not errorlevel 1 (
+            echo   Moved: %%~nxf
+            set /a moved+=1
+        ) else (
+            echo   FAILED to move: %%~nxf
+        )
     )
 )
+if %moved% gtr 0 echo Moved %moved% old mods to oldmods
 goto :download
 
 :moveall
 for %%f in ("%MODS%\\*.jar") do (
     move /Y "%%f" "%OLD%\\" >nul 2>&1
+    if not errorlevel 1 (
+        echo   Moved: %%~nxf
+    ) else (
+        echo   FAILED to move: %%~nxf
+    )
 )
 
 :download
@@ -1507,24 +1526,41 @@ Write-Host "Fetching mod list from server..." -ForegroundColor Yellow
 try {{
     $manifest = Invoke-RestMethod -Uri "http://$ServerIP`:$Port/download/mods_manifest.json" -UseBasicParsing
     $serverMods = $manifest.mods
+    if (-not $serverMods) {{
+        throw "Invalid manifest - no mods array"
+    }}
     Write-Host "Server has $($serverMods.Count) mods" -ForegroundColor Gray
     
     # Move mods not in the manifest
     $movedCount = 0
+    $failedCount = 0
     Get-ChildItem -Path $modsPath -Filter "*.jar" -ErrorAction SilentlyContinue | ForEach-Object {{
         if ($serverMods -notcontains $_.Name) {{
-            Write-Host "  Moving old: $($_.Name)" -ForegroundColor DarkGray
-            Move-Item -Path $_.FullName -Destination $oldmodsPath -Force
-            $movedCount++
+            try {{
+                Move-Item -Path $_.FullName -Destination $oldmodsPath -Force -ErrorAction Stop
+                Write-Host "  Moved: $($_.Name)" -ForegroundColor DarkGray
+                $movedCount++
+            }} catch {{
+                Write-Host "  FAILED to move: $($_.Name)" -ForegroundColor Red
+                $failedCount++
+            }}
         }}
     }}
     if ($movedCount -gt 0) {{
         Write-Host "Moved $movedCount old mods to oldmods" -ForegroundColor Yellow
     }}
+    if ($failedCount -gt 0) {{
+        Write-Host "WARNING: $failedCount mods could not be moved" -ForegroundColor Red
+    }}
 }} catch {{
-    Write-Host "WARNING: Could not fetch manifest, moving all old mods" -ForegroundColor Yellow
+    Write-Host "WARNING: Could not fetch valid manifest, moving all old mods" -ForegroundColor Yellow
     Get-ChildItem -Path $modsPath -Filter "*.jar" -ErrorAction SilentlyContinue | ForEach-Object {{
-        Move-Item -Path $_.FullName -Destination $oldmodsPath -Force
+        try {{
+            Move-Item -Path $_.FullName -Destination $oldmodsPath -Force -ErrorAction Stop
+            Write-Host "  Moved: $($_.Name)" -ForegroundColor DarkGray
+        }} catch {{
+            Write-Host "  FAILED to move: $($_.Name)" -ForegroundColor Red
+        }}
     }}
 }}
 
@@ -1563,22 +1599,41 @@ mkdir -p "$OLD" "$MODS"
 
 # Fetch manifest and clean old mods
 echo "Fetching mod list from server..."
+manifest_ok=false
 if curl -L -s -o "$MANIFEST" "http://$SERVER_IP:$PORT/download/mods_manifest.json" 2>/dev/null; then
-    # Move mods not in manifest
+    # Validate manifest is valid JSON with "mods" array
+    if grep -q '"mods"' "$MANIFEST" 2>/dev/null && grep -q '\\[' "$MANIFEST" 2>/dev/null; then
+        manifest_ok=true
+    fi
+fi
+
+if $manifest_ok; then
+    # Move mods not in manifest (exact filename match)
     moved=0
     for f in "$MODS"/*.jar; do
         [[ -f "$f" ]] || continue
         fname=$(basename "$f")
         if ! grep -q "\"$fname\"" "$MANIFEST" 2>/dev/null; then
-            echo "  Moving old: $fname"
-            mv "$f" "$OLD/" 2>/dev/null
-            ((moved++))
+            if mv "$f" "$OLD/" 2>/dev/null; then
+                echo "  Moved: $fname"
+                moved=$((moved + 1))
+            else
+                echo "  FAILED to move: $fname (check permissions)"
+            fi
         fi
     done
-    [[ $moved -gt 0 ]] && echo "Moved $moved old mods to oldmods"
+    [[ $moved -gt 0 ]] && echo "Moved $moved old mods to oldmods/"
 else
-    echo "WARNING: Could not fetch manifest, moving all old mods"
-    ls "$MODS"/*.jar 2>/dev/null && mv "$MODS"/*.jar "$OLD/" 2>/dev/null || true
+    echo "WARNING: Could not fetch valid manifest, moving all old mods"
+    for f in "$MODS"/*.jar; do
+        [[ -f "$f" ]] || continue
+        fname=$(basename "$f")
+        if mv "$f" "$OLD/" 2>/dev/null; then
+            echo "  Moved: $fname"
+        else
+            echo "  FAILED to move: $fname"
+        fi
+    done
 fi
 
 echo "Downloading mods..."
@@ -2894,6 +2949,26 @@ def _try_self_heal(loader_instance, crash_info, cfg, crash_history):
             return False
         
         log_event("SELF_HEAL", f"Missing dependency: {dep_name}" + (f" (required by {culprit})" if culprit else ""))
+        
+        # First check if dependency is already installed (jar filename contains dep_name)
+        dep_norm = re.sub(r'[^a-z0-9]', '', dep_name.lower())
+        already_installed = False
+        if os.path.isdir(mods_dir):
+            for fname in os.listdir(mods_dir):
+                if fname.endswith('.jar'):
+                    file_norm = re.sub(r'[^a-z0-9]', '', fname.lower())
+                    if dep_norm in file_norm or file_norm.startswith(dep_norm):
+                        already_installed = True
+                        log_event("SELF_HEAL", f"Dependency {dep_name} already installed as {fname} - version mismatch or mod ID issue")
+                        break
+        
+        if already_installed:
+            if culprit:
+                log_event("SELF_HEAL", f"Quarantining {culprit} - dep {dep_name} present but incompatible")
+                quarantined = _quarantine_mod(mods_dir, culprit, f"Incompatible with installed {dep_name}")
+                if quarantined:
+                    return "quarantined"
+            return False
         
         # Check if we've already tried to fetch this dep before (dep loop)
         dep_key = f"dep_{dep_name}"

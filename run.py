@@ -4642,8 +4642,10 @@ def _cf_download_jar(url, mods_dir, slug, file_id, mod_name, headers=None):
         return False
 
 
-def _cf_download_playwright(slug, file_id, mods_dir, mod_name):
+def _cf_download_playwright(slug, file_id, mods_dir, mod_name, mc_version=None, loader=None):
     """Download a JAR using Playwright browser to defeat Cloudflare java challenge.
+    
+    Now navigates to the mod's files page to find the correct file for the target MC version and loader.
     
     Returns: 'downloaded', 'exists', or False
     """
@@ -4667,26 +4669,9 @@ def _cf_download_playwright(slug, file_id, mods_dir, mod_name):
                     "--no-sandbox",
                     "--disable-dev-shm-usage",
                     "--disable-infobars",
-                    "--disable-background-networking",
-                    "--disable-breakpad",
-                    "--disable-component-update",
                     "--no-first-run",
                     "--disable-extensions",
-                    "--disable-plugins",
-                    "--disable-sync",
-                    "--metrics-recording-only",
-                    "--disable-default-apps",
                     "--mute-audio",
-                    "--no-default-browser-check",
-                    "--background",
-                    "--disable-hang-monitor",
-                    "--disable-prompt-on-repost",
-                    "--disable-client-side-phishing-detection",
-                    "--disable-domain-reliability",
-                    "--disable-translate",
-                    "--disable-ipc-flooding-protection",
-                    "--disable-renderer-backgrounding",
-                    "--force-color-profile=srgb",
                 ]
             )
             context = browser.new_context(
@@ -4695,12 +4680,8 @@ def _cf_download_playwright(slug, file_id, mods_dir, mod_name):
                 locale=locale,
                 timezone_id=timezone,
                 color_scheme="dark" if random.random() > 0.5 else "light",
-                has_touch=random.random() > 0.7,
-                is_mobile=False,
-                java_script_enabled=True,
             )
             
-            # Add realistic browser headers
             context.set_extra_http_headers({
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
                 "Accept-Language": f"{locale},en;q=0.9",
@@ -4709,9 +4690,6 @@ def _cf_download_playwright(slug, file_id, mods_dir, mod_name):
                 "Sec-Fetch-Mode": "navigate",
                 "Sec-Fetch-Site": "none",
                 "Sec-Fetch-User": "?1",
-                "Sec-CH-UA": '"Chromium";v="131", "Google Chrome";v="131", "Not-A.Brand";v="24"',
-                "Sec-CH-UA-Mobile": "?0",
-                "Sec-CH-UA-Platform": '"Windows"',
                 "Upgrade-Insecure-Requests": "1",
             })
             
@@ -4720,23 +4698,66 @@ def _cf_download_playwright(slug, file_id, mods_dir, mod_name):
             # Simulate human-like mouse movements
             page.mouse.move(random.randint(0, viewport["width"]), random.randint(0, viewport["height"]))
             
-            url = f"https://www.curseforge.com/minecraft/mc-mods/{slug}/download/{file_id}"
-            log.info(f"CurseForge: fetching {mod_name} via Playwright (Cloudflare bypass)")
-            
-            # First visit the main page to establish cookies
+            # First visit homepage to establish cookies
             page.goto("https://www.curseforge.com/", wait_until="domcontentloaded", timeout=30000)
-            time.sleep(random.uniform(1.0, 2.5))
+            time.sleep(random.uniform(1.5, 2.5))
             
-            # Then go to the download page
+            # If we have mc_version and loader, go to files page to find correct file
+            actual_file_id = file_id
+            if mc_version and loader:
+                loader_id = CF_LOADER_IDS.get(loader.lower(), 6)
+                files_url = f"https://www.curseforge.com/minecraft/mc-mods/{slug}/files?version={mc_version}&gameVersionTypeId={loader_id}"
+                log.info(f"CurseForge: finding correct file for {mod_name} (MC {mc_version}, {loader})")
+                
+                page.goto(files_url, wait_until="domcontentloaded", timeout=30000)
+                time.sleep(random.uniform(2.0, 3.5))
+                
+                # Wait for Cloudflare challenge
+                title = page.title()
+                if any(kw in title.lower() for kw in ["just a moment", "attention required", "checking", "cloudflare"]):
+                    log.info("CurseForge: Cloudflare challenge detected, waiting...")
+                    time.sleep(random.uniform(5.0, 10.0))
+                    page.wait_for_load_state("networkidle", timeout=45000)
+                
+                # Find the first file row with download link
+                file_rows = page.query_selector_all("tr.project-file, tr.file-row, tbody tr")
+                found_file_id = None
+                for row in file_rows[:20]:
+                    try:
+                        # Look for download link in this row
+                        dl_link = row.query_selector("a.download-cta, a[data-href*='download']")
+                        if dl_link:
+                            href = dl_link.get_attribute("href") or ""
+                            match = re.search(r'/download/(\d+)', href)
+                            if match:
+                                found_file_id = match.group(1)
+                                # Verify this file is for our version (check row text)
+                                row_text = row.inner_text().lower()
+                                if mc_version.lower() in row_text or not any(v in row_text for v in ["1.20", "1.19", "1.18"]):
+                                    break
+                                else:
+                                    found_file_id = None
+                    except:
+                        continue
+                
+                if found_file_id:
+                    actual_file_id = found_file_id
+                    log.info(f"CurseForge: found file_id {actual_file_id} for MC {mc_version}")
+                else:
+                    log.warning(f"CurseForge: no file found for {mod_name} matching MC {mc_version}, {loader}")
+            
+            # Now download using the correct file_id
+            url = f"https://www.curseforge.com/minecraft/mc-mods/{slug}/download/{actual_file_id}"
+            log.info(f"CurseForge: fetching {mod_name} via Playwright (file_id={actual_file_id})")
+            
             page.goto(url, wait_until="domcontentloaded", timeout=30000)
             
-            # Wait for and defeat Cloudflare java challenge
+            # Wait for Cloudflare challenge
             title = page.title()
             if any(kw in title.lower() for kw in ["just a moment", "attention required", "checking", "cloudflare"]):
                 log.info("CurseForge: Cloudflare challenge detected, waiting...")
                 time.sleep(random.uniform(2.0, 4.0))
                 page.wait_for_load_state("networkidle", timeout=60000)
-                # Simulate human behavior
                 page.mouse.move(random.randint(100, 800), random.randint(100, 600))
                 time.sleep(random.uniform(0.5, 1.5))
             
@@ -4746,7 +4767,7 @@ def _cf_download_playwright(slug, file_id, mods_dir, mod_name):
             final_url = page.url
             filename = os.path.basename(final_url.split("?")[0])
             if not filename.endswith(".jar"):
-                filename = f"{slug}-{file_id}.jar"
+                filename = f"{slug}-{actual_file_id}.jar"
             
             file_path = os.path.join(mods_dir, filename)
             if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
@@ -4791,8 +4812,8 @@ def download_mod_from_curseforge(mod_info, mods_dir, mc_version, loader):
     slug = mod_info.get("slug", "")
     file_id = str(mod_info.get("file_id", ""))
     
-    if not file_id:
-        log.warning(f"CurseForge download: no file_id for {mod_name}")
+    if not slug:
+        log.warning(f"CurseForge download: no slug for {mod_name}")
         return False
     
     # Check if already installed
@@ -4801,8 +4822,8 @@ def download_mod_from_curseforge(mod_info, mods_dir, mc_version, loader):
         log.info(f"CurseForge: {mod_name} already installed as {existing}")
         return "exists"
     
-    # CDN is now blocking automated requests - go straight to Playwright
-    return _cf_download_playwright(slug, file_id, mods_dir, mod_name)
+    # Use Playwright to find and download the correct version
+    return _cf_download_playwright(slug, file_id, mods_dir, mod_name, mc_version=mc_version, loader=loader)
 
 
 MODRINTH_SORT_OPTIONS = {

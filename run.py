@@ -1455,61 +1455,92 @@ def create_install_scripts(mods_dir, cfg=None):
     """Generate client install scripts (.bat, .sh) with smart diff-based syncing.
     
     Downloads only missing mods. Moves old mods to oldmods folder.
+    Pure native commands - no PowerShell required.
     """
     os.makedirs(mods_dir, exist_ok=True)
     http_port = int(cfg.get("http_port", 8000)) if cfg else 8000
     server_ip = get_server_hostname(cfg) if cfg else "localhost"
     
-    # Batch script - calls embedded PowerShell
+    # Batch script - pure native Windows commands with curl.exe
     bat = f'''@echo off
+setlocal enabledelayedexpansion
 title Minecraft Mod Installer
 echo ============================================
 echo    Minecraft Mod Installer
 echo    Server: {server_ip}:{http_port}
 echo ============================================
+
 set "MODS=%APPDATA%\\.minecraft\\mods"
 set "OLD=%APPDATA%\\.minecraft\\oldmods"
+set "BASE=http://{server_ip}:{http_port}"
+set "MANIFEST=%TEMP%\\manifest.json"
 
 REM Create directories
 if not exist "%MODS%" mkdir "%MODS%"
 if not exist "%OLD%" mkdir "%OLD%"
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$m='%APPDATA%\\.minecraft\\mods';" ^
-  "$o='%APPDATA%\\.minecraft\\oldmods';" ^
-  "$b='http://{server_ip}:{http_port}';" ^
-  "Write-Host 'Fetching manifest...';" ^
-  "try {{" ^
-  "  [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12;" ^
-  "  $man=Invoke-RestMethod \"$b/download/manifest\" -UseBasicParsing;" ^
-  "  $srv=@($man.mods.name)" ^
-  "}} catch {{" ^
-  "  Write-Host 'ERROR: Cannot connect to server' -Fore Red; pause; exit 1" ^
-  "}};" ^
-  "$loc=@(Get-ChildItem $m *.jar -ErrorAction SilentlyContinue).Name;" ^
-  "$dl=@($srv|?{{$_ -notin $loc}});" ^
-  "$ar=@($loc|?{{$_ -notin $srv}});" ^
-  "Write-Host \"Server: $($srv.Count) Local: $($loc.Count)\";" ^
-  "Write-Host \"Download: $($dl.Count) Archive: $($ar.Count)\";" ^
-  "foreach($f in $ar){{if(Test-Path \"$m\\$f\"){{Write-Host \" Archiving $f\"; mv \"$m\\$f\" $o -Force -ErrorAction SilentlyContinue}}}};" ^
-  "$n=0;" ^
-  "foreach($f in $dl){{" ^
-  "  Write-Host \" Downloading $f...\" -NoNewline;" ^
-  "  try{{Invoke-WebRequest \"$b/download/mods/$f\" -OutFile \"$m\\$f\" -UseBasicParsing; Write-Host ' OK' -Fore Green; $n++}}" ^
-  "  catch{{Write-Host ' FAIL' -Fore Red}}" ^
-  "}};" ^
-  "Write-Host '============================================' -Fore Green;" ^
-  "Write-Host \"DONE: $((Get-ChildItem $m *.jar).Count) mods ($n new)\" -Fore Green;" ^
-  "pause"
+REM Download manifest
+echo Fetching manifest...
+curl.exe -s -o "%MANIFEST%" "%BASE%/download/manifest"
+if not exist "%MANIFEST%" (
+    echo ERROR: Cannot connect to server
+    pause
+    exit /b 1
+)
+
+REM Count local mods
+set LOC=0
+for %%f in ("%MODS%\\*.jar") do set /a LOC+=1
+
+REM Parse manifest and download missing mods
+set SRV=0
+set DL=0
+set AR=0
+
+REM Read manifest line by line, extract mod names
+for /f "usebackq tokens=2 delims=:," %%a in (`type "%MANIFEST%" ^| findstr /r "name"`) do (
+    set "mod=%%~a"
+    set "mod=!mod:"=!"
+    set "mod=!mod: =!"
+    if not "!mod!"=="" (
+        set /a SRV+=1
+        if not exist "%MODS%\\!mod!" (
+            set /a DL+=1
+            echo Downloading: !mod!
+            curl.exe -s -o "%MODS%\\!mod!" "%BASE%/download/mods/!mod!"
+        )
+    )
+)
+
+REM Archive mods not in server list (simplified - just moves old jars not in current batch)
+for %%f in ("%MODS%\\*.jar") do (
+    findstr /c:"%%~nxf" "%MANIFEST%" >nul 2>&1
+    if errorlevel 1 (
+        set /a AR+=1
+        echo Archiving: %%~nxf
+        move "%%f" "%OLD%\\" >nul 2>&1
+    )
+)
+
+REM Count final
+set FINAL=0
+for %%f in ("%MODS%\\*.jar") do set /a FINAL+=1
+
+echo ============================================
+echo DONE: %FINAL% mods (%DL% downloaded, %AR% archived)
+echo ============================================
+del "%MANIFEST%" 2>nul
+pause
 '''
     
-    # Bash script for Linux/Mac
+    # Bash script for Linux/Mac - simple and portable
     bash = f'''#!/bin/bash
 MC="$HOME/.minecraft"
 [[ "$OSTYPE" == "darwin"* ]] && MC="$HOME/Library/Application Support/minecraft"
 MODS="$MC/mods"
 OLD="$MC/oldmods"
 BASE="http://{server_ip}:{http_port}"
+MANIFEST="/tmp/mc_manifest_$$.json"
 
 echo "============================================"
 echo "   Minecraft Mod Installer"
@@ -1519,37 +1550,54 @@ echo "============================================"
 mkdir -p "$MODS" "$OLD"
 
 echo "Fetching manifest..."
-MANIFEST=$(curl -s "$BASE/download/manifest") || {{ echo "ERROR: Cannot connect"; exit 1; }}
+curl -sf "$BASE/download/manifest" -o "$MANIFEST" || {{ echo "ERROR: Cannot connect"; exit 1; }}
 
+# Get server mod list
 if command -v jq &>/dev/null; then
-    SRV=$(echo "$MANIFEST" | jq -r '.mods[].name')
+    SRV=$(jq -r '.mods[].name' "$MANIFEST")
 elif command -v python3 &>/dev/null; then
-    SRV=$(echo "$MANIFEST" | python3 -c "import sys,json;[print(m['name'])for m in json.load(sys.stdin)['mods']]")
+    SRV=$(python3 -c "import json;[print(m['name'])for m in json.load(open('$MANIFEST'))['mods']]")
 else
-    echo "ERROR: Need jq or python3"; exit 1
+    echo "ERROR: Need jq or python3"; rm -f "$MANIFEST"; exit 1
 fi
 
-LOC=$(ls "$MODS"/*.jar 2>/dev/null | xargs -n1 basename)
+# Get local mods
+LOC=$(ls "$MODS"/*.jar 2>/dev/null | xargs -n1 basename 2>/dev/null)
 
-DL=$(comm -23 <(echo "$SRV"|sort) <(echo "$LOC"|sort))
-AR=$(comm -13 <(echo "$SRV"|sort) <(echo "$LOC"|sort))
+# Count
+echo "Server: $(echo "$SRV"|grep -c .) Local: $(echo "$LOC"|grep -c .)"
 
-echo "Server: $(echo "$SRV"|wc -l) Local: $(echo "$LOC"|wc -l)"
-echo "Download: $(echo "$DL"|wc -l) Archive: $(echo "$AR"|wc -l)"
-
-for f in $AR; do
-    [[ -f "$MODS/$f" ]] && echo "  Archiving $f" && mv "$MODS/$f" "$OLD/"
+# Download missing
+DL=0
+for mod in $SRV; do
+    [[ -z "$mod" ]] && continue
+    if [[ ! -f "$MODS/$mod" ]]; then
+        echo "Downloading: $mod"
+        if curl -sf "$BASE/download/mods/$mod" -o "$MODS/$mod"; then
+            ((DL++))
+        else
+            echo "  FAILED"
+        fi
+    fi
 done
 
-n=0
-for f in $DL; do
-    [[ -z "$f" ]] && continue
-    echo "  Downloading $f..."
-    curl -sL "$BASE/download/mods/$f" -o "$MODS/$f" && ((n++)) || echo "    FAILED"
+# Archive extras
+AR=0
+for local in $LOC; do
+    [[ -z "$local" ]] && continue
+    found=0
+    for srv in $SRV; do
+        [[ "$local" == "$srv" ]] && found=1 && break
+    done
+    if [[ $found -eq 0 ]]; then
+        echo "Archiving: $local"
+        mv "$MODS/$local" "$OLD/" 2>/dev/null && ((AR++))
+    fi
 done
 
+rm -f "$MANIFEST"
 echo "============================================"
-echo "DONE: $(ls "$MODS"/*.jar 2>/dev/null|wc -l) mods ($n new)"
+echo "DONE: $(ls "$MODS"/*.jar 2>/dev/null|wc -l) mods ($DL downloaded, $AR archived)"
 echo "============================================"
 '''
     

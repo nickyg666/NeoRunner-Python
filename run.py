@@ -3140,7 +3140,7 @@ def _preflight_dep_check(cfg):
     clientonly_dir = os.path.join(mods_dir, "clientonly")
     quarantine_dir = os.path.join(mods_dir, "quarantine")
     
-    result = {"fetched": 0, "optional_interop": []}
+    result = {"fetched": 0, "optional_interop": [], "quarantined": []}
     
     if not os.path.exists(mods_dir):
         return result
@@ -3507,12 +3507,20 @@ def _preflight_dep_check(cfg):
                 log_event("PREFLIGHT", f"Round {round_num + 2}: found {len(new_missing)} transitive deps to resolve")
                 missing = new_missing
     
-    # ── Phase 4: Report unfetchable deps ──
+    # ── Phase 4: Quarantine mods with unresolvable dependencies ──
     if fetch_failed:
-        log_event("PREFLIGHT", f"WARNING: {len(fetch_failed)} dependencies could not be fetched:")
+        log_event("PREFLIGHT", f"{len(fetch_failed)} dependencies could not be found - quarantining affected mods:")
         for dep_id, requesters in fetch_failed.items():
-            req_str = ', '.join(sorted(requesters)[:3])
-            log_event("PREFLIGHT", f"  {dep_id} (required by: {req_str}) — mods that need it may crash")
+            req_list = sorted(requesters)[:5]
+            log_event("PREFLIGHT", f"  Missing: {dep_id} (needed by: {', '.join(req_list)})")
+            # Quarantine all mods that need this unavailable dep
+            for requester in requesters:
+                if requester.startswith("<") or requester.endswith(".jar"):
+                    # It's a JAR filename, quarantine it
+                    quarantined = _quarantine_mod(mods_dir, requester, f"Requires unavailable dependency '{dep_id}' for MC {mc_version}")
+                    if quarantined:
+                        log_event("PREFLIGHT", f"    Quarantined {requester}")
+                        result["quarantined"].append(requester)
     
     if fetched > 0:
         log_event("PREFLIGHT", f"Pre-flight fetched/restored {fetched} dependencies")

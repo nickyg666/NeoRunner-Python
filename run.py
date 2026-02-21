@@ -205,7 +205,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s | [%(levelname)s] %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
-    handlers=[logging.FileHandler(LOG_FILE), logging.StreamHandler()]
+    handlers=[logging.StreamHandler()]  # Systemd captures stdout to live.log
 )
 log = logging.getLogger(__name__)
 
@@ -1452,92 +1452,15 @@ def get_server_hostname(cfg):
     return "YOUR_SERVER_IP"
 
 def create_install_scripts(mods_dir, cfg=None):
-    """Generate client install scripts (.bat, .ps1, .sh) with correct IP/port from config.
+    """Generate client install scripts (.bat, .sh) with smart diff-based syncing.
     
-    The .bat file is the primary delivery method for Windows - uses curl.exe and 
-    PowerShell for zip handling. The .ps1 is for users who prefer PowerShell.
-    The .sh is for Linux/Mac users.
-    
-    Smart move logic: download zip first, list contents, then only move existing
-    mods that match incoming filenames to oldmods/ (preserves mods not in the zip).
+    Downloads only missing mods. Moves old mods to oldmods folder.
     """
     os.makedirs(mods_dir, exist_ok=True)
     http_port = int(cfg.get("http_port", 8000)) if cfg else 8000
     server_ip = get_server_hostname(cfg) if cfg else "localhost"
     
-    # PowerShell script - most reliable for Windows
-    ps1 = f'''# Minecraft Mod Installer (PowerShell)
-param([string]$ServerIP="{server_ip}", [int]$Port={http_port})
-$ErrorActionPreference = "Stop"
-$modsPath = "$env:APPDATA\\.minecraft\\mods"
-$oldPath = "$env:APPDATA\\.minecraft\\oldmods"
-$zipPath = "$env:TEMP\\mods_latest.zip"
-$url = "http://$ServerIP`:$Port/download/mods_latest.zip"
-
-Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "   Minecraft Mod Installer" -ForegroundColor Cyan
-Write-Host "   Server: $ServerIP`:$Port" -ForegroundColor Cyan
-Write-Host "============================================" -ForegroundColor Cyan
-
-# Create directories
-try {{
-    New-Item -ItemType Directory -Path $modsPath -Force | Out-Null
-    New-Item -ItemType Directory -Path $oldPath -Force | Out-Null
-}} catch {{
-    Write-Host "ERROR: Cannot create directories: $_" -ForegroundColor Red
-    pause
-    exit 1
-}}
-
-# Download
-Write-Host "Downloading mods..." -ForegroundColor Yellow
-try {{
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing
-}} catch {{
-    Write-Host "ERROR: Download failed: $_" -ForegroundColor Red
-    pause
-    exit 1
-}}
-
-# Move conflicting mods to oldmods
-Write-Host "Checking for conflicting mods..." -ForegroundColor Yellow
-try {{
-    $zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
-    $jarNames = $zip.Entries | Where-Object {{ $_.Name -match "\\.jar$" }} | ForEach-Object {{ $_.Name }}
-    $zip.Dispose()
-    
-    foreach ($jar in $jarNames) {{
-        $target = Join-Path $modsPath $jar
-        if (Test-Path $target) {{
-            Write-Host "  Moving $jar to oldmods..."
-            Move-Item -Path $target -Destination $oldPath -Force
-        }}
-    }}
-}} catch {{
-    Write-Host "Warning: Could not check zip contents: $_" -ForegroundColor Yellow
-}}
-
-# Extract
-Write-Host "Extracting mods..." -ForegroundColor Yellow
-try {{
-    Expand-Archive -Path $zipPath -DestinationPath $modsPath -Force
-    Remove-Item $zipPath -Force
-}} catch {{
-    Write-Host "ERROR: Extraction failed: $_" -ForegroundColor Red
-    pause
-    exit 1
-}}
-
-# Count
-$count = (Get-ChildItem -Path $modsPath -Filter "*.jar" -ErrorAction SilentlyContinue | Measure-Object).Count
-Write-Host "============================================" -ForegroundColor Green
-Write-Host "SUCCESS: $count mods installed!" -ForegroundColor Green
-Write-Host "============================================" -ForegroundColor Green
-pause
-'''
-    
-    # Batch script - uses PowerShell for zip operations
+    # Batch script - calls embedded PowerShell
     bat = f'''@echo off
 title Minecraft Mod Installer
 echo ============================================
@@ -1546,44 +1469,38 @@ echo    Server: {server_ip}:{http_port}
 echo ============================================
 set "MODS=%APPDATA%\\.minecraft\\mods"
 set "OLD=%APPDATA%\\.minecraft\\oldmods"
-set "ZIP=%TEMP%\\mods_latest.zip"
 
 REM Create directories
 if not exist "%MODS%" mkdir "%MODS%"
 if not exist "%OLD%" mkdir "%OLD%"
 
-REM Download
-echo Downloading mods...
-curl.exe -L -o "%ZIP%" "http://{server_ip}:{http_port}/download/mods_latest.zip"
-if errorlevel 1 (
-    echo ERROR: Download failed
-    pause
-    exit /b 1
-)
-
-REM Move conflicting mods using PowerShell (load required assembly)
-echo Checking for conflicting mods...
-powershell -NoProfile -Command "Add-Type -AssemblyName System.IO.Compression.FileSystem; $z=[IO.Compression.ZipFile]::OpenRead('%ZIP%'); $z.Entries|?{{$_.Name -match '.jar$'}}|%%{{ $n=$_.Name; $t='%MODS%\\'+$n; if(Test-Path $t){{ Write-Host '  Moving '+$n; Move-Item $t '%OLD%\\' -Force }} }}; $z.Dispose()"
-
-REM Extract
-echo Extracting mods...
-powershell -NoProfile -Command "Expand-Archive -Path '%ZIP%' -DestinationPath '%MODS%' -Force"
-if errorlevel 1 (
-    echo ERROR: Extraction failed
-    pause
-    exit /b 1
-)
-
-REM Cleanup
-del "%ZIP%" 2>nul
-
-REM Count
-for /f %%a in ('dir /b "%MODS%\\*.jar" 2^>nul ^| find /c /v ""') do set count=%%a
-if not defined count set count=0
-echo ============================================
-echo SUCCESS: %count% mods installed!
-echo ============================================
-pause
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$m='%APPDATA%\\.minecraft\\mods';" ^
+  "$o='%APPDATA%\\.minecraft\\oldmods';" ^
+  "$b='http://{server_ip}:{http_port}';" ^
+  "Write-Host 'Fetching manifest...';" ^
+  "try {{" ^
+  "  [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12;" ^
+  "  $man=Invoke-RestMethod \"$b/download/manifest\" -UseBasicParsing;" ^
+  "  $srv=@($man.mods.name)" ^
+  "}} catch {{" ^
+  "  Write-Host 'ERROR: Cannot connect to server' -Fore Red; pause; exit 1" ^
+  "}};" ^
+  "$loc=@(Get-ChildItem $m *.jar -ErrorAction SilentlyContinue).Name;" ^
+  "$dl=@($srv|?{{$_ -notin $loc}});" ^
+  "$ar=@($loc|?{{$_ -notin $srv}});" ^
+  "Write-Host \"Server: $($srv.Count) Local: $($loc.Count)\";" ^
+  "Write-Host \"Download: $($dl.Count) Archive: $($ar.Count)\";" ^
+  "foreach($f in $ar){{if(Test-Path \"$m\\$f\"){{Write-Host \" Archiving $f\"; mv \"$m\\$f\" $o -Force -ErrorAction SilentlyContinue}}}};" ^
+  "$n=0;" ^
+  "foreach($f in $dl){{" ^
+  "  Write-Host \" Downloading $f...\" -NoNewline;" ^
+  "  try{{Invoke-WebRequest \"$b/download/mods/$f\" -OutFile \"$m\\$f\" -UseBasicParsing; Write-Host ' OK' -Fore Green; $n++}}" ^
+  "  catch{{Write-Host ' FAIL' -Fore Red}}" ^
+  "}};" ^
+  "Write-Host '============================================' -Fore Green;" ^
+  "Write-Host \"DONE: $((Get-ChildItem $m *.jar).Count) mods ($n new)\" -Fore Green;" ^
+  "pause"
 '''
     
     # Bash script for Linux/Mac
@@ -1592,55 +1509,47 @@ MC="$HOME/.minecraft"
 [[ "$OSTYPE" == "darwin"* ]] && MC="$HOME/Library/Application Support/minecraft"
 MODS="$MC/mods"
 OLD="$MC/oldmods"
-ZIP="/tmp/mods_latest.zip"
-URL="http://{server_ip}:{http_port}/download/mods_latest.zip"
+BASE="http://{server_ip}:{http_port}"
 
 echo "============================================"
 echo "   Minecraft Mod Installer"
 echo "   Server: {server_ip}:{http_port}"
 echo "============================================"
 
-# Create directories
-mkdir -p "$OLD" "$MODS" || {{ echo "ERROR: Cannot create directories"; exit 1; }}
+mkdir -p "$MODS" "$OLD"
 
-# Download
-echo "Downloading mods..."
-if ! curl -fL -o "$ZIP" "$URL"; then
-    echo "ERROR: Download failed"
-    rm -f "$ZIP"
-    exit 1
-fi
+echo "Fetching manifest..."
+MANIFEST=$(curl -s "$BASE/download/manifest") || {{ echo "ERROR: Cannot connect"; exit 1; }}
 
-# Move conflicting mods
-echo "Checking for conflicting mods..."
-if command -v unzip &>/dev/null; then
-    unzip -Z1 "$ZIP" 2>/dev/null | grep -iE '[.]jar$' | while read -r jar; do
-        if [[ -f "$MODS/$jar" ]]; then
-            echo "  Moving $jar to oldmods..."
-            mv -f "$MODS/$jar" "$OLD/" 2>/dev/null || true
-        fi
-    done
-fi
-
-# Extract
-echo "Extracting mods..."
-if command -v unzip &>/dev/null; then
-    unzip -o "$ZIP" -d "$MODS" 2>/dev/null
+if command -v jq &>/dev/null; then
+    SRV=$(echo "$MANIFEST" | jq -r '.mods[].name')
 elif command -v python3 &>/dev/null; then
-    python3 -c "import zipfile; zipfile.ZipFile('$ZIP').extractall('$MODS')"
+    SRV=$(echo "$MANIFEST" | python3 -c "import sys,json;[print(m['name'])for m in json.load(sys.stdin)['mods']]")
 else
-    echo "ERROR: No unzip or python3 available"
-    rm -f "$ZIP"
-    exit 1
+    echo "ERROR: Need jq or python3"; exit 1
 fi
 
-# Cleanup
-rm -f "$ZIP"
+LOC=$(ls "$MODS"/*.jar 2>/dev/null | xargs -n1 basename)
 
-# Count
-count=$(find "$MODS" -maxdepth 1 -name "*.jar" 2>/dev/null | wc -l)
+DL=$(comm -23 <(echo "$SRV"|sort) <(echo "$LOC"|sort))
+AR=$(comm -13 <(echo "$SRV"|sort) <(echo "$LOC"|sort))
+
+echo "Server: $(echo "$SRV"|wc -l) Local: $(echo "$LOC"|wc -l)"
+echo "Download: $(echo "$DL"|wc -l) Archive: $(echo "$AR"|wc -l)"
+
+for f in $AR; do
+    [[ -f "$MODS/$f" ]] && echo "  Archiving $f" && mv "$MODS/$f" "$OLD/"
+done
+
+n=0
+for f in $DL; do
+    [[ -z "$f" ]] && continue
+    echo "  Downloading $f..."
+    curl -sL "$BASE/download/mods/$f" -o "$MODS/$f" && ((n++)) || echo "    FAILED"
+done
+
 echo "============================================"
-echo "SUCCESS: $count mods installed!"
+echo "DONE: $(ls "$MODS"/*.jar 2>/dev/null|wc -l) mods ($n new)"
 echo "============================================"
 '''
     
@@ -1648,22 +1557,19 @@ echo "============================================"
     with open(bat_path, "w", newline="\r\n", encoding="utf-8") as f:
         f.write(bat)
     
-    ps1_path = os.path.join(mods_dir, "install-mods.ps1")
-    with open(ps1_path, "w", encoding="utf-8") as f:
-        f.write(ps1)
-    
     bash_path = os.path.join(mods_dir, "install-mods.sh")
     with open(bash_path, "w", encoding="utf-8") as f:
         f.write(bash)
     os.chmod(bash_path, 0o755)
     
-    log_event("SCRIPTS", f"Generated install-mods.bat/.ps1/.sh (ip={server_ip}, port={http_port})")
+    log_event("SCRIPTS", f"Generated install scripts (ip={server_ip}, port={http_port})")
 
 def create_mod_zip(mods_dir):
     """Create mods_latest.zip with all mods (root + clientonly) in flat structure.
-    Also creates mods_manifest.json listing all mods for client-side cleanup."""
+    Also creates mods_manifest.json with filenames and sizes for client-side diff sync."""
     import shutil
     import zipfile
+    import hashlib
     
     clientonly_dir = os.path.join(mods_dir, "clientonly")
     zip_path = os.path.join(mods_dir, "mods_latest.zip")
@@ -1693,25 +1599,36 @@ def create_mod_zip(mods_dir):
             for filename, file_path in sorted(mods_to_zip.items()):
                 zf.write(file_path, arcname=filename)
         
-        # Create manifest JSON
+        # Create manifest JSON with sizes for diff sync
+        mods_list = []
+        total_size = 0
+        for filename, file_path in sorted(mods_to_zip.items()):
+            size = os.path.getsize(file_path)
+            total_size += size
+            mods_list.append({
+                "name": filename,
+                "size": size
+            })
+        
         manifest = {
-            "version": "1.0",
+            "version": "2.0",
             "created": datetime.now().isoformat(),
             "mod_count": len(mods_to_zip),
-            "mods": sorted(mods_to_zip.keys())
+            "total_size": total_size,
+            "mods": mods_list
         }
         with open(manifest_path, 'w') as f:
             json.dump(manifest, f, indent=2)
         
         size_mb = os.path.getsize(zip_path) / (1024 * 1024)
         mod_count = len(mods_to_zip)
-        log_event("MOD_ZIP", f"Created mods_latest.zip ({mod_count} mods, {size_mb:.2f} MB) + manifest")
+        log_event("MOD_ZIP", f"Created mods_latest.zip ({mod_count} mods, {size_mb:.2f} MB) + manifest v2")
         
     except Exception as e:
         log_event("MOD_ZIP_ERROR", f"Failed to create ZIP: {e}")
 
 class SecureHTTPHandler(SimpleHTTPRequestHandler):
-    """HTTP handler with security checks"""
+    """HTTP handler with security checks and individual mod downloads"""
     last_request_time = 0
     
     def do_GET(self):
@@ -1724,7 +1641,58 @@ class SecureHTTPHandler(SimpleHTTPRequestHandler):
             return
         SecureHTTPHandler.last_request_time = current_time
         
-        # File validation
+        # Handle /download/mods/{filename} for individual mod downloads
+        if self.path.startswith("/download/mods/"):
+            filename = self.path[len("/download/mods/"):].split("?")[0]
+            if not filename or filename.startswith(".") or not filename.endswith(".jar"):
+                self.send_error(403)
+                return
+            
+            mods_dir = Path(cfg["mods_dir"])
+            clientonly_dir = mods_dir / "clientonly"
+            
+            # Check root first, then clientonly
+            file_path = mods_dir / filename
+            if not file_path.exists():
+                file_path = clientonly_dir / filename
+            
+            if not file_path.exists():
+                self.send_error(404, f"Mod not found: {filename}")
+                return
+            
+            # File size limit
+            size_mb = file_path.stat().st_size / (1024 * 1024)
+            if size_mb > cfg.get("max_download_mb", 600):
+                self.send_error(413)
+                return
+            
+            # Serve the file
+            self.send_response(200)
+            self.send_header("Content-Type", "application/java-archive")
+            self.send_header("Content-Length", file_path.stat().st_size)
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.end_headers()
+            with open(file_path, "rb") as f:
+                self.wfile.write(f.read())
+            log_event("HTTP_DOWNLOAD", f"Served individual mod: {filename}")
+            return
+        
+        # Handle /download/manifest for manifest.json
+        if self.path.startswith("/download/manifest") or self.path == "/download/mods_manifest.json":
+            manifest_path = Path(cfg["mods_dir"]) / "mods_manifest.json"
+            if not manifest_path.exists():
+                self.send_error(404, "Manifest not found")
+                return
+            
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", manifest_path.stat().st_size)
+            self.end_headers()
+            with open(manifest_path, "rb") as f:
+                self.wfile.write(f.read())
+            return
+        
+        # File validation for other requests
         file_name = Path(self.path.lstrip("/")).name
         if not file_name or file_name.startswith("."):
             self.send_error(403)

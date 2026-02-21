@@ -1,73 +1,69 @@
-# Minecraft Mod Installer (Windows PowerShell)
+# Minecraft Mod Installer (PowerShell)
 param([string]$ServerIP="192.168.0.19", [int]$Port=8000)
+$ErrorActionPreference = "Stop"
 $modsPath = "$env:APPDATA\.minecraft\mods"
-$oldmodsPath = "$env:APPDATA\.minecraft\oldmods"
+$oldPath = "$env:APPDATA\.minecraft\oldmods"
 $zipPath = "$env:TEMP\mods_latest.zip"
-$manifestPath = "$env:TEMP\mods_manifest.json"
+$url = "http://$ServerIP`:$Port/download/mods_latest.zip"
 
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "   Minecraft Mod Installer" -ForegroundColor Cyan
-Write-Host "   Server: $ServerIP:$Port" -ForegroundColor Cyan
+Write-Host "   Server: $ServerIP`:$Port" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 
-New-Item -ItemType Directory -Path $oldmodsPath -Force | Out-Null
-New-Item -ItemType Directory -Path $modsPath -Force | Out-Null
-
-# Fetch manifest and clean old mods
-Write-Host "Fetching mod list from server..." -ForegroundColor Yellow
+# Create directories
 try {
-    $manifest = Invoke-RestMethod -Uri "http://$ServerIP`:$Port/download/mods_manifest.json" -UseBasicParsing
-    $serverMods = $manifest.mods
-    if (-not $serverMods) {
-        throw "Invalid manifest - no mods array"
-    }
-    Write-Host "Server has $($serverMods.Count) mods" -ForegroundColor Gray
-    
-    # Move mods not in the manifest
-    $movedCount = 0
-    $failedCount = 0
-    Get-ChildItem -Path $modsPath -Filter "*.jar" -ErrorAction SilentlyContinue | ForEach-Object {
-        if ($serverMods -notcontains $_.Name) {
-            try {
-                Move-Item -Path $_.FullName -Destination $oldmodsPath -Force -ErrorAction Stop
-                Write-Host "  Moved: $($_.Name)" -ForegroundColor DarkGray
-                $movedCount++
-            } catch {
-                Write-Host "  FAILED to move: $($_.Name)" -ForegroundColor Red
-                $failedCount++
-            }
-        }
-    }
-    if ($movedCount -gt 0) {
-        Write-Host "Moved $movedCount old mods to oldmods" -ForegroundColor Yellow
-    }
-    if ($failedCount -gt 0) {
-        Write-Host "WARNING: $failedCount mods could not be moved" -ForegroundColor Red
-    }
+    New-Item -ItemType Directory -Path $modsPath -Force | Out-Null
+    New-Item -ItemType Directory -Path $oldPath -Force | Out-Null
 } catch {
-    Write-Host "WARNING: Could not fetch valid manifest, moving all old mods" -ForegroundColor Yellow
-    Get-ChildItem -Path $modsPath -Filter "*.jar" -ErrorAction SilentlyContinue | ForEach-Object {
-        try {
-            Move-Item -Path $_.FullName -Destination $oldmodsPath -Force -ErrorAction Stop
-            Write-Host "  Moved: $($_.Name)" -ForegroundColor DarkGray
-        } catch {
-            Write-Host "  FAILED to move: $($_.Name)" -ForegroundColor Red
-        }
-    }
-}
-
-Write-Host "Downloading mods..." -ForegroundColor Yellow
-try {
-    Invoke-WebRequest -Uri "http://$ServerIP`:$Port/download/mods_latest.zip" -OutFile $zipPath -UseBasicParsing
-} catch {
-    Write-Host "ERROR: Download failed. Is the server running?" -ForegroundColor Red
-    Read-Host "Press Enter to exit"
+    Write-Host "ERROR: Cannot create directories: $_" -ForegroundColor Red
+    pause
     exit 1
 }
-Expand-Archive -Path $zipPath -DestinationPath $modsPath -Force
-Remove-Item -Path $zipPath -Force
-$count = (Get-ChildItem -Path $modsPath -Filter "*.jar" | Measure-Object).Count
-Write-Host ""
+
+# Download
+Write-Host "Downloading mods..." -ForegroundColor Yellow
+try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing
+} catch {
+    Write-Host "ERROR: Download failed: $_" -ForegroundColor Red
+    pause
+    exit 1
+}
+
+# Move conflicting mods to oldmods
+Write-Host "Checking for conflicting mods..." -ForegroundColor Yellow
+try {
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+    $jarNames = $zip.Entries | Where-Object { $_.Name -match "\.jar$" } | ForEach-Object { $_.Name }
+    $zip.Dispose()
+    
+    foreach ($jar in $jarNames) {
+        $target = Join-Path $modsPath $jar
+        if (Test-Path $target) {
+            Write-Host "  Moving $jar to oldmods..."
+            Move-Item -Path $target -Destination $oldPath -Force
+        }
+    }
+} catch {
+    Write-Host "Warning: Could not check zip contents: $_" -ForegroundColor Yellow
+}
+
+# Extract
+Write-Host "Extracting mods..." -ForegroundColor Yellow
+try {
+    Expand-Archive -Path $zipPath -DestinationPath $modsPath -Force
+    Remove-Item $zipPath -Force
+} catch {
+    Write-Host "ERROR: Extraction failed: $_" -ForegroundColor Red
+    pause
+    exit 1
+}
+
+# Count
+$count = (Get-ChildItem -Path $modsPath -Filter "*.jar" -ErrorAction SilentlyContinue | Measure-Object).Count
+Write-Host "============================================" -ForegroundColor Green
 Write-Host "SUCCESS: $count mods installed!" -ForegroundColor Green
-Write-Host "Close Minecraft and relaunch to use them." -ForegroundColor Green
-Read-Host "Press Enter to exit"
+Write-Host "============================================" -ForegroundColor Green
+pause

@@ -539,7 +539,7 @@
     <div class="container">
         <header>
             <h1>🎮 NeoRunner - Minecraft Server Dashboard</h1>
-            <p>Manage your modded server with ease</p>
+            <p>Manage your modded server with ease | <strong>Ports:</strong> Game: <span id="game-port">-</span> | Query: <span id="query-port">-</span> | RCON: <span id="rcon-port">-</span> | HTTP: <span id="http-port">-</span></p>
         </header>
         
         <div id="alerts"></div>
@@ -696,6 +696,18 @@
                         <option value="sh">Linux/Mac .sh only</option>
                     </select>
                     <small>Which install scripts to generate for players</small>
+                </div>
+                
+                <h3 style="color:#E91E63;border-bottom:1px solid #333;padding-bottom:8px;">Java Memory</h3>
+                <div class="form-group">
+                    <label>Max Heap Size (-Xmx)</label>
+                    <input type="text" id="cfg-xmx" value="6G" placeholder="e.g. 6G, 4096M, 8G">
+                    <small>Maximum memory for server JVM (e.g. 6G, 8G, 16384M). Requires server restart.</small>
+                </div>
+                <div class="form-group">
+                    <label>Initial Heap Size (-Xms)</label>
+                    <input type="text" id="cfg-xms" value="4G" placeholder="e.g. 4G, 2048M, 6G">
+                    <small>Starting memory allocation (e.g. 4G, 6G). Should be less than or equal to max. Requires server restart.</small>
                 </div>
                 
                 <h3 style="color:#607D8B;border-bottom:1px solid #333;padding-bottom:8px;">Update Schedule</h3>
@@ -1144,30 +1156,38 @@
             window.location.href = `/api/download/${modName}`;
         }
         
-        function loadConfig() {
-            fetch('/api/config')
-                .then(r => r.json())
-                .then(cfg => {
-                    // Network
-                    document.getElementById('cfg-hostname').value = cfg.hostname || '';
-                    document.getElementById('mc-version').value = cfg.mc_version || '1.21.11';
-                    // Curator
-                    document.getElementById('cfg-curator-sort').value = cfg.curator_sort || 'downloads';
-                    document.getElementById('cfg-curator-limit').value = cfg.curator_limit || 100;
-                    // Broadcasts
-                    document.getElementById('cfg-broadcast-enabled').checked = cfg.broadcast_enabled !== false;
-                    document.getElementById('cfg-broadcast-auto').checked = cfg.broadcast_auto_on_install !== false;
-                    // Nag screens
-                    document.getElementById('cfg-nag-modlist').checked = cfg.nag_show_mod_list_on_join !== false;
-                    document.getElementById('cfg-nag-firstvisit').checked = cfg.nag_first_visit_modal !== false;
-                    // Scripts
-                    document.getElementById('cfg-script-types').value = cfg.install_script_types || 'all';
-                    // Schedule
-                    document.getElementById('update-freq').value = cfg.ferium_update_interval_hours || 4;
-                    document.getElementById('weekly-day').value = cfg.ferium_weekly_update_day || 'mon';
-                    document.getElementById('weekly-hour').value = cfg.ferium_weekly_update_hour || 2;
-                })
-                .catch(err => console.error('Config error:', err));
+         function loadConfig() {
+              fetch('/api/config')
+                  .then(r => r.json())
+                  .then(cfg => {
+                      // Ports (display in header - read from server.properties)
+                      document.getElementById('game-port').textContent = cfg.server_port || '25565';
+                      document.getElementById('query-port').textContent = cfg.query_port || '25565';
+                      document.getElementById('rcon-port').textContent = cfg.rcon_port || '25575';
+                      document.getElementById('http-port').textContent = cfg.http_port || '8000';
+                      // Network
+                      document.getElementById('cfg-hostname').value = cfg.hostname || '';
+                     document.getElementById('mc-version').value = cfg.mc_version || '1.21.11';
+                     // Curator
+                     document.getElementById('cfg-curator-sort').value = cfg.curator_sort || 'downloads';
+                     document.getElementById('cfg-curator-limit').value = cfg.curator_limit || 100;
+                     // Broadcasts
+                     document.getElementById('cfg-broadcast-enabled').checked = cfg.broadcast_enabled !== false;
+                     document.getElementById('cfg-broadcast-auto').checked = cfg.broadcast_auto_on_install !== false;
+                     // Nag screens
+                     document.getElementById('cfg-nag-modlist').checked = cfg.nag_show_mod_list_on_join !== false;
+                     document.getElementById('cfg-nag-firstvisit').checked = cfg.nag_first_visit_modal !== false;
+                      // Scripts
+                      document.getElementById('cfg-script-types').value = cfg.install_script_types || 'all';
+                      // Java memory
+                      document.getElementById('cfg-xmx').value = cfg.xmx || '6G';
+                      document.getElementById('cfg-xms').value = cfg.xms || '4G';
+                      // Schedule
+                     document.getElementById('update-freq').value = cfg.ferium_update_interval_hours || 4;
+                     document.getElementById('weekly-day').value = cfg.ferium_weekly_update_day || 'mon';
+                     document.getElementById('weekly-hour').value = cfg.ferium_weekly_update_hour || 2;
+                 })
+                 .catch(err => console.error('Config error:', err));
         }
         
         function saveConfig() {
@@ -1186,6 +1206,9 @@
                 nag_first_visit_modal: document.getElementById('cfg-nag-firstvisit').checked,
                 // Scripts
                 install_script_types: document.getElementById('cfg-script-types').value,
+                // Java memory
+                xmx: document.getElementById('cfg-xmx').value.trim() || '6G',
+                xms: document.getElementById('cfg-xms').value.trim() || '4G',
                 // Schedule
                 ferium_update_interval_hours: parseInt(document.getElementById('update-freq').value),
                 ferium_weekly_update_day: document.getElementById('weekly-day').value,

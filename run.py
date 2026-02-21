@@ -1452,95 +1452,71 @@ def get_server_hostname(cfg):
     return "YOUR_SERVER_IP"
 
 def create_install_scripts(mods_dir, cfg=None):
-    """Generate client install scripts (.bat, .sh) with smart diff-based syncing.
+    """Generate client install scripts (.bat, .sh).
     
-    Downloads only missing mods. Moves old mods to oldmods folder.
-    Pure native commands - no PowerShell required.
+    Simple approach: download zip, extract, move old mods to oldmods.
     """
     os.makedirs(mods_dir, exist_ok=True)
     http_port = int(cfg.get("http_port", 8000)) if cfg else 8000
     server_ip = get_server_hostname(cfg) if cfg else "localhost"
     
-    # Batch script - pure native Windows commands with curl.exe
+    # Batch script - simple zip download and extract
     bat = f'''@echo off
-setlocal enabledelayedexpansion
 title Minecraft Mod Installer
 echo ============================================
-echo    Minecraft Mod Installer
+echo    Minecraft Mod Installer  
 echo    Server: {server_ip}:{http_port}
 echo ============================================
 
 set "MODS=%APPDATA%\\.minecraft\\mods"
 set "OLD=%APPDATA%\\.minecraft\\oldmods"
-set "BASE=http://{server_ip}:{http_port}"
-set "MANIFEST=%TEMP%\\manifest.json"
+set "ZIP=%TEMP%\\mods.zip"
+set "URL=http://{server_ip}:{http_port}/download/mods_latest.zip"
 
 REM Create directories
 if not exist "%MODS%" mkdir "%MODS%"
 if not exist "%OLD%" mkdir "%OLD%"
 
-REM Download manifest
-echo Fetching manifest...
-curl.exe -s -o "%MANIFEST%" "%BASE%/download/manifest"
-if not exist "%MANIFEST%" (
-    echo ERROR: Cannot connect to server
+REM Download zip
+echo Downloading mods...
+curl.exe -L -o "%ZIP%" "%URL%"
+if not exist "%ZIP%" (
+    echo ERROR: Download failed
     pause
     exit /b 1
 )
 
-REM Count local mods
-set LOC=0
-for %%f in ("%MODS%\\*.jar") do set /a LOC+=1
+REM Move existing jars to oldmods
+echo Archiving old mods...
+for %%f in ("%MODS%\\*.jar") do move "%%f" "%OLD%\\" >nul 2>&1
 
-REM Parse manifest and download missing mods
-set SRV=0
-set DL=0
-set AR=0
-
-REM Read manifest line by line, extract mod names
-for /f "usebackq tokens=2 delims=:," %%a in (`type "%MANIFEST%" ^| findstr /r "name"`) do (
-    set "mod=%%~a"
-    set "mod=!mod:"=!"
-    set "mod=!mod: =!"
-    if not "!mod!"=="" (
-        set /a SRV+=1
-        if not exist "%MODS%\\!mod!" (
-            set /a DL+=1
-            echo Downloading: !mod!
-            curl.exe -s -o "%MODS%\\!mod!" "%BASE%/download/mods/!mod!"
-        )
-    )
+REM Extract using tar (Windows 10+ built-in)
+echo Extracting mods...
+tar.exe -xf "%ZIP%" -C "%MODS%" 2>nul
+if errorlevel 1 (
+    REM Fallback: use PowerShell for extraction only
+    powershell -NoProfile -Command "Expand-Archive -Path '%ZIP%' -DestinationPath '%MODS%' -Force"
 )
 
-REM Archive mods not in server list (simplified - just moves old jars not in current batch)
-for %%f in ("%MODS%\\*.jar") do (
-    findstr /c:"%%~nxf" "%MANIFEST%" >nul 2>&1
-    if errorlevel 1 (
-        set /a AR+=1
-        echo Archiving: %%~nxf
-        move "%%f" "%OLD%\\" >nul 2>&1
-    )
-)
-
-REM Count final
-set FINAL=0
-for %%f in ("%MODS%\\*.jar") do set /a FINAL+=1
+REM Cleanup and count
+del "%ZIP%" 2>nul
+set COUNT=0
+for %%f in ("%MODS%\\*.jar") do set /a COUNT+=1
 
 echo ============================================
-echo DONE: %FINAL% mods (%DL% downloaded, %AR% archived)
+echo SUCCESS: %COUNT% mods installed!
 echo ============================================
-del "%MANIFEST%" 2>nul
 pause
 '''
     
-    # Bash script for Linux/Mac - simple and portable
+    # Bash script - simple and portable
     bash = f'''#!/bin/bash
 MC="$HOME/.minecraft"
 [[ "$OSTYPE" == "darwin"* ]] && MC="$HOME/Library/Application Support/minecraft"
 MODS="$MC/mods"
 OLD="$MC/oldmods"
-BASE="http://{server_ip}:{http_port}"
-MANIFEST="/tmp/mc_manifest_$$.json"
+ZIP="/tmp/mods.zip"
+URL="http://{server_ip}:{http_port}/download/mods_latest.zip"
 
 echo "============================================"
 echo "   Minecraft Mod Installer"
@@ -1549,55 +1525,27 @@ echo "============================================"
 
 mkdir -p "$MODS" "$OLD"
 
-echo "Fetching manifest..."
-curl -sf "$BASE/download/manifest" -o "$MANIFEST" || {{ echo "ERROR: Cannot connect"; exit 1; }}
+echo "Downloading mods..."
+curl -fL -o "$ZIP" "$URL" || {{ echo "ERROR: Download failed"; rm -f "$ZIP"; exit 1; }}
 
-# Get server mod list
-if command -v jq &>/dev/null; then
-    SRV=$(jq -r '.mods[].name' "$MANIFEST")
+echo "Archiving old mods..."
+mv "$MODS"/*.jar "$OLD/" 2>/dev/null || true
+
+echo "Extracting mods..."
+if command -v unzip &>/dev/null; then
+    unzip -o "$ZIP" -d "$MODS"
 elif command -v python3 &>/dev/null; then
-    SRV=$(python3 -c "import json;[print(m['name'])for m in json.load(open('$MANIFEST'))['mods']]")
+    python3 -c "import zipfile; zipfile.ZipFile('$ZIP').extractall('$MODS')"
 else
-    echo "ERROR: Need jq or python3"; rm -f "$MANIFEST"; exit 1
+    echo "ERROR: Need unzip or python3"
+    rm -f "$ZIP"
+    exit 1
 fi
 
-# Get local mods
-LOC=$(ls "$MODS"/*.jar 2>/dev/null | xargs -n1 basename 2>/dev/null)
-
-# Count
-echo "Server: $(echo "$SRV"|grep -c .) Local: $(echo "$LOC"|grep -c .)"
-
-# Download missing
-DL=0
-for mod in $SRV; do
-    [[ -z "$mod" ]] && continue
-    if [[ ! -f "$MODS/$mod" ]]; then
-        echo "Downloading: $mod"
-        if curl -sf "$BASE/download/mods/$mod" -o "$MODS/$mod"; then
-            ((DL++))
-        else
-            echo "  FAILED"
-        fi
-    fi
-done
-
-# Archive extras
-AR=0
-for local in $LOC; do
-    [[ -z "$local" ]] && continue
-    found=0
-    for srv in $SRV; do
-        [[ "$local" == "$srv" ]] && found=1 && break
-    done
-    if [[ $found -eq 0 ]]; then
-        echo "Archiving: $local"
-        mv "$MODS/$local" "$OLD/" 2>/dev/null && ((AR++))
-    fi
-done
-
-rm -f "$MANIFEST"
+rm -f "$ZIP"
+COUNT=$(ls "$MODS"/*.jar 2>/dev/null | wc -l)
 echo "============================================"
-echo "DONE: $(ls "$MODS"/*.jar 2>/dev/null|wc -l) mods ($DL downloaded, $AR archived)"
+echo "SUCCESS: $COUNT mods installed!"
 echo "============================================"
 '''
     

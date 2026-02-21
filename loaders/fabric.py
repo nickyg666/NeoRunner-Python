@@ -19,11 +19,14 @@ class FabricLoader(LoaderBase):
     
     def _setup_jvm_args(self):
         jvm_file = os.path.join(self.cwd, "user_jvm_args.txt")
-        if os.path.exists(jvm_file):
-            return
         
+        # Get memory settings from config
+        xmx = self.cfg.get("xmx", "6G")
+        xms = self.cfg.get("xms", "4G")
+        
+        # Always regenerate to pick up config changes
         with open(jvm_file, 'w') as f:
-            f.write("-Xmx6G\n-Xms4G\n")
+            f.write(f"-Xmx{xmx}\n-Xms{xms}\n")
     
     def _setup_server_properties(self):
         props_file = os.path.join(self.cwd, "server.properties")

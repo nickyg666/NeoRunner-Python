@@ -20,11 +20,14 @@ class ForgeLoader(LoaderBase):
     def _setup_jvm_args(self):
         """Create user_jvm_args.txt"""
         jvm_file = os.path.join(self.cwd, "user_jvm_args.txt")
-        if os.path.exists(jvm_file):
-            return
         
-        jvm_args = """-Xmx6G
--Xms4G
+        # Get memory settings from config
+        xmx = self.cfg.get("xmx", "6G")
+        xms = self.cfg.get("xms", "4G")
+        
+        # Always regenerate to pick up config changes
+        jvm_args = f"""-Xmx{xmx}
+-Xms{xms}
 -XX:+UseG1GC
 -XX:MaxGCPauseMillis=200
 """

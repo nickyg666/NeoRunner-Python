@@ -22,11 +22,13 @@ class NeoForgeLoader(LoaderBase):
         """Create user_jvm_args.txt with memory settings"""
         jvm_file = os.path.join(self.cwd, "user_jvm_args.txt")
         
-        if os.path.exists(jvm_file):
-            return  # Don't overwrite
+        # Get memory settings from config
+        xmx = self.cfg.get("xmx", "6G")
+        xms = self.cfg.get("xms", "4G")
         
-        jvm_args = """-Xmx6G
--Xms4G
+        # Always regenerate to pick up config changes
+        jvm_args = f"""-Xmx{xmx}
+-Xms{xms}
 -XX:+UseG1GC
 -XX:MaxGCPauseMillis=200
 -XX:+ParallelRefProcEnabled
@@ -162,6 +164,30 @@ class NeoForgeLoader(LoaderBase):
                 "bad_file": bad_file
             }
         
+        # ---- 0.3. MIXIN ERROR WITH CLIENT CLASS ----
+        # "MixinTransformerError" with "Error loading class" for client-side classes
+        # Also catches "Attach error for X from mod Y" patterns
+        mixin_client_match = re.search(r"mixintransformererror|MixinPreProcessorException.*from\s+mod\s+(" + MOD_ID + r")", log_text, re.IGNORECASE)
+        if mixin_client_match or (re.search(r"error\s+loading\s+class:.*client", log_lower) and re.search(r"from\s+mod\s+(" + MOD_ID + r")", log_text)):
+            # Extract mod ID from "from mod X" pattern
+            from_mod_match = re.search(r"from\s+mod\s+(" + MOD_ID + r")", log_text)
+            culprit_mod = from_mod_match.group(1).lower() if from_mod_match else None
+            culprit_file = None
+            if culprit_mod:
+                # Find the JAR file
+                jar_pattern = rf"mods/([^\s/]*{re.escape(culprit_mod)}[^\s/]*\.jar)"
+                jar_match = re.search(jar_pattern, log_lower)
+                if jar_match:
+                    culprit_file = jar_match.group(1)
+            return {
+                "type": "mod_error",
+                "subtype": "client_only",
+                "culprit": culprit_mod,
+                "culprits": [culprit_mod] if culprit_mod else [],
+                "message": f"Client-only mod mixin crash: {culprit_mod or 'unknown'}",
+                "bad_file": culprit_file
+            }
+        
         # ---- 0.5. CLIENT-ONLY MOD CRASH ----
         # Detect mods that reference client-side classes (Screen, MouseHandler, etc.)
         # on a dedicated server.  These are NOT mixin conflicts — the mod simply
@@ -176,7 +202,6 @@ class NeoForgeLoader(LoaderBase):
         for cp in client_class_patterns:
             client_match = re.search(cp, log_lower)
             if client_match:
-                # Try to identify which mod file caused it
                 culprit_mod = None
                 culprit_file = None
                 # Look for "Mod file: /path/to/mods/X.jar" near the error
@@ -188,6 +213,16 @@ class NeoForgeLoader(LoaderBase):
                 fail_match = re.search(r"failure\s+message:\s+\S+\s+\((" + MOD_ID + r")\)\s+has\s+failed", log_lower)
                 if fail_match:
                     culprit_mod = fail_match.group(1)
+                # Try to extract from mixin error: "mavm.mixins.json:AxolotlMixin from mod mavm"
+                mixin_mod_match = re.search(r"from\s+mod\s+(" + MOD_ID + r")", log_text)
+                if not culprit_mod and mixin_mod_match:
+                    culprit_mod = mixin_mod_match.group(1).lower()
+                # Try to find the JAR file for this mod
+                if culprit_mod and not culprit_file:
+                    jar_pattern = rf"mods/([^\s/]*{re.escape(culprit_mod)}[^\s/]*\.jar)"
+                    jar_match = re.search(jar_pattern, log_lower)
+                    if jar_match:
+                        culprit_file = jar_match.group(1)
                 
                 return {
                     "type": "mod_error",
@@ -229,6 +264,53 @@ class NeoForgeLoader(LoaderBase):
         
         # ---- 2. MOD CONFLICTS (duplicate registries, incompatible mods) ----
         # These are common when two biome mods (BOP + BYG) or two tech mods clash
+        
+        # NOTE: Mixin "overwrite conflict" WARNINGS with "Skipping method" are NOT crashes!
+        # The mixin framework handles these gracefully - one mod's mixin is skipped, server boots fine.
+        # Only detect ACTUAL mixin ERRORS (MixinApplyError, MixinTransformerError, etc.)
+        
+        def _extract_mod_id_from_mixin_path(path_or_id):
+            if not path_or_id:
+                return None
+            s = path_or_id.lower().strip()
+            if '.' not in s:
+                return s
+            parts = s.split('.')
+            skip_words = {'mixin', 'mixins', 'common', 'client', 'server', 'api', 'impl', 'core', 'internal', 'util', 'handler', 'access', 'wrapper', 'hook', 'patch', 'transform', 'chunk', 'world', 'entity', 'block', 'item', 'screen', 'container', 'packet', 'network', 'data', 'config'}
+            mixin_idx = -1
+            for i, part in enumerate(parts):
+                if 'mixin' in part:
+                    mixin_idx = i
+                    break
+            if mixin_idx > 0:
+                for i in range(mixin_idx - 1, -1, -1):
+                    part = parts[i]
+                    if part in skip_words or part in ('dev', 'com', 'org', 'net', 'io', 'me', 'xyz'):
+                        continue
+                    if len(part) >= 3:
+                        return part
+            for part in reversed(parts):
+                if part in skip_words:
+                    continue
+                if len(part) >= 3 and not part.startswith('class') and not part.startswith('mixin'):
+                    return part
+            return parts[-1] if parts else s
+        
+        benign_mixin_conflict = False
+        mod1, mod2, method_name, mixin_class = None, None, None, None
+        benign_mixin_match = re.search(
+            r"overwrite\s+conflict\s+for\s+(\S+)\s+in\s+(\S+)\s+from\s+(?:mod\s+)?(" + MOD_ID + r")[\s,].*?"
+            r"previously\s+(?:written|defined)\s+by\s+(.+?)\.?\s+Skipping\s+method\.?",
+            log_text, re.IGNORECASE
+        )
+        if benign_mixin_match:
+            method_name = benign_mixin_match.group(1)
+            mixin_class = benign_mixin_match.group(2)
+            mod1 = benign_mixin_match.group(3).lower()
+            mod2_raw = benign_mixin_match.group(4)
+            mod2 = _extract_mod_id_from_mixin_path(mod2_raw)
+            benign_mixin_conflict = True
+        
         conflict_patterns = [
             # "DuplicateModsFoundException" — two versions of same mod
             (r"duplicatemodsfoundexception.*?(\S+\.jar).*?(\S+\.jar)", "duplicate"),
@@ -236,19 +318,27 @@ class NeoForgeLoader(LoaderBase):
             (r"duplicate\s+(?:registry\s+)?(?:key|entry|id)[:\s]+(" + MOD_ID + r"[:/]" + MOD_ID + r")", "registry"),
             # "is already registered" patterns
             (r"(" + MOD_ID + r"[:/]" + MOD_ID + r")\s+is\s+already\s+registered", "registry"),
-            # Mixin conflict: "Overwrite conflict for METHOD in MixinClass from mod A, previously written by mod B"
-            # This is a REAL mixin overwrite conflict — two mods both @Overwrite the same method
-            (r"overwrite\s+conflict\s+for\s+\S+\s+in\s+\S+\s+from\s+(?:mod\s+)?(" + MOD_ID + r")[\s,].*?previously\s+(?:written|defined)\s+by\s+.*?(" + MOD_ID + r")", "mixin"),
             # "Mixin apply failed" — only match if mod ID is on same line (prevents false positives
             # from benign warnings like "Failed reading REFMAP JSON" which have "mixin" in the prefix)
             (r"mixin\s+apply\s+for\s+mod\s+(" + MOD_ID + r")\s+failed", "mixin_fail"),
             # MixinApplyError with specific mod
             (r"mixinapplyerror.*?mod[:\s]+(" + MOD_ID + r")", "mixin_fail"),
+            # Mixin transformer error (actual crash, not just warning)
+            (r"mixintransformererror.*?from\s+mod\s+(" + MOD_ID + r")", "mixin_error"),
             # Incompatible mod set 
             (r"incompatible\s+mod(?:s)?\s+(?:set|found|detected)", "incompatible"),
             # "conflicts with"
             (r"(" + MOD_ID + r")\s+conflicts?\s+with\s+(" + MOD_ID + r")", "conflict"),
         ]
+        
+        if benign_mixin_conflict:
+            return {
+                "type": "benign_mixin_warning",
+                "conflict_type": "mixin_overwrite_handled",
+                "culprit": None,
+                "culprits": [mod1, mod2] if mod1 and mod2 else [],
+                "message": f"Mixin overwrite warning (handled gracefully): {mod1} and {mod2} both target {method_name} in {mixin_class}. One mixin was skipped - this is NOT a crash."
+            }
         
         for pattern, conflict_type in conflict_patterns:
             match = re.search(pattern, log_lower)
@@ -259,7 +349,10 @@ class NeoForgeLoader(LoaderBase):
                     ns = culprits[0].split(":")[0] if ":" in culprits[0] else culprits[0].split("/")[0]
                     culprits = [ns]
                 
-                # For mixin conflicts, both groups are mod IDs
+                # For mixin conflicts, extract proper mod ID if it's a package path
+                if conflict_type in ("mixin_fail", "mixin_error"):
+                    culprits = [_extract_mod_id_from_mixin_path(c) for c in culprits]
+                
                 primary_culprit = culprits[-1] if culprits else None
                 
                 return {

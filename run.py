@@ -119,10 +119,70 @@ except ImportError:
 
 # CurseForge scraper constants
 CF_USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
-    "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:126.0) Gecko/20100101 Firefox/126.0",
+    # Chrome on Windows
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+    # Chrome on Mac
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    # Firefox on Windows
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0",
+    # Firefox on Linux
+    "Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0",
+    "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0",
+    # Edge on Windows
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
+    # Safari on Mac
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Safari/605.1.15",
 ]
+
+CF_VIEWPORTS = [
+    {"width": 1920, "height": 1080},
+    {"width": 1366, "height": 768},
+    {"width": 1536, "height": 864},
+    {"width": 1440, "height": 900},
+    {"width": 2560, "height": 1440},
+    {"width": 1280, "height": 720},
+]
+
+CF_LOCALES = ["en-US", "en-GB", "en-CA", "en-AU"]
+
+CF_TIMEZONES = ["America/New_York", "America/Los_Angeles", "America/Chicago", "Europe/London", "Europe/Berlin"]
+
+_last_cf_request_time = 0
+
+def _cf_rate_limit():
+    """Random delay between CurseForge requests to appear human-like."""
+    global _last_cf_request_time
+    now = time.time()
+    elapsed = now - _last_cf_request_time
+    delay = random.uniform(1.5, 5.0)
+    if elapsed < delay:
+        time.sleep(delay - elapsed)
+    _last_cf_request_time = time.time()
+
+def _get_cf_headers():
+    """Get randomized headers for CurseForge requests."""
+    return {
+        "User-Agent": random.choice(CF_USER_AGENTS),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "DNT": "1",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Cache-Control": "max-age=0",
+    }
 import re
 import random
 
@@ -697,6 +757,9 @@ def get_config():
         "motd_show_download_url": False,  # embed download URL in server MOTD
         # Install scripts
         "install_script_types": "all",  # which scripts to generate: "all", "bat", "ps1", "sh"
+        # Java memory
+        "xmx": "6G",  # max heap size
+        "xms": "4G",  # initial heap size
     }
     for k, v in defaults.items():
         if k not in cfg:
@@ -869,6 +932,9 @@ def classify_mod(jar_path):
     Detect if a mod is client-only, server-only, or both.
     Uses proper manifest parsing of neoforge.mods.toml / fabric.mod.json.
     
+    STRICT: Only classify as "client" if EXPLICITLY marked client-side.
+    If in doubt, return "both" to keep mod in root mods/ folder.
+    
     Returns: "client", "server", or "both"
     """
     manifest = _parse_mod_manifest(jar_path)
@@ -880,24 +946,12 @@ def classify_mod(jar_path):
     if manifest["side"] == "server":
         return "server"
     
-    # 2. displayTest = "IGNORE_ALL_VERSION" combined with no server-side deps
-    #    is a strong client-only signal. But displayTest alone is NOT sufficient —
-    #    mods like voicechat use displayTest="NONE" while running on both sides.
-    #    Only treat as client-only if displayTest is set AND deps say CLIENT or no side info.
-    dt = (manifest.get("display_test") or "").upper()
-    if dt in ("IGNORE_ALL_VERSION", "NONE"):
-        # Only classify as client if side is explicitly client or unknown (no deps found)
-        # If side is "both" (deps explicitly say BOTH), respect that.
-        if manifest["side"] is None:
-            return "client"
-        # side is already handled above (client/server), if we get here side="both"
-        # meaning at least one dep says BOTH — keep as "both"
-    
-    # 3. Fabric environment: "client"
+    # 2. Fabric environment: "client" (explicit)
     if manifest.get("environment") == "client":
         return "client"
     
-    # 4. Default to "both" — don't guess from class names, it's too unreliable
+    # 3. Default to "both" — if not EXPLICITLY marked client, keep in root mods/
+    #    Do NOT use displayTest or other heuristics to guess client-only
     return "both"
 
 def sort_mods_by_type(mods_dir):
@@ -1257,13 +1311,15 @@ def build_installed_index(mods_dir):
     
     return installed_tokens, installed_jars
 
-def check_installed(name, slug, installed_tokens, threshold=0.82):
+def check_installed(name, slug, installed_tokens, threshold=0.82, exact=False):
     """Check if a mod (by name and/or slug) matches any installed JAR token.
     
     Uses three strategies in order:
     1. Exact substring match (either direction) against tokens - but NOT short common words
     2. Alias expansion (e.g. 'macaws-bridges' -> also check 'mcw' + 'bridges')  
     3. Fuzzy SequenceMatcher above threshold
+    
+    If exact=True, only allow EXACT token matches (for dependency resolution).
     
     Returns True if the mod appears to be installed.
     """
@@ -1286,18 +1342,22 @@ def check_installed(name, slug, installed_tokens, threshold=0.82):
         return False
     
     for norm in checks:
+        # For exact mode (dependency resolution), require EXACT token match
+        if exact:
+            for token in installed_tokens:
+                if norm == token:
+                    return True
+            continue
+        
         # Strategy 1: substring match (bidirectional) - but skip if norm is a common word
         for token in installed_tokens:
-            # Require the match to be significant (at least 5 chars) and not just a common word
-            if len(norm) >= 5 and (norm in token or token in norm):
-                # Additional check: make sure it's not just matching a common word
-                is_common = False
-                for cw in COMMON_WORDS:
-                    if norm == cw or (cw in norm and len(norm.replace(cw, "")) < 3):
-                        is_common = True
-                        break
-                if not is_common:
-                    return True
+            # Require EXACT match or a true prefix/suffix (not just substring in middle)
+            # This prevents "biomesoplenty" matching "mcwbiomesoplenty"
+            if norm == token:
+                return True
+            # Allow prefix/suffix matches only if significantly different (addon pattern)
+            if len(norm) >= 5 and (token.startswith(norm) or token.endswith(norm)) and len(token) - len(norm) < 4:
+                return True
         
         # Strategy 2: alias expansion
         for alias, canonical in MOD_ALIASES.items():
@@ -1311,6 +1371,10 @@ def check_installed(name, slug, installed_tokens, threshold=0.82):
                 for token in installed_tokens:
                     if len(expanded) >= 5 and (expanded in token or token in expanded):
                         return True
+    
+    # In exact mode, we've already checked all tokens - no match found
+    if exact:
+        return False
     
     # Strategy 3: fuzzy match with SequenceMatcher (higher threshold for short names)
     for norm in checks:
@@ -1390,272 +1454,206 @@ def get_server_hostname(cfg):
 def create_install_scripts(mods_dir, cfg=None):
     """Generate client install scripts (.bat, .ps1, .sh) with correct IP/port from config.
     
-    The .bat file is the primary delivery method — uses curl.exe and tar.exe which
-    ship with Windows 10+ by default. A kid can double-click it and be done.
+    The .bat file is the primary delivery method for Windows - uses curl.exe and 
+    PowerShell for zip handling. The .ps1 is for users who prefer PowerShell.
+    The .sh is for Linux/Mac users.
     
-    Smart move logic: before overwriting, compare incoming filenames to existing ones.
-    If a JAR with the exact same name already exists, skip it. Otherwise back up all
-    old JARs to oldmods/ before extracting.
+    Smart move logic: download zip first, list contents, then only move existing
+    mods that match incoming filenames to oldmods/ (preserves mods not in the zip).
     """
     os.makedirs(mods_dir, exist_ok=True)
     http_port = int(cfg.get("http_port", 8000)) if cfg else 8000
-    # Resolve server hostname from config > server.properties > localhost
     server_ip = get_server_hostname(cfg) if cfg else "localhost"
     
-    # ── .bat (Windows — primary, double-clickable, zero dependencies beyond Win10) ──
+    # PowerShell script - most reliable for Windows
+    ps1 = f'''# Minecraft Mod Installer (PowerShell)
+param([string]$ServerIP="{server_ip}", [int]$Port={http_port})
+$ErrorActionPreference = "Stop"
+$modsPath = "$env:APPDATA\\.minecraft\\mods"
+$oldPath = "$env:APPDATA\\.minecraft\\oldmods"
+$zipPath = "$env:TEMP\\mods_latest.zip"
+$url = "http://$ServerIP`:$Port/download/mods_latest.zip"
+
+Write-Host "============================================" -ForegroundColor Cyan
+Write-Host "   Minecraft Mod Installer" -ForegroundColor Cyan
+Write-Host "   Server: $ServerIP`:$Port" -ForegroundColor Cyan
+Write-Host "============================================" -ForegroundColor Cyan
+
+# Create directories
+try {{
+    New-Item -ItemType Directory -Path $modsPath -Force | Out-Null
+    New-Item -ItemType Directory -Path $oldPath -Force | Out-Null
+}} catch {{
+    Write-Host "ERROR: Cannot create directories: $_" -ForegroundColor Red
+    pause
+    exit 1
+}}
+
+# Download
+Write-Host "Downloading mods..." -ForegroundColor Yellow
+try {{
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing
+}} catch {{
+    Write-Host "ERROR: Download failed: $_" -ForegroundColor Red
+    pause
+    exit 1
+}}
+
+# Move conflicting mods to oldmods
+Write-Host "Checking for conflicting mods..." -ForegroundColor Yellow
+try {{
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+    $jarNames = $zip.Entries | Where-Object {{ $_.Name -match "\\.jar$" }} | ForEach-Object {{ $_.Name }}
+    $zip.Dispose()
+    
+    foreach ($jar in $jarNames) {{
+        $target = Join-Path $modsPath $jar
+        if (Test-Path $target) {{
+            Write-Host "  Moving $jar to oldmods..."
+            Move-Item -Path $target -Destination $oldPath -Force
+        }}
+    }}
+}} catch {{
+    Write-Host "Warning: Could not check zip contents: $_" -ForegroundColor Yellow
+}}
+
+# Extract
+Write-Host "Extracting mods..." -ForegroundColor Yellow
+try {{
+    Expand-Archive -Path $zipPath -DestinationPath $modsPath -Force
+    Remove-Item $zipPath -Force
+}} catch {{
+    Write-Host "ERROR: Extraction failed: $_" -ForegroundColor Red
+    pause
+    exit 1
+}}
+
+# Count
+$count = (Get-ChildItem -Path $modsPath -Filter "*.jar" -ErrorAction SilentlyContinue | Measure-Object).Count
+Write-Host "============================================" -ForegroundColor Green
+Write-Host "SUCCESS: $count mods installed!" -ForegroundColor Green
+Write-Host "============================================" -ForegroundColor Green
+pause
+'''
+    
+    # Batch script - uses PowerShell for zip operations
     bat = f'''@echo off
 title Minecraft Mod Installer
-color 0B
 echo ============================================
 echo    Minecraft Mod Installer
 echo    Server: {server_ip}:{http_port}
 echo ============================================
-echo.
-
-set "SERVER={server_ip}"
-set "PORT={http_port}"
-set "MC=%APPDATA%\\.minecraft"
-set "MODS=%MC%\\mods"
-set "OLD=%MC%\\oldmods"
+set "MODS=%APPDATA%\\.minecraft\\mods"
+set "OLD=%APPDATA%\\.minecraft\\oldmods"
 set "ZIP=%TEMP%\\mods_latest.zip"
-set "MANIFEST=%TEMP%\\mods_manifest.json"
 
-:: Create dirs
+REM Create directories
 if not exist "%MODS%" mkdir "%MODS%"
 if not exist "%OLD%" mkdir "%OLD%"
 
-:: Download manifest first
-echo Fetching mod list from server...
-curl.exe -L -s -o "%MANIFEST%" "http://%SERVER%:%PORT%/download/mods_manifest.json"
+REM Download
+echo Downloading mods...
+curl.exe -L -o "%ZIP%" "http://{server_ip}:{http_port}/download/mods_latest.zip"
 if errorlevel 1 (
-    echo WARNING: Could not fetch manifest, moving all old mods
-    goto :moveall
-)
-
-:: Validate manifest contains JSON (basic check)
-findstr /C:"mods" "%MANIFEST%" >nul 2>&1
-if errorlevel 1 (
-    echo WARNING: Invalid manifest, moving all old mods
-    goto :moveall
-)
-
-:: Parse manifest and move mods not in the list
-echo Cleaning old mods not in server pack...
-set moved=0
-for %%f in ("%MODS%\\*.jar") do (
-    findstr /C:"%%~nxf" "%MANIFEST%" >nul 2>&1
-    if errorlevel 1 (
-        move /Y "%%f" "%OLD%\\" >nul 2>&1
-        if not errorlevel 1 (
-            echo   Moved: %%~nxf
-            set /a moved+=1
-        ) else (
-            echo   FAILED to move: %%~nxf
-        )
-    )
-)
-if %moved% gtr 0 echo Moved %moved% old mods to oldmods
-goto :download
-
-:moveall
-for %%f in ("%MODS%\\*.jar") do (
-    move /Y "%%f" "%OLD%\\" >nul 2>&1
-    if not errorlevel 1 (
-        echo   Moved: %%~nxf
-    ) else (
-        echo   FAILED to move: %%~nxf
-    )
-)
-
-:download
-:: Download mod pack
-echo.
-echo Downloading mods from server...
-curl.exe -L -o "%ZIP%" "http://%SERVER%:%PORT%/download/mods_latest.zip"
-if errorlevel 1 (
-    color 0C
-    echo.
-    echo ERROR: Download failed. Make sure the server is running.
-    echo URL: http://%SERVER%:%PORT%/download/mods_latest.zip
+    echo ERROR: Download failed
     pause
     exit /b 1
 )
 
-:: Extract (tar.exe ships with Windows 10+)
+REM Move conflicting mods using PowerShell (load required assembly)
+echo Checking for conflicting mods...
+powershell -NoProfile -Command "Add-Type -AssemblyName System.IO.Compression.FileSystem; $z=[IO.Compression.ZipFile]::OpenRead('%ZIP%'); $z.Entries|?{{$_.Name -match '.jar$'}}|%%{{ $n=$_.Name; $t='%MODS%\\'+$n; if(Test-Path $t){{ Write-Host '  Moving '+$n; Move-Item $t '%OLD%\\' -Force }} }}; $z.Dispose()"
+
+REM Extract
 echo Extracting mods...
-tar.exe -xf "%ZIP%" -C "%MODS%"
+powershell -NoProfile -Command "Expand-Archive -Path '%ZIP%' -DestinationPath '%MODS%' -Force"
 if errorlevel 1 (
-    echo tar failed, trying PowerShell fallback...
-    powershell -Command "Expand-Archive -Path '%ZIP%' -DestinationPath '%MODS%' -Force"
+    echo ERROR: Extraction failed
+    pause
+    exit /b 1
 )
+
+REM Cleanup
 del "%ZIP%" 2>nul
-del "%MANIFEST%" 2>nul
 
-:: Count installed mods
-set count=0
-for %%f in ("%MODS%\\*.jar") do set /a count+=1
-
-echo.
-color 0A
+REM Count
+for /f %%a in ('dir /b "%MODS%\\*.jar" 2^>nul ^| find /c /v ""') do set count=%%a
+if not defined count set count=0
 echo ============================================
-echo    SUCCESS: %count% mods installed!
-echo    Close Minecraft and relaunch to use them.
+echo SUCCESS: %count% mods installed!
 echo ============================================
-echo.
 pause
 '''
     
-    # ── .ps1 (PowerShell — alternative for Windows) ──
-    ps = f'''# Minecraft Mod Installer (Windows PowerShell)
-param([string]$ServerIP="{server_ip}", [int]$Port={http_port})
-$modsPath = "$env:APPDATA\\.minecraft\\mods"
-$oldmodsPath = "$env:APPDATA\\.minecraft\\oldmods"
-$zipPath = "$env:TEMP\\mods_latest.zip"
-$manifestPath = "$env:TEMP\\mods_manifest.json"
-
-Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "   Minecraft Mod Installer" -ForegroundColor Cyan
-Write-Host "   Server: $ServerIP:$Port" -ForegroundColor Cyan
-Write-Host "============================================" -ForegroundColor Cyan
-
-New-Item -ItemType Directory -Path $oldmodsPath -Force | Out-Null
-New-Item -ItemType Directory -Path $modsPath -Force | Out-Null
-
-# Fetch manifest and clean old mods
-Write-Host "Fetching mod list from server..." -ForegroundColor Yellow
-try {{
-    $manifest = Invoke-RestMethod -Uri "http://$ServerIP`:$Port/download/mods_manifest.json" -UseBasicParsing
-    $serverMods = $manifest.mods
-    if (-not $serverMods) {{
-        throw "Invalid manifest - no mods array"
-    }}
-    Write-Host "Server has $($serverMods.Count) mods" -ForegroundColor Gray
-    
-    # Move mods not in the manifest
-    $movedCount = 0
-    $failedCount = 0
-    Get-ChildItem -Path $modsPath -Filter "*.jar" -ErrorAction SilentlyContinue | ForEach-Object {{
-        if ($serverMods -notcontains $_.Name) {{
-            try {{
-                Move-Item -Path $_.FullName -Destination $oldmodsPath -Force -ErrorAction Stop
-                Write-Host "  Moved: $($_.Name)" -ForegroundColor DarkGray
-                $movedCount++
-            }} catch {{
-                Write-Host "  FAILED to move: $($_.Name)" -ForegroundColor Red
-                $failedCount++
-            }}
-        }}
-    }}
-    if ($movedCount -gt 0) {{
-        Write-Host "Moved $movedCount old mods to oldmods" -ForegroundColor Yellow
-    }}
-    if ($failedCount -gt 0) {{
-        Write-Host "WARNING: $failedCount mods could not be moved" -ForegroundColor Red
-    }}
-}} catch {{
-    Write-Host "WARNING: Could not fetch valid manifest, moving all old mods" -ForegroundColor Yellow
-    Get-ChildItem -Path $modsPath -Filter "*.jar" -ErrorAction SilentlyContinue | ForEach-Object {{
-        try {{
-            Move-Item -Path $_.FullName -Destination $oldmodsPath -Force -ErrorAction Stop
-            Write-Host "  Moved: $($_.Name)" -ForegroundColor DarkGray
-        }} catch {{
-            Write-Host "  FAILED to move: $($_.Name)" -ForegroundColor Red
-        }}
-    }}
-}}
-
-Write-Host "Downloading mods..." -ForegroundColor Yellow
-try {{
-    Invoke-WebRequest -Uri "http://$ServerIP`:$Port/download/mods_latest.zip" -OutFile $zipPath -UseBasicParsing
-}} catch {{
-    Write-Host "ERROR: Download failed. Is the server running?" -ForegroundColor Red
-    Read-Host "Press Enter to exit"
-    exit 1
-}}
-Expand-Archive -Path $zipPath -DestinationPath $modsPath -Force
-Remove-Item -Path $zipPath -Force
-$count = (Get-ChildItem -Path $modsPath -Filter "*.jar" | Measure-Object).Count
-Write-Host ""
-Write-Host "SUCCESS: $count mods installed!" -ForegroundColor Green
-Write-Host "Close Minecraft and relaunch to use them." -ForegroundColor Green
-Read-Host "Press Enter to exit"
-'''
-    
-    # ── .sh (Linux/Mac) ──
+    # Bash script for Linux/Mac
     bash = f'''#!/bin/bash
-# Minecraft Mod Installer (Linux / macOS)
-SERVER_IP="{server_ip}"
-PORT="{http_port}"
+MC="$HOME/.minecraft"
+[[ "$OSTYPE" == "darwin"* ]] && MC="$HOME/Library/Application Support/minecraft"
+MODS="$MC/mods"
+OLD="$MC/oldmods"
+ZIP="/tmp/mods_latest.zip"
+URL="http://{server_ip}:{http_port}/download/mods_latest.zip"
+
 echo "============================================"
 echo "   Minecraft Mod Installer"
-echo "   Server: $SERVER_IP:$PORT"
+echo "   Server: {server_ip}:{http_port}"
 echo "============================================"
-[[ "$OSTYPE" == "darwin"* ]] && MC_DIR="$HOME/Library/Application Support/minecraft" || MC_DIR="$HOME/.minecraft"
-MODS="$MC_DIR/mods"
-OLD="$MC_DIR/oldmods"
-ZIP="/tmp/mods_latest.zip"
-MANIFEST="/tmp/mods_manifest.json"
-mkdir -p "$OLD" "$MODS"
 
-# Fetch manifest and clean old mods
-echo "Fetching mod list from server..."
-manifest_ok=false
-if curl -L -s -o "$MANIFEST" "http://$SERVER_IP:$PORT/download/mods_manifest.json" 2>/dev/null; then
-    # Validate manifest is valid JSON with "mods" array
-    if grep -q '"mods"' "$MANIFEST" 2>/dev/null && grep -q '\\[' "$MANIFEST" 2>/dev/null; then
-        manifest_ok=true
-    fi
-fi
+# Create directories
+mkdir -p "$OLD" "$MODS" || {{ echo "ERROR: Cannot create directories"; exit 1; }}
 
-if $manifest_ok; then
-    # Move mods not in manifest (exact filename match)
-    moved=0
-    for f in "$MODS"/*.jar; do
-        [[ -f "$f" ]] || continue
-        fname=$(basename "$f")
-        if ! grep -q "\"$fname\"" "$MANIFEST" 2>/dev/null; then
-            if mv "$f" "$OLD/" 2>/dev/null; then
-                echo "  Moved: $fname"
-                moved=$((moved + 1))
-            else
-                echo "  FAILED to move: $fname (check permissions)"
-            fi
-        fi
-    done
-    [[ $moved -gt 0 ]] && echo "Moved $moved old mods to oldmods/"
-else
-    echo "WARNING: Could not fetch valid manifest, moving all old mods"
-    for f in "$MODS"/*.jar; do
-        [[ -f "$f" ]] || continue
-        fname=$(basename "$f")
-        if mv "$f" "$OLD/" 2>/dev/null; then
-            echo "  Moved: $fname"
-        else
-            echo "  FAILED to move: $fname"
-        fi
-    done
-fi
-
+# Download
 echo "Downloading mods..."
-curl -L -o "$ZIP" "http://$SERVER_IP:$PORT/download/mods_latest.zip" || {{ echo "ERROR: Download failed!"; exit 1; }}
-unzip -o -q "$ZIP" -d "$MODS"
-rm -f "$ZIP" "$MANIFEST"
-COUNT=$(ls -1 "$MODS"/*.jar 2>/dev/null | wc -l)
-echo ""
-echo "SUCCESS: $COUNT mods installed!"
-echo "Close Minecraft and relaunch to use them."
+if ! curl -fL -o "$ZIP" "$URL"; then
+    echo "ERROR: Download failed"
+    rm -f "$ZIP"
+    exit 1
+fi
+
+# Move conflicting mods
+echo "Checking for conflicting mods..."
+if command -v unzip &>/dev/null; then
+    unzip -Z1 "$ZIP" 2>/dev/null | grep -iE '[.]jar$' | while read -r jar; do
+        if [[ -f "$MODS/$jar" ]]; then
+            echo "  Moving $jar to oldmods..."
+            mv -f "$MODS/$jar" "$OLD/" 2>/dev/null || true
+        fi
+    done
+fi
+
+# Extract
+echo "Extracting mods..."
+if command -v unzip &>/dev/null; then
+    unzip -o "$ZIP" -d "$MODS" 2>/dev/null
+elif command -v python3 &>/dev/null; then
+    python3 -c "import zipfile; zipfile.ZipFile('$ZIP').extractall('$MODS')"
+else
+    echo "ERROR: No unzip or python3 available"
+    rm -f "$ZIP"
+    exit 1
+fi
+
+# Cleanup
+rm -f "$ZIP"
+
+# Count
+count=$(find "$MODS" -maxdepth 1 -name "*.jar" 2>/dev/null | wc -l)
+echo "============================================"
+echo "SUCCESS: $count mods installed!"
+echo "============================================"
 '''
     
-    # Write all three scripts
     bat_path = os.path.join(mods_dir, "install-mods.bat")
-    with open(bat_path, "w", newline="\r\n") as f:
+    with open(bat_path, "w", newline="\r\n", encoding="utf-8") as f:
         f.write(bat)
     
-    with open(os.path.join(mods_dir, "install-mods.ps1"), "w") as f:
-        f.write(ps)
+    ps1_path = os.path.join(mods_dir, "install-mods.ps1")
+    with open(ps1_path, "w", encoding="utf-8") as f:
+        f.write(ps1)
     
     bash_path = os.path.join(mods_dir, "install-mods.sh")
-    with open(bash_path, "w") as f:
+    with open(bash_path, "w", encoding="utf-8") as f:
         f.write(bash)
     os.chmod(bash_path, 0o755)
     
@@ -1863,15 +1861,16 @@ def http_server(port, mods_dir):
                     uid = os.getuid()
                     tmux_socket = f"/tmp/tmux-{uid}/default"
                     running = run_cmd(f"tmux -S {tmux_socket} list-sessions 2>/dev/null | grep -c MC").get("stdout", "").strip() == "1"
-                    # Fallback: check for java process
                     if not running:
-                        java_check = run_cmd("pgrep -f 'java.*nogui' || true")
-                        running = java_check.get("stdout", "").strip() != ""
+                        java_check = run_cmd("ps aux | grep -v grep | grep -v pgrep | grep -c 'java.*nogui' || true")
+                        running = java_check.get("stdout", "").strip() != "0"
                     c = load_cfg()
                     loader = c.get("loader", "unknown")
                     mc_ver = c.get("mc_version", "unknown")
                     mods_dir_path = os.path.join(CWD, c.get("mods_dir", "mods"))
                     mod_count = len([f for f in os.listdir(mods_dir_path) if f.endswith(".jar")]) if os.path.exists(mods_dir_path) else 0
+                    
+                    props = parse_props()
                     
                     return {
                         "running": running,
@@ -1880,7 +1879,10 @@ def http_server(port, mods_dir):
                         "mod_count": mod_count,
                         "player_count": 0,
                         "rcon_enabled": c.get("rcon_pass") is not None,
-                        "uptime": "N/A"
+                        "uptime": "N/A",
+                        "server_port": props.get("server-port", c.get("server_port", "25565")),
+                        "query_port": props.get("query.port", "25565"),
+                        "rcon_port": props.get("rcon.port", "25575"),
                     }
                 
                 def get_mod_list():
@@ -1907,6 +1909,10 @@ def http_server(port, mods_dir):
                 def api_config():
                     c = load_cfg()
                     c["rcon_pass"] = "***"
+                    props = parse_props()
+                    c["server_port"] = props.get("server-port", c.get("server_port", "25565"))
+                    c["query_port"] = props.get("query.port", "25565")
+                    c["rcon_port"] = props.get("rcon.port", "25575")
                     return jsonify(c)
                 
                 @app.route("/api/config", methods=["POST"])
@@ -2334,51 +2340,71 @@ def http_server(port, mods_dir):
                 
                 @app.route("/api/server/start", methods=["POST"])
                 def api_server_start():
+                    """Start the MC server (remove stopped flag, run loop will start MC)."""
                     try:
                         uid = os.getuid()
-                        env = os.environ.copy()
-                        env["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
-                        result = subprocess.run(
-                            ["systemctl", "--user", "start", "mcserver"],
-                            env=env, capture_output=True, text=True
-                        )
-                        if result.returncode == 0:
+                        tmux_socket = f"/tmp/tmux-{uid}/default"
+                        
+                        # Check if MC is already running
+                        check = run_cmd(f"tmux -S {tmux_socket} has-session -t MC 2>/dev/null")
+                        if check.get("success"):
+                            return jsonify({"success": True, "message": "Server already running"})
+                        
+                        # Remove the stopped flag - run loop will detect and start MC
+                        stopped_flag = os.path.join(CWD, ".mc_stopped")
+                        if os.path.exists(stopped_flag):
+                            os.remove(stopped_flag)
+                            log_event("SERVER_START", "Start command received via dashboard")
                             return jsonify({"success": True, "message": "Server starting..."})
-                        return jsonify({"success": False, "error": result.stderr or "start failed"}), 500
+                        else:
+                            # No flag but MC not running - service might need full restart
+                            return jsonify({"success": False, "error": "Service needs restart via systemctl"}), 400
                     except Exception as e:
                         return jsonify({"success": False, "error": str(e)}), 400
                 
                 @app.route("/api/server/stop", methods=["POST"])
                 def api_server_stop():
+                    """Stop the MC server (tmux session only, keep Flask running)."""
                     try:
                         uid = os.getuid()
                         tmux_socket = f"/tmp/tmux-{uid}/default"
-                        # Send stop command via tmux
+                        
+                        # Send stop command to MC
                         run_cmd(f"tmux -S {tmux_socket} send-keys -t MC 'stop' Enter 2>/dev/null")
-                        return jsonify({"success": True, "message": "Stop command sent"})
+                        time.sleep(3)
+                        
+                        # Kill tmux session if still alive
+                        run_cmd(f"tmux -S {tmux_socket} kill-session -t MC 2>/dev/null || true")
+                        
+                        # Create flag to prevent auto-restart
+                        with open(os.path.join(CWD, ".mc_stopped"), "w") as f:
+                            f.write(str(time.time()))
+                        
+                        log_event("SERVER_STOP", "MC server stopped via dashboard")
+                        return jsonify({"success": True, "message": "Server stopped"})
                     except Exception as e:
                         return jsonify({"success": False, "error": str(e)}), 400
                 
                 @app.route("/api/server/restart", methods=["POST"])
                 def api_server_restart():
-                    """Restart server: stop MC gracefully, then restart via systemd user service"""
+                    """Restart MC server: stop then start."""
                     try:
                         uid = os.getuid()
                         tmux_socket = f"/tmp/tmux-{uid}/default"
-                        # Send stop command to MC server
+                        
+                        # Create flag first to prevent clean-shutdown exit
+                        stopped_flag = os.path.join(CWD, ".mc_stopped")
+                        
+                        # Stop MC
                         run_cmd(f"tmux -S {tmux_socket} send-keys -t MC 'stop' Enter 2>/dev/null")
-                        import time
                         time.sleep(3)
-                        # Kill tmux session
                         run_cmd(f"tmux -S {tmux_socket} kill-session -t MC 2>/dev/null || true")
-                        # Restart via user systemd
-                        env = os.environ.copy()
-                        env["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
-                        subprocess.run(
-                            ["systemctl", "--user", "restart", "mcserver"],
-                            env=env, capture_output=True
-                        )
-                        log_event("SERVER_RESTART", "Restart requested via dashboard")
+                        
+                        # Remove flag to trigger restart in run loop
+                        if os.path.exists(stopped_flag):
+                            os.remove(stopped_flag)
+                        
+                        log_event("SERVER_RESTART", "MC server restart via dashboard")
                         return jsonify({"success": True, "message": "Restarting..."})
                     except Exception as e:
                         return jsonify({"success": False, "error": str(e)}), 400
@@ -2592,32 +2618,53 @@ def _search_curseforge_live(dep_name, mods_dir, mc_version, loader_name):
     if not PLAYWRIGHT_AVAILABLE:
         return False
     
+    _cf_rate_limit()
+    
     loader_id = CF_LOADER_IDS.get(loader_name.lower(), 6)
     dep_norm = re.sub(r'[^a-z0-9]', '', dep_name.lower())
+    
+    ua = random.choice(CF_USER_AGENTS)
+    viewport = random.choice(CF_VIEWPORTS)
+    locale = random.choice(CF_LOCALES)
     
     try:
         with Stealth().use_sync(sync_playwright()) as p:
             browser = p.chromium.launch(
                 headless=True,
-                args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-infobars",
+                    "--no-first-run",
+                    "--disable-extensions",
+                    "--mute-audio",
+                ]
             )
             context = browser.new_context(
-                user_agent=random.choice(CF_USER_AGENTS),
-                viewport={"width": 1920, "height": 1080}
+                user_agent=ua,
+                viewport=viewport,
+                locale=locale,
+                color_scheme="dark" if random.random() > 0.5 else "light",
             )
             page = context.new_page()
+            
+            # Visit homepage first to establish cookies
+            page.goto("https://www.curseforge.com/", wait_until="domcontentloaded", timeout=30000)
+            time.sleep(random.uniform(2.0, 3.5))
             
             search_url = f"https://www.curseforge.com/minecraft/search?search={dep_name}&version={mc_version}&gameVersionTypeId={loader_id}"
             log_event("SELF_HEAL", f"CurseForge search URL: {search_url}")
             
             try:
                 page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
-                time.sleep(5)
+                time.sleep(random.uniform(3.0, 5.0))
                 
                 title = page.title()
                 if any(kw in title.lower() for kw in ["just a moment", "attention required", "checking"]):
                     log_event("SELF_HEAL", "CurseForge: Cloudflare challenge, waiting...")
-                    time.sleep(10)
+                    time.sleep(random.uniform(8.0, 15.0))
+                    page.wait_for_load_state("networkidle", timeout=45000)
                 
                 cards = page.query_selector_all("div.project-card")
                 if not cards:
@@ -2941,6 +2988,10 @@ def _try_self_heal(loader_instance, crash_info, cfg, crash_history):
     mc_version = cfg.get("mc_version", "1.21.11")
     loader_name = cfg.get("loader", "neoforge")
     mods_dir = os.path.join(CWD, cfg.get("mods_dir", "mods"))
+    
+    if crash_type == "benign_mixin_warning":
+        log_event("SELF_HEAL", f"Benign mixin warning detected - NOT a crash: {crash_info.get('message', '')[:200]}")
+        return "ignored"
     
     if crash_type == "missing_dep":
         dep_name = crash_info.get("dep", "")
@@ -3590,8 +3641,23 @@ def run_server(cfg):
     restart_count = 0
     crash_history = {}  # Track {mod_id: crash_count} across restarts
     tmux_socket = f"/tmp/tmux-{os.getuid()}/default"
+    stopped_flag = os.path.join(CWD, ".mc_stopped")
     
     while restart_count <= MAX_RESTART_ATTEMPTS:
+        # Check if MC was intentionally stopped via dashboard
+        if os.path.exists(stopped_flag):
+            log_event("SERVER_STOPPED", "MC was stopped via dashboard, waiting for start command...")
+            # Wait for start command (flag to be removed) or service stop
+            for _ in range(3600):  # Wait up to 1 hour
+                if not os.path.exists(stopped_flag):
+                    break
+                time.sleep(1)
+            else:
+                log_event("SERVER_STOPPED", "No start command received for 1 hour, exiting")
+                return True
+            # Flag removed, continue to start MC
+            log_event("SERVER_START", "Start command received, starting MC...")
+        
         # Check if tmux session already exists (leftover from previous run)
         existing = run(f"tmux -S {tmux_socket} has-session -t MC 2>/dev/null")
         if existing.returncode == 0:
@@ -3658,6 +3724,18 @@ def run_server(cfg):
         
         # Check for clean shutdown (not a crash)
         if "Stopping the server" in new_log or "Server stopped" in new_log:
+            # If stopped via dashboard, wait for start command instead of exiting
+            if os.path.exists(stopped_flag):
+                log_event("SERVER_STOPPED", "Clean shutdown via dashboard, waiting for start command...")
+                for _ in range(3600):
+                    if not os.path.exists(stopped_flag):
+                        log_event("SERVER_START", "Start command received, restarting MC...")
+                        break
+                    time.sleep(1)
+                else:
+                    log_event("SERVER_STOPPED", "No start command for 1 hour, exiting")
+                    return True
+                continue  # Restart MC
             log_event("SERVER_STOPPED", "Clean shutdown detected, not restarting")
             return True
         
@@ -4004,7 +4082,7 @@ class EventHook:
         return True
 
 class PlayerJoinHook(EventHook):
-    """Trigger on player join event - show mod list options"""
+    """Trigger on player join event - show welcome message"""
     def __init__(self):
         super().__init__("PlayerJoin")
     
@@ -4014,7 +4092,7 @@ class PlayerJoinHook(EventHook):
     def on_trigger(self, event_data, cfg):
         player = event_data.get("player", "Unknown")
         if self.debounce_check(player, seconds=30):
-            show_mod_list_on_join(player, cfg)
+            send_chat_message(f"Welcome {player}! Type 'mods' to see available mods.")
             log_event("HOOK_PLAYER_JOIN", f"Triggered for {player}")
             return True
         return False
@@ -4072,6 +4150,25 @@ class ModDownloadHook(EventHook):
         return False
 
 
+class ModsCommandHook(EventHook):
+    """Trigger when player types 'mods' to show the mod list"""
+    def __init__(self):
+        super().__init__("ModsCommand")
+    
+    def should_trigger(self, event_data):
+        msg = event_data.get("message") or ""
+        return msg.lower().strip() == "mods"
+    
+    def on_trigger(self, event_data, cfg):
+        player = event_data.get("player", "Unknown")
+        
+        if self.debounce_check(f"mods_{player}", seconds=10):
+            show_mod_list_on_join(player, cfg)
+            log_event("HOOK_MODS_COMMAND", f"Player {player} requested mod list")
+            return True
+        return False
+
+
 def parse_log_line(line):
     """Parse server log line and extract event data"""
     import re
@@ -4119,9 +4216,7 @@ def remote_event_monitor(cfg):
         PlayerJoinHook(),
         PlayerDeathHook(),
         ModDownloadHook(),
-        ChatPatternHook("!help", "Available commands: !help, !status, !tps"),
-        ChatPatternHook("!status", "Server is running. Check Discord for more info."),
-        ChatPatternHook("!tps", "Current TPS: ??? (use /forge tps for details)"),
+        ModsCommandHook(),
     ]
     
     log_event("EVENT_MONITOR", "Remote event monitoring started")
@@ -4382,34 +4477,72 @@ def fetch_curseforge_mods_scraper(mc_version, loader, limit=100, scrape_deps=Tru
     page_size = 50
     pages_needed = (limit + page_size - 1) // page_size
     
+    ua = random.choice(CF_USER_AGENTS)
+    viewport = random.choice(CF_VIEWPORTS)
+    locale = random.choice(CF_LOCALES)
+    timezone = random.choice(CF_TIMEZONES)
+    
     try:
         with Stealth().use_sync(sync_playwright()) as p:
             browser = p.chromium.launch(
                 headless=True,
-                args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-infobars",
+                    "--disable-background-networking",
+                    "--no-first-run",
+                    "--disable-extensions",
+                    "--disable-sync",
+                    "--mute-audio",
+                    "--disable-translate",
+                    "--force-color-profile=srgb",
+                ]
             )
             context = browser.new_context(
-                user_agent=random.choice(CF_USER_AGENTS),
-                viewport={"width": 1920, "height": 1080}
+                user_agent=ua,
+                viewport=viewport,
+                locale=locale,
+                timezone_id=timezone,
+                color_scheme="dark" if random.random() > 0.5 else "light",
             )
+            
+            context.set_extra_http_headers({
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                "Accept-Language": f"{locale},en;q=0.9",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+                "Sec-Fetch-User": "?1",
+                "Upgrade-Insecure-Requests": "1",
+            })
+            
             page = context.new_page()
+            
+            # First visit homepage to establish cookies
+            page.goto("https://www.curseforge.com/", wait_until="domcontentloaded", timeout=30000)
+            time.sleep(random.uniform(2.0, 4.0))
             
             # ---- Phase 1: Scrape search pages ----
             for page_num in range(1, pages_needed + 1):
                 if len(all_mods) >= limit:
                     break
                 
+                _cf_rate_limit()
                 url = _cf_search_url(mc_version, loader, page=page_num, page_size=page_size, sort=sort)
                 log.info(f"CurseForge: scraping page {page_num}/{pages_needed} ({page_size}/page)")
                 
                 try:
                     page.goto(url, wait_until="domcontentloaded", timeout=20000)
-                    time.sleep(6)
+                    time.sleep(random.uniform(3.0, 6.0))
                     
                     title = page.title()
                     if any(kw in title.lower() for kw in ["just a moment", "attention required", "checking"]):
-                        log.warning(f"CurseForge: Cloudflare challenge on page {page_num}, waiting 15s...")
-                        time.sleep(15)
+                        log.warning(f"CurseForge: Cloudflare challenge on page {page_num}, waiting...")
+                        time.sleep(random.uniform(10.0, 20.0))
+                        page.wait_for_load_state("networkidle", timeout=45000)
                         title = page.title()
                         if any(kw in title.lower() for kw in ["just a moment", "attention required", "checking"]):
                             log.error(f"CurseForge: Cloudflare challenge NOT resolved, aborting")
@@ -4425,7 +4558,7 @@ def fetch_curseforge_mods_scraper(mc_version, loader, limit=100, scrape_deps=Tru
                     log.info(f"CurseForge: page {page_num} -> {len(page_mods)} mods (total: {len(all_mods)})")
                     
                     if page_num < pages_needed:
-                        time.sleep(random.uniform(2, 4))
+                        time.sleep(random.uniform(2.5, 5.0))
                 
                 except PlaywrightTimeout:
                     log.warning(f"CurseForge: timeout on page {page_num}")
@@ -4445,6 +4578,7 @@ def fetch_curseforge_mods_scraper(mc_version, loader, limit=100, scrape_deps=Tru
                     slug = mod.get("slug", "")
                     if not slug:
                         continue
+                    _cf_rate_limit()
                     try:
                         deps = _scrape_cf_dependencies(page, slug)
                         mod["deps_required"] = deps.get("required", [])
@@ -4454,7 +4588,7 @@ def fetch_curseforge_mods_scraper(mc_version, loader, limit=100, scrape_deps=Tru
                                      f"{len(deps['required'])} req, {len(deps['optional'])} opt deps")
                         if (i + 1) % 10 == 0:
                             log.info(f"  ... {i+1}/{len(all_mods)} dep pages scraped")
-                        time.sleep(random.uniform(1, 2))
+                        time.sleep(random.uniform(1.5, 3.5))
                     except Exception as e:
                         log.warning(f"  deps error for {slug}: {e}")
                         mod["deps_required"] = []
@@ -4479,9 +4613,10 @@ def fetch_curseforge_mods_scraper(mc_version, loader, limit=100, scrape_deps=Tru
     return all_mods
 
 def _cf_download_jar(url, mods_dir, slug, file_id, mod_name, headers=None):
-    """Helper: download a JAR from a URL, return 'downloaded', 'exists', or False."""
+    """Helper: download a JAR from a CDN URL (no Cloudflare). Returns 'downloaded', 'exists', or False."""
+    _cf_rate_limit()
     if headers is None:
-        headers = {"User-Agent": random.choice(CF_USER_AGENTS)}
+        headers = _get_cf_headers()
     try:
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=120) as response:
@@ -4496,108 +4631,178 @@ def _cf_download_jar(url, mods_dir, slug, file_id, mod_name, headers=None):
                 return "exists"
             
             data = response.read()
-            if len(data) < 1000:
-                # Likely an HTML error page, not a JAR
-                log.warning(f"CurseForge: response too small ({len(data)} bytes), probably not a JAR")
+            if len(data) < 1000 or data[:2] != b'PK':
                 return False
             with open(file_path, "wb") as f:
                 f.write(data)
-            
             log.info(f"CurseForge: downloaded {filename} ({len(data)/1024:.0f} KB)")
             return "downloaded"
     except Exception as e:
-        log.warning(f"CurseForge: download failed for {mod_name} from {url}: {e}")
+        log.warning(f"CurseForge: CDN download failed for {mod_name}: {e}")
         return False
 
-def download_mod_from_curseforge(mod_info, mods_dir, mc_version, loader):
+
+def _cf_download_playwright(slug, file_id, mods_dir, mod_name):
+    """Download a JAR using Playwright browser to defeat Cloudflare java challenge.
+    
+    Returns: 'downloaded', 'exists', or False
     """
-    Download a mod JAR from CurseForge.
+    if not PLAYWRIGHT_AVAILABLE:
+        log.warning(f"CurseForge: Playwright not available, cannot download {mod_name}")
+        return False
     
-    Attempts in order:
-    1. CDN URL pattern (no mod_id needed) — file_id split into /files/{first4}/{last3-4}/
-    2. Direct API URL (if numeric mod_id available)
-    3. Playwright scrape for numeric mod_id, then retry API
+    _cf_rate_limit()
     
+    ua = random.choice(CF_USER_AGENTS)
+    viewport = random.choice(CF_VIEWPORTS)
+    locale = random.choice(CF_LOCALES)
+    timezone = random.choice(CF_TIMEZONES)
+    
+    try:
+        with Stealth().use_sync(sync_playwright()) as p:
+            browser = p.chromium.launch(
+                headless=True, 
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-infobars",
+                    "--disable-background-networking",
+                    "--disable-breakpad",
+                    "--disable-component-update",
+                    "--no-first-run",
+                    "--disable-extensions",
+                    "--disable-plugins",
+                    "--disable-sync",
+                    "--metrics-recording-only",
+                    "--disable-default-apps",
+                    "--mute-audio",
+                    "--no-default-browser-check",
+                    "--background",
+                    "--disable-hang-monitor",
+                    "--disable-prompt-on-repost",
+                    "--disable-client-side-phishing-detection",
+                    "--disable-domain-reliability",
+                    "--disable-translate",
+                    "--disable-ipc-flooding-protection",
+                    "--disable-renderer-backgrounding",
+                    "--force-color-profile=srgb",
+                ]
+            )
+            context = browser.new_context(
+                user_agent=ua,
+                viewport=viewport,
+                locale=locale,
+                timezone_id=timezone,
+                color_scheme="dark" if random.random() > 0.5 else "light",
+                has_touch=random.random() > 0.7,
+                is_mobile=False,
+                java_script_enabled=True,
+            )
+            
+            # Add realistic browser headers
+            context.set_extra_http_headers({
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                "Accept-Language": f"{locale},en;q=0.9",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "none",
+                "Sec-Fetch-User": "?1",
+                "Sec-CH-UA": '"Chromium";v="131", "Google Chrome";v="131", "Not-A.Brand";v="24"',
+                "Sec-CH-UA-Mobile": "?0",
+                "Sec-CH-UA-Platform": '"Windows"',
+                "Upgrade-Insecure-Requests": "1",
+            })
+            
+            page = context.new_page()
+            
+            # Simulate human-like mouse movements
+            page.mouse.move(random.randint(0, viewport["width"]), random.randint(0, viewport["height"]))
+            
+            url = f"https://www.curseforge.com/minecraft/mc-mods/{slug}/download/{file_id}"
+            log.info(f"CurseForge: fetching {mod_name} via Playwright (Cloudflare bypass)")
+            
+            # First visit the main page to establish cookies
+            page.goto("https://www.curseforge.com/", wait_until="domcontentloaded", timeout=30000)
+            time.sleep(random.uniform(1.0, 2.5))
+            
+            # Then go to the download page
+            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            
+            # Wait for and defeat Cloudflare java challenge
+            title = page.title()
+            if any(kw in title.lower() for kw in ["just a moment", "attention required", "checking", "cloudflare"]):
+                log.info("CurseForge: Cloudflare challenge detected, waiting...")
+                time.sleep(random.uniform(2.0, 4.0))
+                page.wait_for_load_state("networkidle", timeout=60000)
+                # Simulate human behavior
+                page.mouse.move(random.randint(100, 800), random.randint(100, 600))
+                time.sleep(random.uniform(0.5, 1.5))
+            
+            time.sleep(random.uniform(1.5, 3.0))
+            
+            # Get final redirect URL (CDN link)
+            final_url = page.url
+            filename = os.path.basename(final_url.split("?")[0])
+            if not filename.endswith(".jar"):
+                filename = f"{slug}-{file_id}.jar"
+            
+            file_path = os.path.join(mods_dir, filename)
+            if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+                log.info(f"CurseForge: {filename} already exists")
+                context.close()
+                browser.close()
+                return "exists"
+            
+            # Download using browser cookies
+            cookies = context.cookies()
+            cookie_header = "; ".join(f"{c.get('name','')}={c.get('value','')}" for c in cookies if c.get('name') and c.get('value'))
+            headers = _get_cf_headers()
+            headers["Cookie"] = cookie_header
+            headers["Referer"] = url
+            
+            req = urllib.request.Request(final_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                data = resp.read()
+                if len(data) < 1000 or data[:2] != b'PK':
+                    log.warning(f"CurseForge: invalid JAR from {final_url}")
+                    context.close()
+                    browser.close()
+                    return False
+                with open(file_path, "wb") as f:
+                    f.write(data)
+            
+            log.info(f"CurseForge: downloaded {filename} ({os.path.getsize(file_path)/1024:.0f} KB)")
+            context.close()
+            browser.close()
+            return "downloaded"
+            
+    except Exception as e:
+        log.warning(f"CurseForge: Playwright download failed for {mod_name}: {e}")
+        return False
+
+
+def download_mod_from_curseforge(mod_info, mods_dir, mc_version, loader):
+    """Download a mod JAR from CurseForge using Playwright to defeat Cloudflare.
     Returns: 'downloaded', 'exists', or False
     """
     mod_name = mod_info.get("name", "unknown")
     slug = mod_info.get("slug", "")
     file_id = str(mod_info.get("file_id", ""))
-    mod_id = mod_info.get("mod_id", "")
     
     if not file_id:
         log.warning(f"CurseForge download: no file_id for {mod_name}")
         return False
     
-    # Check if we already have this mod by slug match before even hitting the network
+    # Check if already installed
     existing = _mod_jar_exists(mods_dir, mod_slug=slug)
     if existing:
-        log.info(f"CurseForge: {mod_name} already installed as {existing}, skipping")
+        log.info(f"CurseForge: {mod_name} already installed as {existing}")
         return "exists"
     
-    # --- Strategy 1: CDN URL pattern (works without numeric mod_id) ---
-    # CurseForge CDN splits file_id: e.g. file_id=7107983 -> /files/7107/983/filename.jar
-    # We don't know the filename, but we can try the download page URL which redirects to CDN
-    if slug and file_id:
-        # Try the website download URL — it redirects to the CDN
-        dl_url = f"https://www.curseforge.com/minecraft/mc-mods/{slug}/download/{file_id}"
-        result = _cf_download_jar(dl_url, mods_dir, slug, file_id, mod_name)
-        if result:
-            return result
-        
-        # Also try with /file/ path variant
-        dl_url2 = f"https://www.curseforge.com/minecraft/mc-mods/{slug}/download/{file_id}/file"
-        result = _cf_download_jar(dl_url2, mods_dir, slug, file_id, mod_name)
-        if result:
-            return result
-    
-    # --- Strategy 2: Direct API URL (if we have numeric mod_id) ---
-    if mod_id:
-        api_url = f"https://www.curseforge.com/api/v1/mods/{mod_id}/files/{file_id}/download"
-        result = _cf_download_jar(api_url, mods_dir, slug, file_id, mod_name)
-        if result:
-            return result
-    
-    # --- Strategy 3: CDN direct URL construction ---
-    # Split file_id into path segments: 7107983 -> 7107/983
-    if len(file_id) >= 5:
-        prefix = file_id[:4]
-        suffix = file_id[4:].lstrip('0') or '0'
-        # We don't know the exact filename, but try common patterns
-        for ext_name in [f"{slug}.jar", f"{slug}-neoforge-{mc_version}.jar",
-                         f"{slug}-{mc_version}.jar", f"{slug}-forge-{mc_version}.jar"]:
-            cdn_url = f"https://mediafilez.forgecdn.net/files/{prefix}/{suffix}/{ext_name}"
-            result = _cf_download_jar(cdn_url, mods_dir, slug, file_id, mod_name)
-            if result:
-                return result
-    
-    # --- Strategy 4: Playwright to scrape numeric mod_id, then retry ---
-    if PLAYWRIGHT_AVAILABLE and slug and len(file_id) >= 5:
-        try:
-            with Stealth().use_sync(sync_playwright()) as p:
-                browser = p.chromium.launch(
-                    headless=True,
-                    args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]
-                )
-                context = browser.new_context(
-                    user_agent=random.choice(CF_USER_AGENTS),
-                    viewport={"width": 1920, "height": 1080}
-                )
-                pg = context.new_page()
-                numeric_id = _get_cf_mod_id_from_download_page(pg, slug, file_id)
-                context.close()
-                browser.close()
-                
-                if numeric_id:
-                    api_url = f"https://www.curseforge.com/api/v1/mods/{numeric_id}/files/{file_id}/download"
-                    result = _cf_download_jar(api_url, mods_dir, slug, file_id, mod_name)
-                    if result:
-                        return result
-        except Exception as e:
-            log.warning(f"CurseForge: Playwright fallback failed for {mod_name}: {e}")
-    
-    log.error(f"CurseForge: could not download {mod_name} (slug={slug}, file_id={file_id})")
-    return False
+    # CDN is now blocking automated requests - go straight to Playwright
+    return _cf_download_playwright(slug, file_id, mods_dir, mod_name)
 
 
 MODRINTH_SORT_OPTIONS = {
@@ -5167,7 +5372,8 @@ def _mod_jar_exists(mods_dir, filename=None, mod_slug=None, mod_name=None):
     # Smart match using the installed detection system
     if mod_slug or mod_name:
         installed_tokens, installed_jars = build_installed_index(mods_dir)
-        if check_installed(mod_name or "", mod_slug or "", installed_tokens):
+        # Use exact=True for dependency resolution - don't let "biomesoplenty" match "mcwbiomesoplenty"
+        if check_installed(mod_name or "", mod_slug or "", installed_tokens, exact=True):
             # Found a match — figure out which JAR it is for potential replacement
             search_norm = re.sub(r'[^a-z0-9]', '', (mod_slug or mod_name or "").lower())
             if search_norm:

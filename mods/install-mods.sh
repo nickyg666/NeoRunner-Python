@@ -1,62 +1,55 @@
 #!/bin/bash
-# Minecraft Mod Installer (Linux / macOS)
-SERVER_IP="192.168.0.19"
-PORT="8000"
+MC="$HOME/.minecraft"
+[[ "$OSTYPE" == "darwin"* ]] && MC="$HOME/Library/Application Support/minecraft"
+MODS="$MC/mods"
+OLD="$MC/oldmods"
+ZIP="/tmp/mods_latest.zip"
+URL="http://192.168.0.19:8000/download/mods_latest.zip"
+
 echo "============================================"
 echo "   Minecraft Mod Installer"
-echo "   Server: $SERVER_IP:$PORT"
+echo "   Server: 192.168.0.19:8000"
 echo "============================================"
-[[ "$OSTYPE" == "darwin"* ]] && MC_DIR="$HOME/Library/Application Support/minecraft" || MC_DIR="$HOME/.minecraft"
-MODS="$MC_DIR/mods"
-OLD="$MC_DIR/oldmods"
-ZIP="/tmp/mods_latest.zip"
-MANIFEST="/tmp/mods_manifest.json"
-mkdir -p "$OLD" "$MODS"
 
-# Fetch manifest and clean old mods
-echo "Fetching mod list from server..."
-manifest_ok=false
-if curl -L -s -o "$MANIFEST" "http://$SERVER_IP:$PORT/download/mods_manifest.json" 2>/dev/null; then
-    # Validate manifest is valid JSON with "mods" array
-    if grep -q '"mods"' "$MANIFEST" 2>/dev/null && grep -q '\[' "$MANIFEST" 2>/dev/null; then
-        manifest_ok=true
-    fi
-fi
+# Create directories
+mkdir -p "$OLD" "$MODS" || { echo "ERROR: Cannot create directories"; exit 1; }
 
-if $manifest_ok; then
-    # Move mods not in manifest (exact filename match)
-    moved=0
-    for f in "$MODS"/*.jar; do
-        [[ -f "$f" ]] || continue
-        fname=$(basename "$f")
-        if ! grep -q "\"$fname\"" "$MANIFEST" 2>/dev/null; then
-            if mv "$f" "$OLD/" 2>/dev/null; then
-                echo "  Moved: $fname"
-                moved=$((moved + 1))
-            else
-                echo "  FAILED to move: $fname (check permissions)"
-            fi
-        fi
-    done
-    [[ $moved -gt 0 ]] && echo "Moved $moved old mods to oldmods/"
-else
-    echo "WARNING: Could not fetch valid manifest, moving all old mods"
-    for f in "$MODS"/*.jar; do
-        [[ -f "$f" ]] || continue
-        fname=$(basename "$f")
-        if mv "$f" "$OLD/" 2>/dev/null; then
-            echo "  Moved: $fname"
-        else
-            echo "  FAILED to move: $fname"
-        fi
-    done
-fi
-
+# Download
 echo "Downloading mods..."
-curl -L -o "$ZIP" "http://$SERVER_IP:$PORT/download/mods_latest.zip" || { echo "ERROR: Download failed!"; exit 1; }
-unzip -o -q "$ZIP" -d "$MODS"
-rm -f "$ZIP" "$MANIFEST"
-COUNT=$(ls -1 "$MODS"/*.jar 2>/dev/null | wc -l)
-echo ""
-echo "SUCCESS: $COUNT mods installed!"
-echo "Close Minecraft and relaunch to use them."
+if ! curl -fL -o "$ZIP" "$URL"; then
+    echo "ERROR: Download failed"
+    rm -f "$ZIP"
+    exit 1
+fi
+
+# Move conflicting mods
+echo "Checking for conflicting mods..."
+if command -v unzip &>/dev/null; then
+    unzip -Z1 "$ZIP" 2>/dev/null | grep -iE '[.]jar$' | while read -r jar; do
+        if [[ -f "$MODS/$jar" ]]; then
+            echo "  Moving $jar to oldmods..."
+            mv -f "$MODS/$jar" "$OLD/" 2>/dev/null || true
+        fi
+    done
+fi
+
+# Extract
+echo "Extracting mods..."
+if command -v unzip &>/dev/null; then
+    unzip -o "$ZIP" -d "$MODS" 2>/dev/null
+elif command -v python3 &>/dev/null; then
+    python3 -c "import zipfile; zipfile.ZipFile('$ZIP').extractall('$MODS')"
+else
+    echo "ERROR: No unzip or python3 available"
+    rm -f "$ZIP"
+    exit 1
+fi
+
+# Cleanup
+rm -f "$ZIP"
+
+# Count
+count=$(find "$MODS" -maxdepth 1 -name "*.jar" 2>/dev/null | wc -l)
+echo "============================================"
+echo "SUCCESS: $count mods installed!"
+echo "============================================"

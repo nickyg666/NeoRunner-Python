@@ -1452,149 +1452,25 @@ def get_server_hostname(cfg):
     return "YOUR_SERVER_IP"
 
 def create_install_scripts(mods_dir, cfg=None):
-    """Generate client install scripts (.bat, .sh).
+    """Generate client install scripts (.ps1, .sh).
     
     PowerShell uses only built-ins available in Windows 10 21H2 (PowerShell 5.1).
+    Scripts are generated on-demand via Flask routes, not stored on disk.
     """
     os.makedirs(mods_dir, exist_ok=True)
     http_port = int(cfg.get("http_port", 8000)) if cfg else 8000
     server_ip = get_server_hostname(cfg) if cfg else "localhost"
     
-    # PowerShell script - Windows 10 21H2 compatible (PowerShell 5.1)
-    ps1 = f'''# Minecraft Mod Installer
-# Compatible with PowerShell 5.1 (Windows 10 21H2)
-
-$modsPath = "$env:APPDATA\\.minecraft\\mods"
-$oldPath = "$env:APPDATA\\.minecraft\\oldmods"
-$baseUrl = "http://{server_ip}:{http_port}"
-
-Write-Host "============================================"
-Write-Host "   Minecraft Mod Installer"
-Write-Host "   Server: {server_ip}:{http_port}"
-Write-Host "============================================"
-
-# Create directories
-New-Item -ItemType Directory -Path $modsPath -Force | Out-Null
-New-Item -ItemType Directory -Path $oldPath -Force | Out-Null
-
-# Fetch manifest
-Write-Host "Fetching mod list..."
-try {{
-    $manifest = Invoke-RestMethod -Uri "$baseUrl/download/manifest" -UseBasicParsing
-}} catch {{
-    Write-Host "ERROR: Cannot connect to server" -ForegroundColor Red
-    Read-Host "Press Enter to exit"
-    exit 1
-}}
-
-$serverMods = @($manifest.mods | ForEach-Object {{ $_.name }})
-$localMods = @()
-if (Test-Path $modsPath) {{
-    $localMods = @(Get-ChildItem -Path $modsPath -Filter "*.jar" | ForEach-Object {{ $_.Name }})
-}}
-
-Write-Host "Server: $($serverMods.Count) mods"
-Write-Host "Local: $($localMods.Count) mods"
-
-# Find what to download and archive
-$toDownload = @($serverMods | Where-Object {{ $_ -notin $localMods }})
-$toArchive = @($localMods | Where-Object {{ $_ -notin $serverMods }})
-
-Write-Host "To download: $($toDownload.Count)"
-Write-Host "To archive: $($toArchive.Count)"
-
-# Archive old mods
-foreach ($mod in $toArchive) {{
-    $src = Join-Path $modsPath $mod
-    if (Test-Path $src) {{
-        Write-Host "  Archiving $mod"
-        Move-Item -Path $src -Destination $oldPath -Force
-    }}
-}}
-
-# Download missing mods
-$downloaded = 0
-foreach ($mod in $toDownload) {{
-    $dest = Join-Path $modsPath $mod
-    $url = "$baseUrl/download/mods/$mod"
-    Write-Host "  Downloading $mod..." -NoNewline
-    try {{
-        Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
-        Write-Host " OK" -ForegroundColor Green
-        $downloaded++
-    }} catch {{
-        Write-Host " FAILED" -ForegroundColor Red
-    }}
-}}
-
-# Count final
-$total = @(Get-ChildItem -Path $modsPath -Filter "*.jar").Count
-Write-Host "============================================"
-Write-Host "SUCCESS: $total mods installed!" -ForegroundColor Green
-Write-Host "Downloaded: $downloaded, Archived: $($toArchive.Count)"
-Write-Host "============================================"
-Read-Host "Press Enter to exit"
-'''
+    # Store config for dynamic script generation
+    script_config = {
+        "server_ip": server_ip,
+        "http_port": http_port,
+    }
+    script_config_path = os.path.join(mods_dir, ".script_config.json")
+    with open(script_config_path, "w") as f:
+        json.dump(script_config, f)
     
-    # Batch wrapper - just launches PowerShell
-    bat = f'''@echo off
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install-mods.ps1"
-'''
-    
-    # Bash script for Linux/Mac
-    bash = f'''#!/bin/bash
-MC="$HOME/.minecraft"
-[[ "$OSTYPE" == "darwin"* ]] && MC="$HOME/Library/Application Support/minecraft"
-MODS="$MC/mods"
-OLD="$MC/oldmods"
-ZIP="/tmp/mods.zip"
-URL="http://{server_ip}:{http_port}/download/mods_latest.zip"
-
-echo "============================================"
-echo "   Minecraft Mod Installer"
-echo "   Server: {server_ip}:{http_port}"
-echo "============================================"
-
-mkdir -p "$MODS" "$OLD"
-
-echo "Downloading mods..."
-curl -fL -o "$ZIP" "$URL" || {{ echo "ERROR: Download failed"; rm -f "$ZIP"; exit 1; }}
-
-echo "Archiving old mods..."
-mv "$MODS"/*.jar "$OLD/" 2>/dev/null || true
-
-echo "Extracting mods..."
-if command -v unzip &>/dev/null; then
-    unzip -o "$ZIP" -d "$MODS"
-elif command -v python3 &>/dev/null; then
-    python3 -c "import zipfile; zipfile.ZipFile('$ZIP').extractall('$MODS')"
-else
-    echo "ERROR: Need unzip or python3"
-    rm -f "$ZIP"
-    exit 1
-fi
-
-rm -f "$ZIP"
-COUNT=$(ls "$MODS"/*.jar 2>/dev/null | wc -l)
-echo "============================================"
-echo "SUCCESS: $COUNT mods installed!"
-echo "============================================"
-'''
-    
-    ps1_path = os.path.join(mods_dir, "install-mods.ps1")
-    with open(ps1_path, "w", encoding="utf-8") as f:
-        f.write(ps1)
-    
-    bat_path = os.path.join(mods_dir, "install-mods.bat")
-    with open(bat_path, "w", newline="\r\n", encoding="utf-8") as f:
-        f.write(bat)
-    
-    bash_path = os.path.join(mods_dir, "install-mods.sh")
-    with open(bash_path, "w", encoding="utf-8") as f:
-        f.write(bash)
-    os.chmod(bash_path, 0o755)
-    
-    log_event("SCRIPTS", f"Generated install scripts (ip={server_ip}, port={http_port})")
+    log_event("SCRIPTS", f"Script config saved (ip={server_ip}, port={http_port}) - scripts generated on-demand")
 
 def create_mod_zip(mods_dir):
     """Create mods_latest.zip with all mods (root + clientonly) in flat structure.
@@ -1886,16 +1762,40 @@ def http_server(port, mods_dir):
                     }
                 
                 def get_mod_list():
+                    """Return sorted list of all mods (server + clientonly)."""
                     c = load_cfg()
                     mods_dir_path = os.path.join(CWD, c.get("mods_dir", "mods"))
+                    clientonly_path = os.path.join(mods_dir_path, "clientonly")
                     mods = []
+                    
+                    # Server mods
                     if os.path.exists(mods_dir_path):
-                        for filename in sorted(os.listdir(mods_dir_path)):
+                        for filename in os.listdir(mods_dir_path):
                             if filename.endswith(".jar"):
                                 path = os.path.join(mods_dir_path, filename)
                                 size = os.path.getsize(path)
-                                mods.append({"name": filename, "size": size, "size_mb": round(size / (1024*1024), 2)})
-                    return sorted(mods, key=lambda x: x["name"])
+                                mods.append({
+                                    "name": filename,
+                                    "size": size,
+                                    "size_mb": round(size / (1024*1024), 2),
+                                    "source": "server"
+                                })
+                    
+                    # Client-only mods
+                    if os.path.exists(clientonly_path):
+                        for filename in os.listdir(clientonly_path):
+                            if filename.endswith(".jar"):
+                                path = os.path.join(clientonly_path, filename)
+                                size = os.path.getsize(path)
+                                mods.append({
+                                    "name": filename,
+                                    "size": size,
+                                    "size_mb": round(size / (1024*1024), 2),
+                                    "source": "clientonly"
+                                })
+                    
+                    # Sort A-Z by name
+                    return sorted(mods, key=lambda x: x["name"].lower())
                 
                 @app.route("/")
                 def dashboard():
@@ -2020,13 +1920,16 @@ def http_server(port, mods_dir):
                     server_ip = get_server_hostname(c)
                     
                     if ext == "bat":
+                        # Minimal wrapper - bypasses execution policy
                         script = f'''@echo off
-powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb http://{server_ip}:{http_port}/download/install-scripts/ps1 | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri 'http://{server_ip}:{http_port}/download/install-mods.ps1' -OutFile '%TEMP%\\install-mods.ps1'; PowerShell -NoProfile -ExecutionPolicy Bypass -File '%TEMP%\\install-mods.ps1'"
 '''
                         return Response(script, mimetype="application/bat", headers={"Content-Disposition": "attachment; filename=install-mods.bat"})
                     
                     elif ext == "ps1":
                         script = f'''# Minecraft Mod Installer
+# Compatible with PowerShell 5.1 (Windows 10 21H2)
+
 $modsPath = "$env:APPDATA\\.minecraft\\mods"
 $oldPath = "$env:APPDATA\\.minecraft\\oldmods"
 $baseUrl = "http://{server_ip}:{http_port}"
@@ -2089,7 +1992,7 @@ curl -fL -o /tmp/mods.zip "$URL" || {{ echo "ERROR: Download failed"; exit 1; }}
 echo "Archiving old mods..."
 mv "$MODS"/*.jar "$OLD/" 2>/dev/null || true
 
-echo "Extracting..."
+echo "Extracting mods..."
 unzip -o /tmp/mods.zip -d "$MODS" 2>/dev/null || python3 -c "import zipfile; zipfile.ZipFile('/tmp/mods.zip').extractall('$MODS')"
 rm -f /tmp/mods.zip
 
@@ -2099,7 +2002,7 @@ echo "============================================"
 '''
                         return Response(script, mimetype="text/plain", headers={"Content-Disposition": "attachment; filename=install-mods.sh"})
                     
-                    return jsonify({"error": "Unknown script type"}), 404
+                    return jsonify({"error": "Unknown script type. Use .ps1 or .sh"}), 404
                 
                 @app.route("/api/mod-lists")
                 def api_mod_lists():
@@ -2883,17 +2786,23 @@ def _search_and_download_dep(dep_name, mods_dir, mc_version, loader_name):
     Returns True if successfully downloaded, False otherwise."""
     from urllib.parse import quote as _url_quote
     
-    def _modrinth_search(query):
-        """Search Modrinth and return best hit or None."""
-        try:
-            facets = f'[["versions:{mc_version}"],["categories:{loader_name}"],["project_type:mod"]]'
-            search_url = f"https://api.modrinth.com/v2/search?query={_url_quote(query)}&facets={_url_quote(facets)}&limit=10"
-            req = urllib.request.Request(search_url, headers={"User-Agent": "NeoRunner/1.0"})
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                results = json.loads(resp.read().decode())
-            return results.get("hits", [])
-        except Exception:
-            return []
+    def _modrinth_search(query, project_types=None):
+        """Search Modrinth for mods AND libraries. Returns list of hits."""
+        if project_types is None:
+            project_types = ["mod", "modlibrary"]  # Search both mods and libraries
+        
+        all_hits = []
+        for ptype in project_types:
+            try:
+                facets = f'[["versions:{mc_version}"],["categories:{loader_name}"],["project_type:{ptype}"]]'
+                search_url = f"https://api.modrinth.com/v2/search?query={_url_quote(query)}&facets={_url_quote(facets)}&limit=10"
+                req = urllib.request.Request(search_url, headers={"User-Agent": "NeoRunner/1.0"})
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    results = json.loads(resp.read().decode())
+                all_hits.extend(results.get("hits", []))
+            except Exception:
+                continue
+        return all_hits
     
     def _try_download_hit(hit):
         """Try downloading a Modrinth search hit. Returns True on success."""
@@ -3655,17 +3564,56 @@ def _preflight_dep_check(cfg):
                 log_event("PREFLIGHT", f"Round {round_num + 2}: found {len(new_missing)} transitive deps to resolve")
                 missing = new_missing
     
-    # ── Phase 4: Quarantine mods with unresolvable dependencies ──
+    # ── Phase 4: Quarantine mods with unresolvable dependencies (chain rollback) ──
     if fetch_failed:
-        log_event("PREFLIGHT", f"{len(fetch_failed)} dependencies could not be found - quarantining affected mods:")
+        log_event("PREFLIGHT", f"{len(fetch_failed)} dependencies could not be found - rolling back dependency chains:")
+        
+        # Build reverse dependency map: mod -> what deps it needs
+        mod_to_deps = {}
+        for dep_id, requesters in required_deps.items():
+            for req in requesters:
+                mod_to_deps.setdefault(req, set()).add(dep_id)
+        
+        # For each failed dep, find the full chain and quarantine all affected mods
         for dep_id, requesters in fetch_failed.items():
             req_list = sorted(requesters)[:5]
-            log_event("PREFLIGHT", f"  Missing: {dep_id} (needed by: {', '.join(req_list)})")
-            # Quarantine all mods that need this unavailable dep
+            
+            # Find root cause - why is this dep unavailable?
+            dep_reason = f"Not available for MC {mc_version}/{loader_name}"
+            
+            # Check if it's a version-specific issue
+            dep_lower = dep_id.lower()
+            if dep_lower in ["create", "create-fabric", "createforge"]:
+                dep_reason = f"Create mod only supports MC 1.18.2, 1.19.2, 1.20.1, 1.21.1 - not {mc_version}"
+            elif dep_lower in ["easy_npc"]:
+                dep_reason = f"Easy NPC not updated for MC {mc_version}"
+            elif dep_lower.startswith("ftb"):
+                dep_reason = f"FTB mods may not support MC {mc_version} yet"
+            
+            log_event("PREFLIGHT", f"  Missing: {dep_id} - {dep_reason}")
+            log_event("PREFLIGHT", f"    Needed by: {', '.join(req_list)}")
+            
+            # Quarantine all mods that directly need this dep
             for requester in requesters:
-                if requester.startswith("<") or requester.endswith(".jar"):
-                    # It's a JAR filename, quarantine it
-                    quarantined = _quarantine_mod(mods_dir, requester, f"Requires unavailable dependency '{dep_id}' for MC {mc_version}")
+                if requester.startswith("<"):
+                    continue
+                if not requester.endswith(".jar"):
+                    requester = requester + ".jar" if not requester.endswith(".jar") else requester
+                
+                # Check if file exists before quarantining
+                requester_path = os.path.join(mods_dir, requester)
+                if not os.path.exists(requester_path):
+                    # Try to find it by partial name
+                    for fn in os.listdir(mods_dir):
+                        if fn.lower().startswith(dep_id.replace("_", "").replace("-", "")[:8]) and fn.endswith(".jar"):
+                            requester_path = os.path.join(mods_dir, fn)
+                            requester = fn
+                            break
+                
+                if os.path.exists(requester_path):
+                    # Build chain explanation
+                    chain_reason = f"Requires '{dep_id}' which is unavailable ({dep_reason})"
+                    quarantined = _quarantine_mod(mods_dir, requester, chain_reason)
                     if quarantined:
                         log_event("PREFLIGHT", f"    Quarantined {requester}")
                         result["quarantined"].append(requester)

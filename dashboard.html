@@ -1174,12 +1174,13 @@
                                 <div class="mod-info">
                                     <div class="mod-name">${badge}${mod.name}</div>
                                     <div class="mod-size">${mod.size_mb} MB</div>
-                                </div>
-                                <div>
-                                    <button onclick="downloadMod('${mod.name}')" style="margin: 0; padding: 5px 10px; font-size: 12px;">📥</button>
-                                    <button onclick="removeMod('${mod.name}')" class="danger" style="margin: 0; padding: 5px 10px; font-size: 12px;">🗑️</button>
-                                </div>
-                            </div>
+                                 </div>
+                                 <div>
+                                     <button onclick="downloadMod('${mod.name}')" style="margin: 0; padding: 5px 10px; font-size: 12px;" title="Download">📥</button>
+                                     <button onclick="quarantineMod('${mod.name}')" style="margin: 0; padding: 5px 10px; font-size: 12px; background:#FF9800;" title="Quarantine">🔒</button>
+                                     <button onclick="removeMod('${mod.name}')" class="danger" style="margin: 0; padding: 5px 10px; font-size: 12px;" title="Delete">🗑️</button>
+                                 </div>
+                             </div>
                         `;
                     });
                     html += `</div>`;
@@ -1202,6 +1203,23 @@
                     if (data.success) {
                         showAlert(`Removed ${modName}`, 'success');
                         loadMods();
+                    } else {
+                        showAlert(`Error: ${data.error}`, 'error');
+                    }
+                })
+                .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+        
+        function quarantineMod(modName) {
+            if (!confirm(`Quarantine mod: ${modName}?\n\nThis will move the mod to the quarantine folder. You can restore it later from the Quarantine tab.`)) return;
+            
+            fetch(`/api/mods/${modName}/quarantine`, { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        showAlert(`Quarantined ${modName}`, 'success');
+                        loadMods();
+                        loadQuarantine();
                     } else {
                         showAlert(`Error: ${data.error}`, 'error');
                     }

@@ -1108,6 +1108,7 @@ def _version_in_range(version, version_range):
     
     def parse_ver(v):
         """Parse version string into tuple of integers"""
+        v = v.strip()  # Strip whitespace
         parts = re.findall(r'\d+', v)
         return tuple(int(p) for p in parts) if parts else (0,)
     
@@ -1118,11 +1119,11 @@ def _version_in_range(version, version_range):
     if not version_range or version_range == "*" or version_range == "":
         return True
     
-    # Parse range notation
-    range_match = re.match(r'^([\[\(])([^,]*),([^,\]\)]*)([\]\)])$', version_range)
+    # Parse range notation - strip spaces from captured groups
+    range_match = re.match(r'^([\[\(])\s*([^,]*?)\s*,\s*([^,\]\)]*?)\s*([\]\)])$', version_range)
     if not range_match:
         # Single version requirement
-        return parse_ver(version) >= parse_ver(version_range.strip("[]()"))
+        return parse_ver(version) >= parse_ver(version_range.strip("[]() "))
     
     left_bracket, left_ver, right_ver, right_bracket = range_match.groups()
     

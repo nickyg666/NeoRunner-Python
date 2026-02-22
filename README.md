@@ -135,3 +135,43 @@ RestartSec=10
 ```
 
 Install: `sudo cp mcserver.service /etc/systemd/system/ && sudo systemctl enable --now mcserver`
+
+---
+
+## Edge Cases & Known Issues
+
+### Language Providers
+
+Some mods are written in **non-Java languages** (Scala, Kotlin, etc.) and require a **language provider** to load. These are declared in the `modLoader` field at the top of `neoforge.mods.toml`, NOT in the normal `[[dependencies]]` section.
+
+**Example:**
+```toml
+modLoader = "kotori_scala"  # Needs Scala runtime
+```
+
+**Known Language Providers (auto-detected):**
+| Provider ID | Modrinth Slug | Language |
+|------------|---------------|----------|
+| `kotori_scala` | `scalable-cats-force` | Scala |
+| `kotlinforforge` | `kotlinforforge` | Kotlin |
+| `kotlin` | `kotlinforforge` | Kotlin |
+
+NeoRunner **automatically detects** these and fetches the required provider from Modrinth.
+
+### Why Isn't It Detected as a Normal Dependency?
+
+Language providers use a special loading mechanism in NeoForge/Forge. They're declared via `modLoader = "provider_id"` at the TOP of the mods.toml file, not in `[[dependencies.modId]]` sections. This is a separate mod loading system that runs before the normal dependency resolver.
+
+**Normal dependency:**
+```toml
+[[dependencies.mymod]]
+modId = "othermod"  # Normal dependency
+type = "required"
+```
+
+**Language provider:**
+```toml
+modLoader = "kotori_scala"  # NOT a normal dependency - language runtime
+```
+
+If you see errors like `Missing language loader kotori_scala`, the mod needs a language provider that NeoRunner will now auto-fetch.

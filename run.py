@@ -1454,62 +1454,94 @@ def get_server_hostname(cfg):
 def create_install_scripts(mods_dir, cfg=None):
     """Generate client install scripts (.bat, .sh).
     
-    Simple approach: download zip, extract, move old mods to oldmods.
+    PowerShell uses only built-ins available in Windows 10 21H2 (PowerShell 5.1).
     """
     os.makedirs(mods_dir, exist_ok=True)
     http_port = int(cfg.get("http_port", 8000)) if cfg else 8000
     server_ip = get_server_hostname(cfg) if cfg else "localhost"
     
-    # Batch script - simple zip download and extract
-    bat = f'''@echo off
-title Minecraft Mod Installer
-echo ============================================
-echo    Minecraft Mod Installer  
-echo    Server: {server_ip}:{http_port}
-echo ============================================
+    # PowerShell script - Windows 10 21H2 compatible (PowerShell 5.1)
+    ps1 = f'''# Minecraft Mod Installer
+# Compatible with PowerShell 5.1 (Windows 10 21H2)
 
-set "MODS=%APPDATA%\\.minecraft\\mods"
-set "OLD=%APPDATA%\\.minecraft\\oldmods"
-set "ZIP=%TEMP%\\mods.zip"
-set "URL=http://{server_ip}:{http_port}/download/mods_latest.zip"
+$modsPath = "$env:APPDATA\\.minecraft\\mods"
+$oldPath = "$env:APPDATA\\.minecraft\\oldmods"
+$baseUrl = "http://{server_ip}:{http_port}"
 
-REM Create directories
-if not exist "%MODS%" mkdir "%MODS%"
-if not exist "%OLD%" mkdir "%OLD%"
+Write-Host "============================================"
+Write-Host "   Minecraft Mod Installer"
+Write-Host "   Server: {server_ip}:{http_port}"
+Write-Host "============================================"
 
-REM Download zip
-echo Downloading mods...
-curl.exe -L -o "%ZIP%" "%URL%"
-if not exist "%ZIP%" (
-    echo ERROR: Download failed
-    pause
-    exit /b 1
-)
+# Create directories
+New-Item -ItemType Directory -Path $modsPath -Force | Out-Null
+New-Item -ItemType Directory -Path $oldPath -Force | Out-Null
 
-REM Move existing jars to oldmods
-echo Archiving old mods...
-for %%f in ("%MODS%\\*.jar") do move "%%f" "%OLD%\\" >nul 2>&1
+# Fetch manifest
+Write-Host "Fetching mod list..."
+try {{
+    $manifest = Invoke-RestMethod -Uri "$baseUrl/download/manifest" -UseBasicParsing
+}} catch {{
+    Write-Host "ERROR: Cannot connect to server" -ForegroundColor Red
+    Read-Host "Press Enter to exit"
+    exit 1
+}}
 
-REM Extract using tar (Windows 10+ built-in)
-echo Extracting mods...
-tar.exe -xf "%ZIP%" -C "%MODS%" 2>nul
-if errorlevel 1 (
-    REM Fallback: use PowerShell for extraction only
-    powershell -NoProfile -Command "Expand-Archive -Path '%ZIP%' -DestinationPath '%MODS%' -Force"
-)
+$serverMods = @($manifest.mods | ForEach-Object {{ $_.name }})
+$localMods = @()
+if (Test-Path $modsPath) {{
+    $localMods = @(Get-ChildItem -Path $modsPath -Filter "*.jar" | ForEach-Object {{ $_.Name }})
+}}
 
-REM Cleanup and count
-del "%ZIP%" 2>nul
-set COUNT=0
-for %%f in ("%MODS%\\*.jar") do set /a COUNT+=1
+Write-Host "Server: $($serverMods.Count) mods"
+Write-Host "Local: $($localMods.Count) mods"
 
-echo ============================================
-echo SUCCESS: %COUNT% mods installed!
-echo ============================================
-pause
+# Find what to download and archive
+$toDownload = @($serverMods | Where-Object {{ $_ -notin $localMods }})
+$toArchive = @($localMods | Where-Object {{ $_ -notin $serverMods }})
+
+Write-Host "To download: $($toDownload.Count)"
+Write-Host "To archive: $($toArchive.Count)"
+
+# Archive old mods
+foreach ($mod in $toArchive) {{
+    $src = Join-Path $modsPath $mod
+    if (Test-Path $src) {{
+        Write-Host "  Archiving $mod"
+        Move-Item -Path $src -Destination $oldPath -Force
+    }}
+}}
+
+# Download missing mods
+$downloaded = 0
+foreach ($mod in $toDownload) {{
+    $dest = Join-Path $modsPath $mod
+    $url = "$baseUrl/download/mods/$mod"
+    Write-Host "  Downloading $mod..." -NoNewline
+    try {{
+        Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+        Write-Host " OK" -ForegroundColor Green
+        $downloaded++
+    }} catch {{
+        Write-Host " FAILED" -ForegroundColor Red
+    }}
+}}
+
+# Count final
+$total = @(Get-ChildItem -Path $modsPath -Filter "*.jar").Count
+Write-Host "============================================"
+Write-Host "SUCCESS: $total mods installed!" -ForegroundColor Green
+Write-Host "Downloaded: $downloaded, Archived: $($toArchive.Count)"
+Write-Host "============================================"
+Read-Host "Press Enter to exit"
 '''
     
-    # Bash script - simple and portable
+    # Batch wrapper - just launches PowerShell
+    bat = f'''@echo off
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install-mods.ps1"
+'''
+    
+    # Bash script for Linux/Mac
     bash = f'''#!/bin/bash
 MC="$HOME/.minecraft"
 [[ "$OSTYPE" == "darwin"* ]] && MC="$HOME/Library/Application Support/minecraft"
@@ -1548,6 +1580,10 @@ echo "============================================"
 echo "SUCCESS: $COUNT mods installed!"
 echo "============================================"
 '''
+    
+    ps1_path = os.path.join(mods_dir, "install-mods.ps1")
+    with open(ps1_path, "w", encoding="utf-8") as f:
+        f.write(ps1)
     
     bat_path = os.path.join(mods_dir, "install-mods.bat")
     with open(bat_path, "w", newline="\r\n", encoding="utf-8") as f:
@@ -1665,7 +1701,7 @@ class SecureHTTPHandler(SimpleHTTPRequestHandler):
             # Serve the file
             self.send_response(200)
             self.send_header("Content-Type", "application/java-archive")
-            self.send_header("Content-Length", file_path.stat().st_size)
+            self.send_header("Content-Length", str(file_path.stat().st_size))
             self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
             self.end_headers()
             with open(file_path, "rb") as f:
@@ -1682,7 +1718,7 @@ class SecureHTTPHandler(SimpleHTTPRequestHandler):
             
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", manifest_path.stat().st_size)
+            self.send_header("Content-Length", str(manifest_path.stat().st_size))
             self.end_headers()
             with open(manifest_path, "rb") as f:
                 self.wfile.write(f.read())
@@ -1782,7 +1818,7 @@ def http_server(port, mods_dir):
                 import sys as _sys
                 _sys.path.insert(0, CWD)
                 
-                from flask import Flask, render_template, jsonify, request, send_file
+                from flask import Flask, render_template, jsonify, request, send_file, Response
                 
                 app = Flask(__name__, template_folder=CWD, static_folder=os.path.join(CWD, "static"))
                 app.secret_key = os.urandom(24)
@@ -1939,7 +1975,7 @@ def http_server(port, mods_dir):
                     """Serve mod/zip/script files for client download"""
                     c = load_cfg()
                     mods_dir_path = os.path.join(CWD, c.get("mods_dir", "mods"))
-                    allowed_ext = [".jar", ".zip", ".ps1", ".sh", ".bat"]
+                    allowed_ext = [".jar", ".zip", ".ps1", ".sh", ".bat", ".json"]
                     if not any(filename.endswith(ext) for ext in allowed_ext):
                         return jsonify({"error": "File type not allowed"}), 403
                     file_path = os.path.join(mods_dir_path, filename)
@@ -1948,6 +1984,122 @@ def http_server(port, mods_dir):
                     if os.path.exists(file_path):
                         return send_file(file_path, as_attachment=True)
                     return jsonify({"error": "File not found"}), 404
+                
+                @app.route("/download/manifest")
+                def download_manifest():
+                    """Serve mods_manifest.json"""
+                    c = load_cfg()
+                    mods_dir_path = os.path.join(CWD, c.get("mods_dir", "mods"))
+                    manifest_path = os.path.join(mods_dir_path, "mods_manifest.json")
+                    if os.path.exists(manifest_path):
+                        return send_file(manifest_path, mimetype="application/json")
+                    return jsonify({"error": "Manifest not found"}), 404
+                
+                @app.route("/download/mods/<filename>")
+                def download_mod(filename):
+                    """Serve individual mod JAR for diff-based syncing"""
+                    c = load_cfg()
+                    mods_dir_path = os.path.join(CWD, c.get("mods_dir", "mods"))
+                    if not filename.endswith(".jar"):
+                        return jsonify({"error": "Only .jar files"}), 403
+                    
+                    # Check root first, then clientonly
+                    file_path = os.path.join(mods_dir_path, filename)
+                    if not os.path.exists(file_path):
+                        file_path = os.path.join(mods_dir_path, "clientonly", filename)
+                    
+                    if os.path.exists(file_path):
+                        return send_file(file_path, as_attachment=True)
+                    return jsonify({"error": "Mod not found"}), 404
+                
+                @app.route("/download/install-mods.<ext>")
+                def download_script(ext):
+                    """Generate and serve install scripts on-the-fly"""
+                    c = load_cfg()
+                    http_port = int(c.get("http_port", 8000))
+                    server_ip = get_server_hostname(c)
+                    
+                    if ext == "bat":
+                        script = f'''@echo off
+powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb http://{server_ip}:{http_port}/download/install-scripts/ps1 | iex"
+'''
+                        return Response(script, mimetype="application/bat", headers={"Content-Disposition": "attachment; filename=install-mods.bat"})
+                    
+                    elif ext == "ps1":
+                        script = f'''# Minecraft Mod Installer
+$modsPath = "$env:APPDATA\\.minecraft\\mods"
+$oldPath = "$env:APPDATA\\.minecraft\\oldmods"
+$baseUrl = "http://{server_ip}:{http_port}"
+
+Write-Host "============================================"
+Write-Host "   Minecraft Mod Installer"
+Write-Host "   Server: {server_ip}:{http_port}"
+Write-Host "============================================"
+
+New-Item -ItemType Directory -Path $modsPath,$oldPath -Force | Out-Null
+
+Write-Host "Fetching mod list..."
+try {{ $man = Invoke-RestMethod "$baseUrl/download/manifest" -UseBasicParsing }}
+catch {{ Write-Host "ERROR: Cannot connect to server" -Fore Red; Read-Host "Press Enter"; exit 1 }}
+
+$srv = @($man.mods.name)
+$loc = @(Get-ChildItem $modsPath *.jar -ErrorAction SilentlyContinue).Name
+$dl = @($srv | ?{{$_ -notin $loc}})
+$ar = @($loc | ?{{$_ -notin $srv}})
+
+Write-Host "Server: $($srv.Count) Local: $($loc.Count)"
+Write-Host "Download: $($dl.Count) Archive: $($ar.Count)"
+
+foreach ($f in $ar) {{
+    $p = Join-Path $modsPath $f
+    if (Test-Path $p) {{ Write-Host " Archiving $f"; mv $p $oldPath -Force }}
+}}
+
+$n = 0
+foreach ($f in $dl) {{
+    Write-Host " Downloading $f..." -NoNewline
+    try {{ Invoke-WebRequest "$baseUrl/download/mods/$f" -OutFile "$modsPath\\$f" -UseBasicParsing; Write-Host " OK" -Fore Green; $n++ }}
+    catch {{ Write-Host " FAIL" -Fore Red }}
+}}
+
+Write-Host "============================================"
+Write-Host "SUCCESS: $((Get-ChildItem $modsPath *.jar).Count) mods ($n new)" -Fore Green
+Write-Host "============================================"
+Read-Host "Press Enter"
+'''
+                        return Response(script, mimetype="text/plain", headers={"Content-Disposition": "attachment; filename=install-mods.ps1"})
+                    
+                    elif ext == "sh":
+                        script = f'''#!/bin/bash
+MC="$HOME/.minecraft"
+[[ "$OSTYPE" == "darwin"* ]] && MC="$HOME/Library/Application Support/minecraft"
+MODS="$MC/mods"
+OLD="$MC/oldmods"
+URL="http://{server_ip}:{http_port}/download/mods_latest.zip"
+
+echo "============================================"
+echo "   Minecraft Mod Installer"
+echo "   Server: {server_ip}:{http_port}"
+echo "============================================"
+
+mkdir -p "$MODS" "$OLD"
+echo "Downloading mods..."
+curl -fL -o /tmp/mods.zip "$URL" || {{ echo "ERROR: Download failed"; exit 1; }}
+
+echo "Archiving old mods..."
+mv "$MODS"/*.jar "$OLD/" 2>/dev/null || true
+
+echo "Extracting..."
+unzip -o /tmp/mods.zip -d "$MODS" 2>/dev/null || python3 -c "import zipfile; zipfile.ZipFile('/tmp/mods.zip').extractall('$MODS')"
+rm -f /tmp/mods.zip
+
+echo "============================================"
+echo "SUCCESS: $(ls $MODS/*.jar 2>/dev/null | wc -l) mods installed!"
+echo "============================================"
+'''
+                        return Response(script, mimetype="text/plain", headers={"Content-Disposition": "attachment; filename=install-mods.sh"})
+                    
+                    return jsonify({"error": "Unknown script type"}), 404
                 
                 @app.route("/api/mod-lists")
                 def api_mod_lists():

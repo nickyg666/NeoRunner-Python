@@ -3725,10 +3725,15 @@ def run_server(cfg):
         preflight_result = _preflight_dep_check(cfg)
         if preflight_result["fetched"] > 0:
             log_event("SERVER_START", f"Pre-flight fetched {preflight_result['fetched']} missing deps")
+            # Regenerate mod ZIP since new mods were fetched
+            create_mod_zip(mods_dir)
+            create_install_scripts(mods_dir, cfg)
         if preflight_result["optional_interop"]:
             log_event("SERVER_START", f"OPTIONAL DEP INTEROP: {len(preflight_result['optional_interop'])} shared optional deps found (installing may improve compatibility)")
             for interop in preflight_result["optional_interop"][:5]:
                 log_event("SERVER_START", f"  - {interop['dep_id']} (wanted by {interop['count']} mods)")
+        if preflight_result.get("quarantined"):
+            log_event("SERVER_START", f"Pre-flight quarantined {len(preflight_result['quarantined'])} mods with unresolvable deps")
     except Exception as e:
         log_event("SERVER_START", f"Pre-flight check failed (non-fatal): {e}")
     

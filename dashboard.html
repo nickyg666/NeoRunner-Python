@@ -574,7 +574,7 @@
                 <a href="/download/install-mods.bat" class="installer-btn installer-bat" download>
                     <span class="installer-icon">&#x1F4E5;</span>
                     <span class="installer-label">.bat</span>
-                    <span class="installer-desc">Windows (runs .ps1)</span>
+                    <span class="installer-desc">Windows (double-click)</span>
                 </a>
                 <a href="/download/install-mods.ps1" class="installer-btn installer-ps1" download>
                     <span class="installer-icon">&#x1F4E5;</span>
@@ -587,6 +587,11 @@
                     <span class="installer-desc">Linux / macOS</span>
                 </a>
             </div>
+            <p style="color:#888; font-size:11px; margin-top:10px;">
+                <strong>One-liner (PowerShell):</strong> Right-click in PowerShell and paste, or run: 
+                <code id="powershell-oneliner" style="background:#2a2a2a;padding:2px 6px;border-radius:3px;cursor:pointer;font-family:monospace;" onclick="copyToClipboard(this)" title="Click to copy">Loading...</code>
+                <br><span style="color:#666;">If double-clicking .bat opens Notepad, use the one-liner or right-click .bat → "Run with PowerShell"</span>
+            </p>
         </div>
         
         <!-- Quarantine Banner (hidden by default, shown when mods are quarantined) -->
@@ -690,8 +695,7 @@
                 <div class="form-group">
                     <label>Script Types to Generate</label>
                     <select id="cfg-script-types">
-                        <option value="all">All (.bat + .ps1 + .sh)</option>
-                        <option value="bat">Windows .bat only</option>
+                        <option value="all">All (.ps1 + .sh)</option>
                         <option value="ps1">PowerShell .ps1 only</option>
                         <option value="sh">Linux/Mac .sh only</option>
                     </select>
@@ -1062,6 +1066,14 @@
             setTimeout(() => alert.remove(), 5000);
         }
         
+        function copyToClipboard(element) {
+            navigator.clipboard.writeText(element.textContent).then(() => {
+                const orig = element.style.background;
+                element.style.background = '#4CAF50';
+                setTimeout(() => element.style.background = orig, 500);
+            });
+        }
+        
         function refreshStatus() {
             fetch('/api/status')
                 .then(r => r.json())
@@ -1110,12 +1122,23 @@
             fetch('/api/mods')
                 .then(r => r.json())
                 .then(mods => {
-                    let html = `<div class="mod-list">`;
+                    // Count by source
+                    const serverCount = mods.filter(m => m.source === 'server').length;
+                    const clientCount = mods.filter(m => m.source === 'clientonly').length;
+                    
+                    let html = `<div style="margin-bottom:12px;padding:8px;background:#2a2a2a;border-radius:4px;font-size:12px;">
+                        <span style="color:#4CAF50;">🟢 Server mods: ${serverCount}</span> &nbsp; 
+                        <span style="color:#2196F3;">🔵 Client-only: ${clientCount}</span>
+                    </div>`;
+                    html += `<div class="mod-list">`;
                     mods.forEach(mod => {
+                        const badge = mod.source === 'clientonly' 
+                            ? '<span style="background:#2196F3;color:white;padding:1px 6px;border-radius:3px;font-size:10px;margin-right:6px;">CLIENT</span>'
+                            : '';
                         html += `
                             <div class="mod-item">
                                 <div class="mod-info">
-                                    <div class="mod-name">${mod.name}</div>
+                                    <div class="mod-name">${badge}${mod.name}</div>
                                     <div class="mod-size">${mod.size_mb} MB</div>
                                 </div>
                                 <div>
@@ -1160,11 +1183,15 @@
               fetch('/api/config')
                   .then(r => r.json())
                   .then(cfg => {
-                      // Ports (display in header - read from server.properties)
-                      document.getElementById('game-port').textContent = cfg.server_port || '25565';
-                      document.getElementById('query-port').textContent = cfg.query_port || '25565';
-                      document.getElementById('rcon-port').textContent = cfg.rcon_port || '25575';
-                      document.getElementById('http-port').textContent = cfg.http_port || '8000';
+                       // Ports (display in header - read from server.properties)
+                       document.getElementById('game-port').textContent = cfg.server_port || '25565';
+                       document.getElementById('query-port').textContent = cfg.query_port || '25565';
+                       document.getElementById('rcon-port').textContent = cfg.rcon_port || '25575';
+                       document.getElementById('http-port').textContent = cfg.http_port || '8000';
+                       // PowerShell one-liner
+                       const ip = cfg.hostname || window.location.hostname || 'localhost';
+                       const port = cfg.http_port || '8000';
+                       document.getElementById('powershell-oneliner').textContent = `iwr http://${ip}:${port}/download/install-mods.ps1 | iex`;
                       // Network
                       document.getElementById('cfg-hostname').value = cfg.hostname || '';
                      document.getElementById('mc-version').value = cfg.mc_version || '1.21.11';

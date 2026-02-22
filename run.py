@@ -3285,6 +3285,16 @@ def _preflight_dep_check(cfg):
         "quilt_loader", "javafml", "lowcodefml", "mixin", "mixinextras",
     }
     
+    # Known language providers (mods that provide language runtime support)
+    # These are declared via modLoader field, NOT in [[dependencies]]
+    KNOWN_LANGUAGE_PROVIDERS = {
+        "kotori_scala": "scalable-cats-force",      # Scala language provider
+        "kotlinforforge": "kotlinforforge",          # Kotlin language provider
+        "kotlin": "kotlinforforge",                  # Alternate Kotlin provider ID
+        "scalacats": "scalable-cats-force",          # Alternate Scala provider
+        "scala": "scalable-cats-force",              # Alternate Scala provider
+    }
+    
     # Loader-incompatible deps - skip these to avoid downloading wrong mods
     # NeoForge/Forge server should not try to fetch Fabric deps, and vice versa
     # Using pattern matching to catch all fabric-* variants
@@ -3331,6 +3341,21 @@ def _preflight_dep_check(cfg):
                     if toml_file:
                         raw = zf.read(toml_file).decode('utf-8', errors='ignore')
                         toml_data = tomllib.loads(raw)
+                        
+                        # Check for language provider declaration (modLoader field)
+                        # This is NOT a normal dependency - it's declared at the top of the file
+                        # Example: modLoader = "kotori_scala" (needs Scala runtime)
+                        mod_loader = toml_data.get("modLoader", "").lower()
+                        if mod_loader and mod_loader not in ("javafml", "lowcodefml", "java"):
+                            # This mod needs a language provider
+                            if mod_loader in KNOWN_LANGUAGE_PROVIDERS:
+                                provider_slug = KNOWN_LANGUAGE_PROVIDERS[mod_loader]
+                                required_deps.setdefault(provider_slug, set()).add(fn)
+                                log_event("PREFLIGHT", f"Language provider detected: {fn} needs '{mod_loader}' -> will fetch '{provider_slug}'")
+                            else:
+                                # Unknown language provider - log warning
+                                log_event("PREFLIGHT", f"WARNING: Unknown language provider '{mod_loader}' required by {fn}")
+                                required_deps.setdefault(mod_loader, set()).add(fn)
                         
                         # Collect ALL mod IDs declared in this JAR (not just the first)
                         mods_list = toml_data.get("mods", [])

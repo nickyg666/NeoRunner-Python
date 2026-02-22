@@ -2075,6 +2075,61 @@ def http_server(port, mods_dir):
                     except Exception as e:
                         return jsonify({"success": False, "error": str(e)}), 400
                 
+                @app.route("/api/mods/<mod_name>/quarantine", methods=["POST"])
+                def api_quarantine_mod(mod_name):
+                    """Manually quarantine a mod (server or clientonly)"""
+                    try:
+                        c = load_cfg()
+                        mods_dir_path = os.path.join(CWD, c.get("mods_dir", "mods"))
+                        quarantine_dir = os.path.join(mods_dir_path, "quarantine")
+                        clientonly_dir = os.path.join(mods_dir_path, "clientonly")
+                        
+                        # Check root mods folder first
+                        mod_path = os.path.join(mods_dir_path, mod_name)
+                        source = "server"
+                        
+                        # If not in root, check clientonly
+                        if not os.path.exists(mod_path):
+                            mod_path = os.path.join(clientonly_dir, mod_name)
+                            source = "clientonly"
+                        
+                        if not os.path.exists(mod_path):
+                            return jsonify({"success": False, "error": "Mod not found"}), 404
+                        
+                        if not mod_path.endswith(".jar"):
+                            return jsonify({"success": False, "error": "Not a JAR file"}), 400
+                        
+                        # Ensure quarantine dir exists
+                        os.makedirs(quarantine_dir, exist_ok=True)
+                        
+                        # Move to quarantine
+                        dest = os.path.join(quarantine_dir, mod_name)
+                        import shutil
+                        shutil.move(mod_path, dest)
+                        
+                        # Write reason file
+                        reason_file = dest + ".reason.txt"
+                        from datetime import datetime
+                        with open(reason_file, "w") as f:
+                            f.write(f"Quarantined: {datetime.now().isoformat()}\n")
+                            f.write(f"Reason: Manually quarantined via dashboard\n")
+                            f.write(f"Mod ID: {mod_name}\n")
+                            f.write(f"Display Name: {mod_name}\n")
+                            f.write(f"Source: {source}\n")
+                        
+                        log_event("MANUAL_QUARANTINE", f"Manually quarantined {mod_name} (from {source})")
+                        
+                        # Regenerate zip
+                        create_mod_zip(mods_dir_path)
+                        
+                        return jsonify({
+                            "success": True, 
+                            "message": f"Quarantined {mod_name}",
+                            "source": source
+                        })
+                    except Exception as e:
+                        return jsonify({"success": False, "error": str(e)}), 400
+                
                 @app.route("/api/download/<mod_name>")
                 def api_download_mod(mod_name):
                     """Download a mod JAR file"""
@@ -6779,3 +6834,5 @@ def run_neorunner(cfg):
 
 if __name__ == "__main__":
     main()
+
+# Add this endpoint near the other mod API endpoints

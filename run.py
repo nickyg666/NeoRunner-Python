@@ -3671,10 +3671,52 @@ def _preflight_dep_check(cfg):
                 continue
     
     # Quarantine mods that need newer Java
+    java_quarantined_count = 0
+    java_needed_versions = {}  # {version: count}
+    
     for fn, needed_java in java_incompatible:
         quarantined = _quarantine_mod(mods_dir, fn, f"Requires Java {needed_java} (server has Java {java_version})")
         if quarantined:
             result["quarantined"].append(fn)
+            java_quarantined_count += 1
+            java_needed_versions[needed_java] = java_needed_versions.get(needed_java, 0) + 1
+    
+    # Auto-upgrade JDK if 90%+ of mods need the same newer version
+    total_mods = len(installed_mod_ids)
+    if java_quarantined_count > 0 and total_mods > 0:
+        # Find the most common needed version
+        most_common_version = max(java_needed_versions.items(), key=lambda x: x[1]) if java_needed_versions else (None, 0)
+        needed_ver, needed_count = most_common_version
+        
+        if needed_ver:
+            percentage = (needed_count / total_mods) * 100
+            if percentage >= 90:
+                log_event("PREFLIGHT", f"AUTO_JDK_UPGRADE: {percentage:.0f}% of mods need Java {needed_ver}, auto-upgrading...")
+                
+                # Find package for this version
+                available_jdks = _check_jdk_upgrade_available()
+                matching_jdk = next((j for j in available_jdks if j["version"] == needed_ver), None)
+                
+                if matching_jdk:
+                    if _install_jdk(matching_jdk["package"]):
+                        _set_default_java(needed_ver)
+                        log_event("PREFLIGHT", f"Auto-installed {matching_jdk['package']} and set as default")
+                        
+                        # Unquarantine all Java-incompatible mods
+                        import shutil
+                        for fn, _ in java_incompatible:
+                            src = os.path.join(quarantine_dir, fn)
+                            dst = os.path.join(mods_dir, fn)
+                            reason_file = f"{src}.reason.txt"
+                            try:
+                                shutil.move(src, dst)
+                                if os.path.exists(reason_file):
+                                    os.remove(reason_file)
+                            except:
+                                pass
+                        log_event("PREFLIGHT", f"Restored {java_quarantined_count} mods after auto JDK upgrade")
+                    else:
+                        log_event("PREFLIGHT", f"Failed to auto-install JDK {needed_ver}")
     
     # ── Phase 2.5: Re-evaluate quarantined mods ──
     # Mods quarantined for "missing dep" or "Mod conflict (mixin)" may be safe to

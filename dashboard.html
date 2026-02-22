@@ -702,7 +702,10 @@
                     <small>Which install scripts to generate for players</small>
                 </div>
                 
-                <h3 style="color:#E91E63;border-bottom:1px solid #333;padding-bottom:8px;">Java Memory</h3>
+                <h3 style="color:#E91E63;border-bottom:1px solid #333;padding-bottom:8px;">
+                    Java Memory
+                    <button onclick="openJavaModal()" style="float:right; padding:4px 10px; font-size:12px; background:#607D8B;">☕ Version Manager</button>
+                </h3>
                 <div class="form-group">
                     <label>Max Heap Size (-Xmx)</label>
                     <input type="text" id="cfg-xmx" value="6G" placeholder="e.g. 6G, 4096M, 8G">
@@ -845,6 +848,37 @@
                             </div>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Java Upgrade Modal -->
+        <div id="java-modal" class="modal-overlay">
+            <div class="modal" style="max-width: 600px;">
+                <div class="modal-header">
+                    <h2>☕ Java Version Manager</h2>
+                    <button class="close-btn" onclick="closeJavaModal()">×</button>
+                </div>
+                <div class="modal-body" style="padding: 24px;">
+                    <div style="background:#2a2a2a; padding:15px; border-radius:8px; margin-bottom:20px;">
+                        <div style="font-size:12px; color:#888;">Current Java Version</div>
+                        <div id="java-current" style="font-size:24px; font-weight:bold; color:#4CAF50;">Loading...</div>
+                    </div>
+                    
+                    <div id="java-quarantined-section" style="display:none; margin-bottom:20px;">
+                        <h3 style="color:#FF5722; margin-bottom:10px;">⚠️ Quarantined Mods</h3>
+                        <p style="color:#888; font-size:13px; margin-bottom:10px;">These mods need a newer Java version:</p>
+                        <div id="java-quarantined-list" style="max-height:150px; overflow-y:auto;"></div>
+                    </div>
+                    
+                    <div id="java-upgrade-section">
+                        <h3 style="margin-bottom:10px;">Available JDK Upgrades</h3>
+                        <div id="java-upgrades-list">Loading available packages...</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button onclick="closeJavaModal()">Close</button>
+                    <button id="java-unquarantine-btn" class="success" onclick="unquarantineJavaMods()" style="display:none;">Restore Quarantined Mods</button>
                 </div>
             </div>
         </div>
@@ -1256,6 +1290,100 @@
                 }
             })
             .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+        
+        // Java Management
+        function openJavaModal() {
+            document.getElementById('java-modal').classList.add('active');
+            loadJavaStatus();
+        }
+        
+        function closeJavaModal() {
+            document.getElementById('java-modal').classList.remove('active');
+        }
+        
+        function loadJavaStatus() {
+            fetch('/api/java')
+                .then(r => r.json())
+                .then(data => {
+                    // Current version
+                    document.getElementById('java-current').textContent = `Java ${data.current_version}`;
+                    
+                    // Quarantined mods
+                    const qSection = document.getElementById('java-quarantined-section');
+                    const qList = document.getElementById('java-quarantined-list');
+                    const unqBtn = document.getElementById('java-unquarantine-btn');
+                    
+                    if (data.quarantined_mods && data.quarantined_mods.length > 0) {
+                        qSection.style.display = 'block';
+                        unqBtn.style.display = 'inline-block';
+                        qList.innerHTML = data.quarantined_mods.map(m => `
+                            <div style="padding:8px; background:#333; margin-bottom:5px; border-radius:4px; display:flex; justify-content:space-between;">
+                                <span>${m.name}</span>
+                                <span style="color:#FF5722;">Needs Java ${m.required_java}</span>
+                            </div>
+                        `).join('');
+                    } else {
+                        qSection.style.display = 'none';
+                        unqBtn.style.display = 'none';
+                    }
+                    
+                    // Available upgrades
+                    const uList = document.getElementById('java-upgrades-list');
+                    if (data.available_upgrades && data.available_upgrades.length > 0) {
+                        uList.innerHTML = data.available_upgrades.map(u => `
+                            <div style="display:flex; justify-content:space-between; align-items:center; padding:10px; background:#2a2a2a; margin-bottom:8px; border-radius:6px;">
+                                <div>
+                                    <div style="font-weight:bold;">Java ${u.version}</div>
+                                    <div style="font-size:12px; color:#888;">${u.package}</div>
+                                </div>
+                                <button onclick="installJDK('${u.package}', ${u.version})" style="padding:6px 12px;">Install</button>
+                            </div>
+                        `).join('');
+                    } else {
+                        uList.innerHTML = '<div style="color:#888;">No additional JDK versions found in repos. Try: sudo apt update</div>';
+                    }
+                })
+                .catch(err => {
+                    document.getElementById('java-current').textContent = 'Error loading';
+                    document.getElementById('java-upgrades-list').innerHTML = `<div style="color:#f44336;">Error: ${err}</div>`;
+                });
+        }
+        
+        function installJDK(package, version) {
+            if (!confirm(`Install ${package} and set Java ${version} as default?\n\nThis will run: sudo apt-get install ${package}`)) return;
+            
+            showAlert(`Installing ${package}...`, 'info');
+            
+            fetch('/api/java/upgrade', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ package: package })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    showAlert(`${data.message}`, 'success');
+                    loadJavaStatus();
+                } else {
+                    showAlert(`Error: ${data.error}`, 'error');
+                }
+            })
+            .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+        
+        function unquarantineJavaMods() {
+            fetch('/api/java/unquarantine', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        showAlert(`Restored ${data.restored} mods!`, 'success');
+                        loadJavaStatus();
+                    } else {
+                        showAlert(`Error: ${data.error}`, 'error');
+                    }
+                })
+                .catch(err => showAlert(`Error: ${err}`, 'error'));
         }
         
         function startServer() {

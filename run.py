@@ -1097,40 +1097,161 @@ def _version_tuple(version_str):
 
 
 def _version_in_range(version, version_range):
-    """Check if a version string falls within a Maven-style version range.
+    """Check if a version string falls within a version range.
     
-    Returns True if version is in range, False if not, None if can't determine.
+    Supports NeoForge/Maven-style ranges:
+    - "[1.0,)" means 1.0 or higher
+    - "[1.0,2.0)" means 1.0 inclusive to 2.0 exclusive
+    - "[1.0]" means exactly 1.0
     """
-    parsed = _parse_version_range(version_range)
-    if parsed is None:
-        return None  # Can't parse, skip check
+    import re
     
-    lower, upper, lower_inc, upper_inc = parsed
+    def parse_ver(v):
+        """Parse version string into tuple of integers"""
+        parts = re.findall(r'\d+', v)
+        return tuple(int(p) for p in parts) if parts else (0,)
     
-    if lower is None and upper is None:
-        return True  # Wildcard, any version matches
+    # Clean up version string
+    version = version.strip().strip('"\'')
     
-    ver = _version_tuple(version)
+    # Handle simple version requirements
+    if not version_range or version_range == "*" or version_range == "":
+        return True
     
-    if lower:
-        low = _version_tuple(lower)
-        if lower_inc:
-            if ver < low:
+    # Parse range notation
+    range_match = re.match(r'^([\[\(])([^,]*),([^,\]\)]*)([\]\)])$', version_range)
+    if not range_match:
+        # Single version requirement
+        return parse_ver(version) >= parse_ver(version_range.strip("[]()"))
+    
+    left_bracket, left_ver, right_ver, right_bracket = range_match.groups()
+    
+    v = parse_ver(version)
+    left = parse_ver(left_ver) if left_ver else None
+    right = parse_ver(right_ver) if right_ver else None
+    
+    # Check left bound
+    if left:
+        if left_bracket == '[':
+            if v < left:
                 return False
-        else:
-            if ver <= low:
+        else:  # '('
+            if v <= left:
                 return False
     
-    if upper:
-        up = _version_tuple(upper)
-        if upper_inc:
-            if ver > up:
+    # Check right bound
+    if right:
+        if right_bracket == ']':
+            if v > right:
                 return False
-        else:
-            if ver >= up:
+        else:  # ')'
+            if v >= right:
                 return False
     
     return True
+
+
+def _get_java_version():
+    """Get current Java major version"""
+    try:
+        result = subprocess.run(["java", "-version"], capture_output=True, text=True, timeout=5)
+        # Parse version from output like "openjdk version "21.0.10"
+        for line in (result.stderr + result.stdout).split('\n'):
+            if 'version' in line:
+                match = re.search(r'"(\d+)', line)
+                if match:
+                    return match.group(1)
+                # Handle old format "1.8.0"
+                match = re.search(r'"1\.(\d+)', line)
+                if match:
+                    return match.group(1)
+    except Exception:
+        pass
+    return "21"
+
+
+def _check_jdk_upgrade_available():
+    """Check if a newer JDK is available in system repos"""
+    available = []
+    
+    try:
+        # Check apt for available JDK versions
+        result = subprocess.run(
+            ["apt-cache", "search", "openjdk-.*-jdk", "temurin-.*-jdk"],
+            capture_output=True, text=True, timeout=10
+        )
+        for line in result.stdout.split('\n'):
+            if 'jdk' in line.lower() and ('openjdk' in line.lower() or 'temurin' in line.lower()):
+                # Extract version number
+                match = re.search(r'(\d+)-jdk', line)
+                if match:
+                    version = int(match.group(1))
+                    if version >= 21:  # Only care about Java 21+
+                        available.append({
+                            "version": str(version),
+                            "package": line.split()[0] if line.split() else "",
+                            "description": line
+                        })
+    except Exception:
+        pass
+    
+    # Also check for Eclipse Temurin (Adoptium)
+    try:
+        result = subprocess.run(
+            ["apt-cache", "search", "temurin"],
+            capture_output=True, text=True, timeout=10
+        )
+        for line in result.stdout.split('\n'):
+            match = re.search(r'temurin-(\d+)-jdk', line)
+            if match:
+                version = int(match.group(1))
+                if version >= 21:
+                    pkg = f"temurin-{version}-jdk"
+                    if not any(a.get("package") == pkg for a in available):
+                        available.append({
+                            "version": str(version),
+                            "package": pkg,
+                            "description": f"Eclipse Temurin JDK {version}"
+                        })
+    except Exception:
+        pass
+    
+    # Sort by version descending
+    available.sort(key=lambda x: int(x["version"]), reverse=True)
+    return available[:5]  # Top 5
+
+
+def _install_jdk(package_name):
+    """Install a JDK package"""
+    try:
+        result = subprocess.run(
+            ["sudo", "apt-get", "install", "-y", package_name],
+            capture_output=True, text=True, timeout=120
+        )
+        return result.returncode == 0
+    except Exception as e:
+        log_event("JDK_UPGRADE", f"Failed to install {package_name}: {e}")
+        return False
+
+
+def _set_default_java(version):
+    """Set default Java version using update-alternatives"""
+    try:
+        # Find all java alternatives and pick the right one
+        result = subprocess.run(
+            ["update-alternatives", "--list", "java"],
+            capture_output=True, text=True, timeout=10
+        )
+        for path in result.stdout.split('\n'):
+            if f"java-{version}-" in path or f"temurin-{version}" in path:
+                subprocess.run(
+                    ["sudo", "update-alternatives", "--set", "java", path],
+                    capture_output=True, timeout=10
+                )
+                return True
+    except Exception:
+        pass
+    return False
 
 
 def preflight_mod_compatibility_check(mods_dir, cfg):
@@ -1835,6 +1956,104 @@ def http_server(port, mods_dir):
                         return jsonify({"success": True, "message": "Config updated"})
                     except Exception as e:
                         return jsonify({"success": False, "error": str(e)}), 400
+                
+                @app.route("/api/java")
+                def api_java_status():
+                    """Get current Java version and available upgrades"""
+                    current = _get_java_version()
+                    available = _check_jdk_upgrade_available()
+                    
+                    # Find mods quarantined for Java version mismatch
+                    c = load_cfg()
+                    mods_dir = os.path.join(CWD, c.get("mods_dir", "mods"))
+                    quarantine_dir = os.path.join(mods_dir, "quarantine")
+                    java_quarantined = []
+                    
+                    if os.path.isdir(quarantine_dir):
+                        for fn in os.listdir(quarantine_dir):
+                            if fn.endswith('.jar'):
+                                reason_file = os.path.join(quarantine_dir, f"{fn}.reason.txt")
+                                if os.path.exists(reason_file):
+                                    with open(reason_file) as rf:
+                                        reason = rf.read()
+                                    if "Requires Java" in reason and "server has Java" in reason:
+                                        # Extract required version
+                                        match = re.search(r'Requires Java (\d+)', reason)
+                                        required = match.group(1) if match else "unknown"
+                                        java_quarantined.append({
+                                            "name": fn,
+                                            "required_java": required,
+                                            "reason": reason.split('\n')[1] if '\n' in reason else reason
+                                        })
+                    
+                    return jsonify({
+                        "current_version": current,
+                        "available_upgrades": available,
+                        "quarantined_mods": java_quarantined
+                    })
+                
+                @app.route("/api/java/upgrade", methods=["POST"])
+                def api_java_upgrade():
+                    """Install a JDK upgrade"""
+                    data = request.json or {}
+                    package = data.get("package")
+                    
+                    if not package:
+                        return jsonify({"success": False, "error": "No package specified"}), 400
+                    
+                    # Verify it's a valid JDK package
+                    if not re.match(r'^(openjdk|temurin)-\d+-jdk', package):
+                        return jsonify({"success": False, "error": "Invalid package name"}), 400
+                    
+                    # Install
+                    log_event("JDK_UPGRADE", f"Installing {package}...")
+                    if _install_jdk(package):
+                        # Extract version and set as default
+                        match = re.search(r'(\d+)-jdk', package)
+                        if match:
+                            version = match.group(1)
+                            _set_default_java(version)
+                        
+                        log_event("JDK_UPGRADE", f"Successfully installed {package}")
+                        return jsonify({
+                            "success": True, 
+                            "message": f"Installed {package}. Restart server to apply."
+                        })
+                    else:
+                        return jsonify({"success": False, "error": "Installation failed"}), 500
+                
+                @app.route("/api/java/unquarantine", methods=["POST"])
+                def api_java_unquarantine():
+                    """Move Java-incompatible mods back from quarantine"""
+                    c = load_cfg()
+                    mods_dir = os.path.join(CWD, c.get("mods_dir", "mods"))
+                    quarantine_dir = os.path.join(mods_dir, "quarantine")
+                    
+                    if not os.path.isdir(quarantine_dir):
+                        return jsonify({"success": True, "restored": 0})
+                    
+                    restored = []
+                    for fn in os.listdir(quarantine_dir):
+                        if fn.endswith('.jar'):
+                            reason_file = os.path.join(quarantine_dir, f"{fn}.reason.txt")
+                            if os.path.exists(reason_file):
+                                with open(reason_file) as rf:
+                                    reason = rf.read()
+                                if "Requires Java" in reason and "server has Java" in reason:
+                                    # Move back
+                                    import shutil
+                                    src = os.path.join(quarantine_dir, fn)
+                                    dst = os.path.join(mods_dir, fn)
+                                    shutil.move(src, dst)
+                                    os.remove(reason_file)
+                                    restored.append(fn)
+                    
+                    if restored:
+                        log_event("JDK_UPGRADE", f"Restored {len(restored)} mods after Java upgrade")
+                        # Regenerate zip
+                        create_mod_zip(mods_dir)
+                    
+                    return jsonify({"success": True, "restored": len(restored), "mods": restored})
                 
                 @app.route("/api/mods")
                 def api_mods():
@@ -3295,6 +3514,14 @@ def _preflight_dep_check(cfg):
         "scala": "scalable-cats-force",              # Alternate Scala provider
     }
     
+    # Java class file version mapping
+    # Used to detect mods compiled for newer Java than server is running
+    JAVA_CLASS_VERSIONS = {
+        52: "8", 53: "9", 54: "10", 55: "11", 56: "12", 57: "13", 58: "14",
+        59: "15", 60: "16", 61: "17", 62: "18", 63: "19", 64: "20",
+        65: "21", 66: "22", 67: "23", 68: "24", 69: "25",
+    }
+    
     # Loader-incompatible deps - skip these to avoid downloading wrong mods
     # NeoForge/Forge server should not try to fetch Fabric deps, and vice versa
     # Using pattern matching to catch all fabric-* variants
@@ -3411,6 +3638,43 @@ def _preflight_dep_check(cfg):
             continue
         if dep_id not in installed_mod_ids:
             missing[dep_id] = requesters
+    
+    # ── Phase 2.4: Check Java class file versions ──
+    # Detect mods compiled for newer Java than server is running
+    java_version = _get_java_version()
+    java_major = int(java_version.split('.')[0]) if java_version else 21
+    max_class_version = java_major + 44  # Java 8 = 52, Java 21 = 65, Java 22 = 66
+    
+    java_incompatible = []  # Mods that need newer Java
+    
+    for scan_dir in dirs_to_scan:
+        for fn in os.listdir(scan_dir):
+            if not fn.endswith('.jar') or not os.path.isfile(os.path.join(scan_dir, fn)):
+                continue
+            jar_path = os.path.join(scan_dir, fn)
+            try:
+                with zipfile.ZipFile(jar_path, 'r') as zf:
+                    # Check a few class files for version
+                    for entry in zf.namelist():
+                        if entry.endswith('.class'):
+                            data = zf.read(entry)
+                            if len(data) >= 8:
+                                # Class file version is bytes 6-7 (big-endian)
+                                minor = (data[4] << 8) | data[5]
+                                major = (data[6] << 8) | data[7]
+                                if major > max_class_version:
+                                    needed_java = JAVA_CLASS_VERSIONS.get(major, f"unknown({major})")
+                                    java_incompatible.append((fn, needed_java))
+                                    log_event("PREFLIGHT", f"Java version mismatch: {fn} needs Java {needed_java} (server has Java {java_version})")
+                                break  # Only check first class file
+            except Exception:
+                continue
+    
+    # Quarantine mods that need newer Java
+    for fn, needed_java in java_incompatible:
+        quarantined = _quarantine_mod(mods_dir, fn, f"Requires Java {needed_java} (server has Java {java_version})")
+        if quarantined:
+            result["quarantined"].append(fn)
     
     # ── Phase 2.5: Re-evaluate quarantined mods ──
     # Mods quarantined for "missing dep" or "Mod conflict (mixin)" may be safe to

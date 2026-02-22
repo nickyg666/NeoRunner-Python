@@ -5,7 +5,7 @@ As always, big shout-out to
 # To my son, Lorenzo, who is the whole reason I would ever touch minecraft in the first place, let alone get this involved with it.
 
 ## NeoRunner-Python
-Built for a linux host, this (vibe-coded) program will download/run the latest neoforged server (others supported as well) and try to sync mods it finds into client side to sidestep modloader swaps and client/server upgrades. I am a huge fan of the automodpack mod for what it's worth, and this is nowhere near complete. it does kind of work, but xvfb is not required, some deps may be missing. some documentation may be erroneous, it is mostly ai driven, and I largely did not check it for accuracy. I typically focus on good docs after everything works and I'm in a feature freeze, but I keep spiraling past any stopping point. the project is rather unfinished and a mess of things at this point. 
+Built for a linux host, this (vibe-coded) program will download/run the latest neoforged server (others supported/untested/experimental) and try to sync mods it finds into client side to sidestep modloader swaps and client/server upgrades. I am a huge fan of the automodpack mod for what it's worth, and this is nowhere near complete. it does kind of work but some deps may be missing. some documentation may be erroneous, it is mostly ai driven, and I did not check it extremely thoroughly for accuracy. I typically focus on good docs after everything works and I'm in a feature freeze, but I keep spiraling past any stopping point. the project is now fully working for neoforge/mc 1.21.11.
 - Added EC2/amazonlinux compatibility
 - fixed required dependency fetching for mods
 - remove dead things that don't make sense anymore / from other projects

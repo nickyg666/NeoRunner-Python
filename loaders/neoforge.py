@@ -198,40 +198,58 @@ class NeoForgeLoader(LoaderBase):
             r"classnotfoundexception:\s+net\.minecraft\.client\.",
             r"noclassdeffounderror:\s+com/mojang/blaze3d/",
             r"classnotfoundexception:\s+com\.mojang\.blaze3d\.",
+            r"noclassdeffounderror:\s+net/minecraft/client/sounds/",
         ]
+        
+        all_client_crashes = []
         for cp in client_class_patterns:
-            client_match = re.search(cp, log_lower)
-            if client_match:
-                culprit_mod = None
-                culprit_file = None
-                # Look for "Mod file: /path/to/mods/X.jar" near the error
-                file_match = re.search(r"mod\s+file:\s+\S*mods/(\S+\.jar)", log_lower)
-                if file_match:
-                    culprit_file = file_match.group(1)
-                    culprit_mod = re.sub(r'[-_]?\d.*$', '', culprit_file.replace('.jar', '')).lower()
-                # Also try "Failure message: ModName (modid)"
-                fail_match = re.search(r"failure\s+message:\s+\S+\s+\((" + MOD_ID + r")\)\s+has\s+failed", log_lower)
-                if fail_match:
-                    culprit_mod = fail_match.group(1)
-                # Try to extract from mixin error: "mavm.mixins.json:AxolotlMixin from mod mavm"
-                mixin_mod_match = re.search(r"from\s+mod\s+(" + MOD_ID + r")", log_text)
-                if not culprit_mod and mixin_mod_match:
-                    culprit_mod = mixin_mod_match.group(1).lower()
-                # Try to find the JAR file for this mod
-                if culprit_mod and not culprit_file:
-                    jar_pattern = rf"mods/([^\s/]*{re.escape(culprit_mod)}[^\s/]*\.jar)"
-                    jar_match = re.search(jar_pattern, log_lower)
-                    if jar_match:
-                        culprit_file = jar_match.group(1)
+            if re.search(cp, log_lower):
+                # Find ALL mods that failed with client class errors
+                # Pattern: "Failed to create mod instance. ModID: X"
+                fail_patterns = [
+                    r"failed\s+to\s+create\s+mod\s+instance\.\s*modid:\s*(" + MOD_ID + r")",
+                    r"modid:\s*(" + MOD_ID + r")[^\n]*noclassdeffounderror",
+                    r"\[(" + MOD_ID + r")\][^\n]*failed",
+                ]
+                for fp in fail_patterns:
+                    for match in re.finditer(fp, log_lower):
+                        mod_id = match.group(1)
+                        if mod_id not in all_client_crashes:
+                            all_client_crashes.append(mod_id)
                 
-                return {
-                    "type": "mod_error",
-                    "subtype": "client_only",
-                    "culprit": culprit_mod,
-                    "culprits": [culprit_mod] if culprit_mod else [],
-                    "message": f"Client-only mod crash: {culprit_mod or 'unknown'} references client classes not available on server",
-                    "bad_file": culprit_file
-                }
+                # Also try extracting from "Mod file: X.jar"
+                for match in re.finditer(r"mod\s+file:\s+\S*mods/(\S+\.jar)", log_lower):
+                    culprit_file = match.group(1)
+                    culprit_mod = re.sub(r'[-_]?\d.*$', '', culprit_file.replace('.jar', '')).lower()
+                    if culprit_mod and culprit_mod not in all_client_crashes:
+                        all_client_crashes.append(culprit_mod)
+                
+                # Also try from mod X patterns
+                for match in re.finditer(r"from\s+mod\s+(" + MOD_ID + r")", log_text):
+                    mod_id = match.group(1).lower()
+                    if mod_id not in all_client_crashes:
+                        all_client_crashes.append(mod_id)
+                
+                break
+        
+        if all_client_crashes:
+            # Get the jar files for all culprits
+            bad_files = []
+            for culprit_mod in all_client_crashes:
+                jar_pattern = rf"mods/([^\s/]*{re.escape(culprit_mod)}[^\s/]*\.jar)"
+                jar_match = re.search(jar_pattern, log_lower)
+                if jar_match:
+                    bad_files.append(jar_match.group(1))
+            
+            return {
+                "type": "mod_error",
+                "subtype": "client_only",
+                "culprit": all_client_crashes[0] if all_client_crashes else None,
+                "culprits": all_client_crashes,
+                "message": f"Client-only mod crash: {', '.join(all_client_crashes)} reference client classes not available on server",
+                "bad_file": bad_files[0] if bad_files else None,
+                "bad_files": bad_files
+            }
         
         # ---- 1. MISSING MOD DEPENDENCY ----
         missing_patterns = [

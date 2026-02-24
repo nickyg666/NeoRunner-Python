@@ -594,21 +594,12 @@
             </p>
         </div>
         
-        <!-- Quarantine Banner (hidden by default, shown when mods are quarantined) -->
-        <div id="quarantine-banner" style="display:none; background:#fff3cd; border:1px solid #ffc107; border-radius:8px; padding:16px; margin-bottom:20px;">
-            <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
-                <span style="font-size:20px;">&#x26A0;</span>
-                <strong style="color:#856404; font-size:15px;">Quarantined Mods</strong>
-                <span id="quarantine-count" style="background:#ffc107; color:#856404; padding:2px 8px; border-radius:10px; font-size:12px; font-weight:bold;">0</span>
-            </div>
-            <p style="color:#856404; font-size:13px; margin-bottom:10px;">These mods were automatically removed because they caused crashes. You can restore them if the issue has been resolved.</p>
-            <div id="quarantine-list"></div>
-        </div>
-        
         <!-- Tabbed Section -->
         <div class="card">
             <div class="tabs">
                 <button class="tab-button active" onclick="switchTab('mods')">📦 Mods</button>
+                <button class="tab-button" onclick="switchTab('quarantine')">🔒 Quarantine</button>
+                <button class="tab-button" onclick="switchTab('blacklist')">🚫 Blacklist</button>
                 <button class="tab-button" onclick="switchTab('config')">⚙️ Configuration</button>
                 <button class="tab-button" onclick="switchTab('events')">🔔 Events</button>
                 <button class="tab-button" onclick="switchTab('logs')">📝 Logs</button>
@@ -620,10 +611,63 @@
                 <div style="margin-bottom: 15px;">
                     <button class="success" onclick="openModSelector()" style="margin-right: 8px;">+ Add Mods</button>
                     <button onclick="broadcastModUpdate()" style="background: #e67e22; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;" title="Send clickable download link to all online players via in-game chat">Notify Players</button>
+                    <button onclick="quarantineAllClientMods()" style="background: #FF9800; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-left: 8px;" title="Move all client-only mods from root to clientonly folder (clients can still download)">Sort Client Mods</button>
+                    <button onclick="quarantineAllClientMods()" style="background: #FF9800; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-left: 8px;" title="Quarantine all mods with client-side functionality (render methods, client classes, etc.)">Quarantine Client Mods</button>
+                    <button onclick="quarantineAllMods()" style="background: #e74c3c; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-left: 8px;" title="Quarantine all mods that cause crashes (client-only mods, dependency conflicts, etc.)">Quarantine All</button>
+                    <button onclick="rescanMods()" style="background: #9b59b6; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-left: 8px;" title="Scan all mods for corrupt/incomplete files">🔍 Rescan</button>
                 </div>
                 <div id="mods-content">
                     <div class="loading"></div> Loading mods...
                 </div>
+            </div>
+            
+            <!-- Quarantine Tab -->
+            <div id="quarantine" class="tab-content">
+                <h2>🔒 Quarantined Mods</h2>
+                <p style="color:#888; font-size:13px; margin-bottom:15px;">Mods that were automatically removed due to crashes or compatibility issues. Restore them if the issue has been resolved.</p>
+                <div style="margin-bottom: 15px;">
+                    <button onclick="restoreAllQuarantined()" style="background: #27ae60; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-right: 8px;" title="Restore all quarantined mods to their original folders">Restore All</button>
+                    <button onclick="quarantineAllClientMods()" style="background: #FF9800; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;" title="Move all client-only mods from root to clientonly folder">Sort Client Mods</button>
+                    <button onclick="quarantineAllClientMods()" style="background: #FF9800; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-left: 8px;" title="Quarantine all mods with client-side functionality (render methods, client classes, etc.)">Quarantine Client Mods</button>
+                    <button onclick="quarantineAllMods()" style="background: #e74c3c; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-left: 8px;" title="Quarantine all mods that cause crashes (client-only mods, dependency conflicts, etc.)">Quarantine All</button>
+                </div>
+                <div id="quarantine-tab-content">
+                    <div class="loading"></div> Loading...
+                </div>
+            </div>
+            
+            <!-- Blacklist Tab -->
+            <div id="blacklist" class="tab-content">
+                <h2>🚫 Blacklist & Whitelist</h2>
+                <p style="color:#888; font-size:13px; margin-bottom:15px;">Manage mods that are automatically quarantined. Blacklisted mods are always blocked, whitelisted mods are never auto-quarantined.</p>
+                
+                <h3 style="color:#e74c3c; border-bottom:1px solid #333; padding-bottom:8px;">Blacklist</h3>
+                <p style="color:#888; font-size:12px;">Mods in this list will be automatically quarantined on startup or when detected.</p>
+                <div style="display:flex; gap:8px; margin-bottom:10px;">
+                    <input type="text" id="blacklist-add-input" placeholder="mod_id (e.g. emf) or regex pattern (e.g. 'decocraft.*1\.21\.1$')" style="flex:1; padding:8px; border-radius:4px; border:1px solid #555; background:#2a2a2a; color:#fff;">
+                    <button onclick="addToBlacklist()" style="background: #e74c3c; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Add</button>
+                </div>
+                <div style="display:flex; gap:8px; margin-bottom:10px;">
+                    <input type="text" id="blacklist-pattern-add-input" placeholder="regex pattern (e.g. '.*1\.21\.1$')" style="flex:1; padding:8px; border-radius:4px; border:1px solid #555; background:#2a2a2a; color:#fff;">
+                    <button onclick="addToBlacklistPattern()" style="background: #e74c3c; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Add Pattern</button>
+                </div>
+                <div id="blacklist-content" style="margin-bottom:20px;"></div>
+                
+                <h3 style="color:#ff9800; border-bottom:1px solid #333; padding-bottom:8px;">Blacklist Patterns</h3>
+                <p style="color:#888; font-size:12px;">Regex patterns to automatically blacklist mods matching version patterns. Use with caution!</p>
+                <div style="display:flex; gap:8px; margin-bottom:10px;">
+                    <input type="text" id="blacklist-pattern-remove-input" placeholder="pattern to remove" style="flex:1; padding:8px; border-radius:4px; border:1px solid #555; background:#2a2a2a; color:#fff;">
+                    <button onclick="removeFromBlacklistPattern()" style="background: #ff9800; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Remove Pattern</button>
+                </div>
+                <div id="blacklist-patterns-content" style="margin-bottom:20px;"></div>
+                
+                <h3 style="color:#27ae60; border-bottom:1px solid #333; padding-bottom:8px;">Whitelist</h3>
+                <p style="color:#888; font-size:12px;">Mods in this list will never be auto-quarantined (overrides blacklist).</p>
+                <div style="display:flex; gap:8px; margin-bottom:10px;">
+                    <input type="text" id="whitelist-add-input" placeholder="mod_id (e.g. sodium)" style="flex:1; padding:8px; border-radius:4px; border:1px solid #555; background:#2a2a2a; color:#fff;">
+                    <button onclick="addToWhitelist()" style="background: #27ae60; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Add</button>
+                </div>
+                <div id="whitelist-content"></div>
             </div>
             
             <!-- Configuration Tab -->
@@ -657,6 +701,18 @@
                     <label>Curator Limit (per source)</label>
                     <input type="number" id="cfg-curator-limit" min="10" max="200" value="100" step="10">
                     <small>Max mods to fetch from each source (10-200)</small>
+                </div>
+                
+                <h3 style="color:#e74c3c;border-bottom:1px solid #333;padding-bottom:8px;">Server Recovery</h3>
+                <div class="form-group">
+                    <label>Max Restart Attempts</label>
+                    <input type="number" id="cfg-max-restarts" min="1" max="100" value="25">
+                    <small>How many times to auto-restart after crashes before giving up (1-100)</small>
+                </div>
+                <div class="form-group">
+                    <label>Max Crashes Before Quarantine</label>
+                    <input type="number" id="cfg-max-crashes" min="1" max="10" value="3">
+                    <small>How many times a mod can crash before being auto-quarantined (1-10)</small>
                 </div>
                 
                 <h3 style="color:#FF9800;border-bottom:1px solid #333;padding-bottom:8px;">Broadcasts &amp; Notifications</h3>
@@ -898,6 +954,7 @@
             loadConfig();
             refreshLogs();
             loadQuarantine();
+            loadBlacklist();
             loadEvents();
 
             // First-visit check: show mod selector if never loaded AND config allows it
@@ -1213,7 +1270,7 @@
         function quarantineMod(modName) {
             if (!confirm(`Quarantine mod: ${modName}?\n\nThis will move the mod to the quarantine folder. You can restore it later from the Quarantine tab.`)) return;
             
-            fetch(`/api/mods/${modName}/quarantine`, { method: 'POST' })
+            fetch(`/api/mods/${encodeURIComponent(modName)}/quarantine`, { method: 'POST' })
                 .then(r => r.json())
                 .then(data => {
                     if (data.success) {
@@ -1223,6 +1280,53 @@
                     } else {
                         showAlert(`Error: ${data.error}`, 'error');
                     }
+                })
+                .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+        
+        function quarantineAllClientMods() {
+            if (!confirm('Quarantine all mods with client-side functionality?\n\nThis will quarantine mods that contain render methods, client classes, or other client-side functionality.\n\nThese mods will be moved to quarantine/ and will not load on the server.')) return;
+            
+            const action = prompt('Select action:\n1 - Quarantine client-only mods (move to clientonly/)\n2 - Quarantine client-side mods (move to quarantine/)\n\nEnter 1 or 2:');
+            
+            if (action === '') return;
+            
+            const endpoint = action === ''1' ? '/api/quarantine/client-mods' : '/api/quarantine/client-side-mods';
+            const actionName = action === ''1' ? 'Sort Client Mods' : 'Quarantine Client Mods';
+            
+            fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            })
+            .then(r => r.json())
+            .then(result => {
+                if (result.success) {
+                    showAlert(`${actionName} completed: ${result.quarantined || result.moved} mods processed`, 'success');
+                    loadMods();
+                } else {
+                    showAlert(`Error: ${result.error}`, 'error');
+                }
+            })
+            .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+
+        function quarantineAllMods() {
+            if (!confirm('Quarantine all mods that cause crashes?\n\nThis will quarantine client-only mods, dependency conflicts, and other problematic mods.')) return;
+            fetch('/api/quarantine/all', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            })
+            .then(r => r.json())
+            .then(result => {
+                if (result.success) {
+                    showAlert(result.message, 'success');
+                    loadMods();
+                } else {
+                    showAlert(`Error: ${result.error}`, 'error');
+                }
+            })
+            .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
                 })
                 .catch(err => showAlert(`Error: ${err}`, 'error'));
         }
@@ -1245,12 +1349,15 @@
                        const port = cfg.http_port || '8000';
                        document.getElementById('powershell-oneliner').textContent = `iwr http://${ip}:${port}/download/install-mods.ps1 | iex`;
                       // Network
-                      document.getElementById('cfg-hostname').value = cfg.hostname || '';
-                     document.getElementById('mc-version').value = cfg.mc_version || '1.21.11';
-                     // Curator
-                     document.getElementById('cfg-curator-sort').value = cfg.curator_sort || 'downloads';
-                     document.getElementById('cfg-curator-limit').value = cfg.curator_limit || 100;
-                     // Broadcasts
+                       document.getElementById('cfg-hostname').value = cfg.hostname || '';
+                      document.getElementById('mc-version').value = cfg.mc_version || '1.21.11';
+                      // Curator
+                      document.getElementById('cfg-curator-sort').value = cfg.curator_sort || 'downloads';
+                      document.getElementById('cfg-curator-limit').value = cfg.curator_limit || 100;
+                      // Server Recovery
+                      document.getElementById('cfg-max-restarts').value = cfg.max_restart_attempts || 25;
+                      document.getElementById('cfg-max-crashes').value = cfg.max_crashes_before_quarantine || 3;
+                      // Broadcasts
                      document.getElementById('cfg-broadcast-enabled').checked = cfg.broadcast_enabled !== false;
                      document.getElementById('cfg-broadcast-auto').checked = cfg.broadcast_auto_on_install !== false;
                      // Nag screens
@@ -1277,6 +1384,9 @@
                 // Curator
                 curator_sort: document.getElementById('cfg-curator-sort').value,
                 curator_limit: parseInt(document.getElementById('cfg-curator-limit').value),
+                // Server Recovery
+                max_restart_attempts: parseInt(document.getElementById('cfg-max-restarts').value) || 25,
+                max_crashes_before_quarantine: parseInt(document.getElementById('cfg-max-crashes').value) || 3,
                 // Broadcasts
                 broadcast_enabled: document.getElementById('cfg-broadcast-enabled').checked,
                 broadcast_auto_on_install: document.getElementById('cfg-broadcast-auto').checked,
@@ -1409,7 +1519,7 @@
                 fetch('/api/server/start', { method: 'POST' })
                     .then(r => r.json())
                     .then(result => {
-                        showAlert(result.message, result.success ? 'success' : 'error');
+                        showAlert(result.message || result.error || 'Unknown response', result.success ? 'success' : 'error');
                         setTimeout(refreshStatus, 2000);
                     })
                     .catch(err => showAlert(`Error: ${err}`, 'error'));
@@ -1421,7 +1531,7 @@
                 fetch('/api/server/stop', { method: 'POST' })
                     .then(r => r.json())
                     .then(result => {
-                        showAlert(result.message, result.success ? 'success' : 'error');
+                        showAlert(result.message || result.error || 'Unknown response', result.success ? 'success' : 'error');
                         setTimeout(refreshStatus, 2000);
                     })
                     .catch(err => showAlert(`Error: ${err}`, 'error'));
@@ -1658,24 +1768,38 @@
                     const banner = document.getElementById('quarantine-banner');
                     const list = document.getElementById('quarantine-list');
                     const count = document.getElementById('quarantine-count');
-                    if (!data.mods || data.mods.length === 0) {
+                    const tabContent = document.getElementById('quarantine-tab-content');
+                    
+                    const hasMods = data.mods && data.mods.length > 0;
+                    
+                    // Banner (hidden by default)
+                    if (hasMods) {
+                        banner.style.display = 'block';
+                        count.textContent = data.mods.length;
+                    } else {
                         banner.style.display = 'none';
-                        return;
                     }
-                    banner.style.display = 'block';
-                    count.textContent = data.mods.length;
+                    
+                    // Tab content (always visible)
                     let html = '';
-                    data.mods.forEach(m => {
-                        html += `<div class="quarantine-item">
-                            <div class="q-info">
-                                <div class="q-name">${m.filename}</div>
-                                <div class="q-reason">${m.reason || 'Unknown reason'} &mdash; ${m.date || ''}</div>
-                            </div>
-                            <button class="q-restore" onclick="restoreQuarantined('${m.filename}')">Restore</button>
-                            <button class="q-delete" onclick="deleteQuarantined('${m.filename}')">Delete</button>
-                        </div>`;
-                    });
-                    list.innerHTML = html;
+                    if (!hasMods) {
+                        html = '<div style="color:#888; text-align:center; padding:40px;">No quarantined mods</div>';
+                    } else {
+                        data.mods.forEach(m => {
+                            const encFile = encodeURIComponent(m.filename);
+                            html += `<div class="quarantine-item">
+                                <div class="q-info">
+                                    <div class="q-name">${m.filename.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+                                    <div class="q-reason">${(m.reason || 'Unknown reason').replace(/</g,'&lt;').replace(/>/g,'&gt;')} &mdash; ${m.date || ''}</div>
+                                </div>
+                                <button class="q-restore" onclick="restoreQuarantined('${encFile}')">Restore</button>
+                                <button class="q-delete" onclick="deleteQuarantined('${encFile}')">Delete</button>
+                            </div>`;
+                        });
+                    }
+                    
+                    if (list) list.innerHTML = html;
+                    if (tabContent) tabContent.innerHTML = html;
                 })
                 .catch(() => {});
         }
@@ -1685,7 +1809,7 @@
             fetch('/api/quarantine/restore', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ filename })
+                body: JSON.stringify({ filename: decodeURIComponent(filename) })
             })
             .then(r => r.json())
             .then(result => {
@@ -1705,13 +1829,236 @@
             fetch('/api/quarantine/delete', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ filename })
+                body: JSON.stringify({ filename: decodeURIComponent(filename) })
             })
             .then(r => r.json())
             .then(result => {
                 if (result.success) {
                     showAlert(`Deleted ${filename}`, 'success');
                     loadQuarantine();
+                } else {
+                    showAlert(`Error: ${result.error}`, 'error');
+                }
+            })
+            .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+
+        function restoreAllQuarantined() {
+            if (!confirm('Restore ALL quarantined mods?\n\nThis will move all mods from quarantine back to their original folders. Server will restart in 30s.')) return;
+            fetch('/api/quarantine/restore-all', { method: 'POST' })
+                .then(r => r.json())
+                .then(result => {
+                    if (result.success) {
+                        showAlert(result.message, 'success');
+                        loadQuarantine();
+                    } else {
+                        showAlert(`Error: ${result.error}`, 'error');
+                    }
+                })
+                .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+
+        function rescanMods() {
+            if (!confirm('Rescan all mods for corrupt/incomplete files?\n\nCorrupt mods will be moved to quarantine.')) return;
+            fetch('/api/mods/rescan', { method: 'POST' })
+                .then(r => r.json())
+                .then(result => {
+                    if (result.success) {
+                        showAlert(result.message, 'success');
+                        loadQuarantine();
+                    } else {
+                        showAlert(`Error: ${result.error}`, 'error');
+                    }
+                })
+                .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+
+        // ---- Blacklist/Whitelist Management ----
+        function loadBlacklist() {
+            fetch('/api/blacklist')
+                .then(r => r.json())
+                .then(data => {
+                    // Blacklist
+                    const blacklistEl = document.getElementById('blacklist-content');
+                    if (data.blacklist && data.blacklist.length > 0) {
+                        let html = '<div style="display:flex; flex-wrap:wrap; gap:8px;">';
+                        data.blacklist.forEach(modId => {
+                            const isUser = (data.user_blacklist || []).includes(modId);
+                            html += `<div style="background:#3a2a2a; border:1px solid #e74c3c; border-radius:4px; padding:6px 10px; display:flex; align-items:center; gap:8px;">
+                                <span>${modId}</span>
+                                ${isUser ? `<button onclick="removeFromBlacklist('${modId}')" style="background:none; border:none; color:#e74c3c; cursor:pointer; font-size:14px;">&times;</button>` : '<span style="color:#888; font-size:10px;">(default)</span>'}
+                            </div>`;
+                        });
+                        html += '</div>';
+                        blacklistEl.innerHTML = html;
+                    } else {
+                        blacklistEl.innerHTML = '<div style="color:#888;">No mods blacklisted</div>';
+                    }
+                    
+                    // Whitelist
+                    const whitelistEl = document.getElementById('whitelist-content');
+                    if (data.whitelist && data.whitelist.length > 0) {
+                        let html = '<div style="display:flex; flex-wrap:wrap; gap:8px;">';
+                        data.whitelist.forEach(modId => {
+                            const isUser = (data.user_whitelist || []).includes(modId);
+                            html += `<div style="background:#2a3a2a; border:1px solid #27ae60; border-radius:4px; padding:6px 10px; display:flex; align-items:center; gap:8px;">
+                                <span>${modId}</span>
+                                ${isUser ? `<button onclick="removeFromWhitelist('${modId}')" style="background:none; border:none; color:#27ae60; cursor:pointer; font-size:14px;">&times;</button>` : '<span style="color:#888; font-size:10px;">(default)</span>'}
+                            </div>`;
+                        });
+                        html += '</div>';
+                        whitelistEl.innerHTML = html;
+                    } else {
+                        whitelistEl.innerHTML = '<div style="color:#888;">No mods whitelisted</div>';
+                    }
+                    
+                    // Blacklist Patterns
+                    const blacklistPatternsEl = document.getElementById('blacklist-patterns-content');
+                    if (data.blacklist_patterns && data.blacklist_patterns.length > 0) {
+                        let html = '<div style="display:flex; flex-wrap:wrap; gap:8px;">';
+                        data.blacklist_patterns.forEach(pattern => {
+                            html += `<div style="background:#2a1a1a; border:1px solid #ff9800; border-radius:4px; padding:6px 10px; display:flex; align-items:center; gap:8px;">
+                                <span>${pattern}</span>
+                                <button onclick="removeFromBlacklistPattern('${pattern}')" style="background:none; border:none; color:#ff9800; cursor:pointer; font-size:14px;">&times;</button>
+                            </div>`;
+                        });
+                        html += '</div>';
+                        blacklistPatternsEl.innerHTML = html;
+                    } else {
+                        blacklistPatternsEl.innerHTML = '<div style="color:#888;">No blacklist patterns</div>';
+                    }
+                })
+                .catch(err => console.error('Error loading blacklist:', err));
+        }
+
+        function addToBlacklistPattern() {
+            const input = document.getElementById('blacklist-pattern-add-input');
+            const pattern = input.value.trim();
+            if (!pattern) return;
+            
+            fetch('/api/blacklist/patterns/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pattern: pattern })
+            })
+            .then(r => r.json())
+            .then(result => {
+                if (result.success) {
+                    showAlert(result.message, 'success');
+                    input.value = '';
+                    loadBlacklist();
+                } else {
+                    showAlert(`Error: ${result.error}`, 'error');
+                }
+            })
+            .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+
+        function removeFromBlacklistPattern() {
+            const input = document.getElementById('blacklist-pattern-remove-input');
+            const pattern = input.value.trim();
+            if (!pattern) return;
+            
+            fetch('/api/blacklist/patterns/remove', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pattern: pattern })
+            })
+            .then(r => r.json())
+            .then(result => {
+                if (result.success) {
+                    showAlert(result.message, 'success');
+                    input.value = '';
+                    loadBlacklist();
+                } else {
+                    showAlert(`Error: ${result.error}`, 'error');
+                }
+            })
+            .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+
+        function checkBlacklistPattern() {
+            const input = document.getElementById('blacklist-add-input');
+            const modId = input.value.trim().toLowerCase();
+            if (!modId) return;
+            
+            fetch('/api/blacklist/check', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mod_id: modId })
+            })
+            .then(r => r.json())
+            .then(result => {
+                if (result.success) {
+                    if (result.blacklisted) {
+                        showAlert(`Mod is blacklisted: ${result.reason}`, 'error');
+                        if (result.required_version) {
+                            showAlert(`Required MC version: ${result.required_version}`, 'warning');
+                        }
+                    } else {
+                        showAlert(`Mod is not blacklisted`, 'success');
+                    }
+                } else {
+                    showAlert(`Error: ${result.error}`, 'error');
+                }
+            })
+            .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+            })
+            .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+
+        function removeFromBlacklist(modId) {
+            fetch('/api/blacklist/remove', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mod_id: modId })
+            })
+            .then(r => r.json())
+            .then(result => {
+                if (result.success) {
+                    showAlert(result.message, 'success');
+                    loadBlacklist();
+                } else {
+                    showAlert(`Error: ${result.error}`, 'error');
+                }
+            })
+            .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+
+        function addToWhitelist() {
+            const input = document.getElementById('whitelist-add-input');
+            const modId = input.value.trim().toLowerCase();
+            if (!modId) return;
+            fetch('/api/whitelist/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mod_id: modId })
+            })
+            .then(r => r.json())
+            .then(result => {
+                if (result.success) {
+                    showAlert(result.message, 'success');
+                    input.value = '';
+                    loadBlacklist();
+                } else {
+                    showAlert(`Error: ${result.error}`, 'error');
+                }
+            })
+            .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+
+        function removeFromWhitelist(modId) {
+            fetch('/api/whitelist/remove', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mod_id: modId })
+            })
+            .then(r => r.json())
+            .then(result => {
+                if (result.success) {
+                    showAlert(result.message, 'success');
+                    loadBlacklist();
                 } else {
                     showAlert(`Error: ${result.error}`, 'error');
                 }

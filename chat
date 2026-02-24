@@ -1,0 +1,43 @@
+
+# Chat Log - Sun Feb 22 10:14:38 AM EST 2026
+# NeoRunner Development Session
+
+
+
+## Session: Mod Sorting & WebUI Fixes
+
+### User Issues:
+1. Case-insensitive sort for mods in webui (A-Z and a-z together)
+2. Log chats to ~/chat file  
+3. Can't quarantine all client mods - unescaped char issue
+4. "both" mods with clientonly deps creating race condition
+
+### Fixes Applied:
+
+**1. WebUI Unescaped Character Bug (dashboard.html)**
+- Fixed `quarantineMod()` to use `encodeURIComponent(modName)` for URL
+- Fixed `restoreQuarantined()` and `deleteQuarantined()` to handle encoded filenames
+- Fixed quarantine list rendering to escape HTML and encode onclick params
+
+**2. "both" Mods with Clientonly Deps Race Condition (run.py)**
+- Updated `sort_mods_by_type()` Phase 3 to check if a mod (even with side=None) 
+  is depended on by a "both" or "server" mod before moving to clientonly/
+- Updated Phase 4 to also restore mods with side=None that are needed by server mods
+- This prevents the race condition where a dep gets moved to clientonly/ but
+  a "both" mod in mods/ needs it, causing crashes
+
+**3. Removed orphaned comment at end of run.py**
+
+### Technical Details:
+
+The `_parse_mod_manifest()` function already extracts dependencies from:
+- NeoForge/Forge: `[[dependencies.modid]]` sections in mods.toml
+- Fabric: `depends` section in fabric.mod.json
+
+The dependency graph is built as: `depends_on[dep_id] = set(mod_ids_that_depend_on_it)`
+
+When deciding to move a mod to clientonly/, we now check:
+- Is this mod a dependency of any "server", "both", or unknown-side mod?
+- If yes, keep it in root mods/ directory
+
+---

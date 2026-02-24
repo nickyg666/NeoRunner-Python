@@ -1,0 +1,754 @@
+    1  cd /etc/nfs.conf.d/
+    2  ls
+    3  cd ..
+    4  ls
+    5  sudo nano nfs.conf
+    6  mkdir /srv
+    7  cd ..
+    8  ls
+    9  cd srv
+   10  ls
+   11  mkdir nas das
+   12  sudo mkdir nas das
+   13  ls
+   14  sudo nano /etc/fstab
+   15  sudo nano ~/.bashrc
+   16  sudo systemctl daemon-reload
+   17  sudo mount -a
+   18  ls
+   19  ls das/
+   20  cd /srv/das
+   21  cd 4tbdas/
+   22  ls
+   23  ll
+   24  touch file
+   25  rm file
+   26  cd ..
+   27  sudo nano /etc/fstab
+   28  sudo mount -avvv
+   29  sudo mount -a
+   30  reload
+   31  exit
+   32  sudo apt install tree
+   33  nslookup google.com
+   34  ifconfig
+   35  sudo resolvectl status
+   36  sudo nano /etc/systemd/resolved.conf
+   37  restart resolved
+   38  reload
+   39  restart systemd-resolved
+   40  nslookup google.com
+   41  sudo apt install tree
+   42  tree /srv/
+   43  ls /srv/
+   44  ls /srv/nas
+   45  ls /srv/das
+   46  sudo nano /etc/samba/smb.conf
+   47  restart nmbd smbd
+   48  cd /srv/nas
+   49  ll
+   50  cat /etc/fstab
+   51  sudo apt install sshfs
+   52  ssh-keygen -t ed25519
+   53  cat ~\.ssh/id_ed25519.pub
+   54  cat ~/.ssh/id_ed25519.pub
+   55  sshfs nas@192.168.0.11:/mnt/ /srv/nas
+   56  sudo sshfs nas@192.168.0.11:/mnt/ /srv/nas
+   57  ls
+   58  cd ..
+   59  ll
+   60  sudo umount /srv/nas
+   61  ls
+   62  ls nas
+   63  sudo umount -l /srv/nas
+   64  ls nas
+   65  sudo sshfs nas@192.168.0.11:/mnt/ /srv/nas
+   66  ls nas
+   67  ll
+   68  sudo sshfs nas@192.168.0.11:/mnt/ /srv/nas -o allow_other,idmap=user,IdentityFile=/home/services/.ssh/id_ed25519
+   69  ls /nas
+   70  ls nas
+   71  sudo sshfs das@192.168.0.9:/mnt/ /srv/das -o allow_other,idmap=user,IdentityFile=/home/services/.ssh/id_ed25519
+   72  ls das
+   73  ls nas
+   74  sudo apt install ddclient
+   75  sudo nano /etc/ddclient.conf
+   76  restart ddclient
+   77  curl icanhazip.com
+   78  status ddclient
+   79  curl -s https://dynamicdns.park-your-domain.com/getip
+   80  sudo nano /etc/ddclient.conf
+   81  status ddclient
+   82  nslookup google.com
+   83  host 192.168.0.1
+   84  host 192.168.0.18
+   85  host 192.168.0.19
+   86  host 192.168.0.11
+   87  host 192.168.0.9
+   88  sudo apt update
+   89  nslookup dynamicdns.park-your-domain.com
+   90  restart ddclient
+   91  status ddclient
+   92  nslookup nu.ubu.lol
+   93  status ddclient
+   94  time
+   95  uptime
+   96  sudo timedatectl set-ntp true
+   97  uptime
+   98  timedatectl status
+   99  timedatectl list-timezones
+  100  sudo timedatectl set-timezone America/New_York
+  101  timedatectl status
+  102  uptime
+  103  restart ddclient
+  104  status ddclient
+  105  ping dynamicdns.park-your-domain.com
+  106  sudo resolvectl status
+  107  sudo nano /etc/systemd/resolved.conf
+  108  sudo resolvectl status
+  109  sudo resolvectl restart
+  110  reload
+  111  sudo systemctl restart systemd-resolved
+  112  sudo resolvectl status
+  113  restart ddclient
+  114  status ddclient
+  115  bash <(curl -fsS https://packages.openvpn.net/as/install.sh) --yes
+  116  sudo bash <(curl -fsS https://packages.openvpn.net/as/install.sh) --yes
+  117  bash <(sudo curl -fsS https://packages.openvpn.net/as/install.sh) --yes
+  118  curl -fsS https://packages.openvpn.net/as/install.sh
+  119  cd ~
+  120  nano ovpnas.sh
+  121  chmod +x ovpnas.sh
+  122  sudo ovpnas.sh --yes
+  123  sudo .\ovpnas.sh --yes
+  124  sudo ./ovpnas.sh --yes
+  125  curl -fsS https://packages.openvpn.net/as/install.sh | sudo bash
+  126  cd /usr/local/openvpn_as/scripts
+  127  sudo ./sacli --user "openvpn" --key "prop_superuser" --value "true" UserPropPut
+  128  sudo 
+  129  ./sacli --user "openvpn" --key "user_auth_type" --value "local" UserPropPut
+  130  sudo ./sacli --user "openvpn" --key "user_auth_type" --value "local" UserPropPut
+  131  sudo ./sacli --user "openvpn" --new_pass 'GoKB1aNZ!!' SetLocalPassword
+  132  htop
+  133  uptime
+  134  cat /etc/fstab
+  135  sudo mount -avvv
+  136  cat /etc/ddclient
+  137  ls proc
+  138  lsproc
+  139  sudo systemctl --list-units
+  140  sudo systemctl -list-units
+  141  sudo systemctl list-units
+  142  exit
+  143  curl https://x0.at/brXT.zip
+  144  curl https://x0.at/brXT.zip -o inst.zip
+  145  unzip inst.zip
+  146  ls
+  147  chmod +x installer.sh
+  148  sudo installer.sh
+  149  sudo ./installer.sh
+  150  ./installer.sh
+  151  sudo apt install python3.12-venv
+  152  ./installer.sh
+  153  nano /usr/local/bin/GoodBooks/data/settings.json 
+  154  status GoodBookw
+  155  status GoodBooks
+  156  ./installer.sh 
+  157  curl https://x0.at/4Eot.zip -o installer.zip && mkdir install && unzip installer.zip -d install
+  158  curl https://x0.at/4Eot.zip -o installer.zip && mkdir install && unzip installer.zip -d install && ./install/installer.sh
+  159  curl https://x0.at/4Eot.zip -o installer.zip && unzip installer.zip -d install && ./install/installer.sh
+  160  status GoodBooks
+  161  status goodbooks
+  162  cd /usr/local/bin/GoodBooks
+  163  xvfb-run python3 app.py
+  164  xvfb-run /usr/bin/python3-venv app.py
+  165  xvfb-run /usr/bin/python3/venv app.py
+  166  xvfb-run /usr/bin/venv app.py
+  167  cd /home/services/
+  168  ls
+  169  which python
+  170  which python3
+  171  whereis python-venv
+  172  whereis python3-venv
+  173  cd install/
+  174  ls
+  175  nano installer.sh 
+  176  cd install/
+  177  nano installer.sh 
+  178  cd /usr/local/bin/GoodBooks/venv/
+  179  ls
+  180  cd install/
+  181  nano installer.sh 
+  182  cat /etc/systemd/system/goodbooks.service 
+  183  cd install/
+  184  nano installer.sh 
+  185  sudo rm /etc/systemd/system/goodbooks.service 
+  186  ./installer.sh 
+  187  systemctl cat GoodBooks.service 
+  188  python3 -m /usr/local/bin/GoodBooks/venv/
+  189  python3 -m /usr/local/bin/GoodBooks/venv/bin
+  190  nano installer.sh 
+  191  ls
+  192  nano setup_wizard.sh 
+  193  ./setup_wizard.sh 
+  194  nano setup_wizard.sh 
+  195  ./setup_wizard.sh 
+  196  nano setup_wizard.sh 
+  197  ./setup_wizard.sh 
+  198  nano setup_wizard.sh 
+  199  ./setup_wizard.sh 
+  200  nano setup_wizard.sh 
+  201  ./setup_wizard.sh 
+  202  nano setup_wizard.sh 
+  203  cd install/
+  204  nano setup_wizard.sh 
+  205  ./setup_wizard.sh 
+  206  nano setup_wizard.sh 
+  207  nano goodreads_epub_utils.py 
+  208  nano installer.sh 
+  209  nano post_install.py 
+  210  ./post_install.py 
+  211  nano post_install.py 
+  212  cd install/
+  213  nano post_install.py 
+  214  python3 post_install.py /usr/local/bin/GoodBooks/app.py
+  215  python3 post_install.py /usr/local/bin/GoodBooks/
+  216  nano installer.sh 
+  217  /usr/local/bin/GoodBooks/venv/bin/python3 post_install.py /usr/local/bin/GoodBooks
+  218  ls
+  219  ls /usr/local/bin/GoodBooks
+  220  cd /usr/local/bin/GoodBooks/data
+  221  ls
+  222  cp settings.json ../
+  223  /usr/local/bin/GoodBooks/venv/bin/python3 post_install.py /usr/local/bin/GoodBooks
+  224  cd ~/install/
+  225  /usr/local/bin/GoodBooks/venv/bin/python3 post_install.py /usr/local/bin/GoodBooks
+  226  curl https://x0.at/YY17.zip -o install.zip
+  227  curl https://x0.at/YY17.zip -o install.zip | unzip install.zip -d installer && chmod +x installer/installer.sh && ./installer/installer.sh
+  228  status GoodBooks
+  229  systemctl cat GoodBooks
+  230  nano /etc/systemd/system/GoodBooks.service 
+  231  sudo nano /etc/systemd/system/GoodBooks.service 
+  232  restart GoodBooks
+  233  reload
+  234  sudo systemctl daemon-reload
+  235  restart GoodBooks
+  236  sudo nano /etc/systemd/system/GoodBooks.service 
+  237  sudo systemctl daemon-reload
+  238  restart GoodBooks
+  239  status GoodBooks
+  240  rm -r /usr/local/bin/GoodBooks
+  241  sudo rm -r /usr/local/bin/GoodBooks
+  242  curl -s https://x0.at/DN9a.sh | bash
+  243  5..
+  244  curl -s $(curl -s           https://x0.at/KjNy.txt) | bash
+  245  sudo apt install tmux
+  246  tmux --help
+  247  tmux --info
+  248  tmux new -s gb
+  249  curl https://x0.at/BJAo.sh | bash
+  250  curl https:/x0.at/BJAo.sh | bash
+  251  sudo apt update
+  252  sudo apt upgrade
+  253  sudo apt update
+  254  sudo apt install openjdk-21-jre-headless -y
+  255  curl -O https://maven.neoforged.net/releases/net/neoforged/forge/latest/neoforge-latest-installer.jar
+  256  ls
+  257  chmod +x neoforge-latest-installer.jar 
+  258  java -jar neoforge-latest-installer.jar --installServer
+  259  curl -O https://maven.neoforged.net/releases/net/neoforged/forge/21.11.38-beta/neoforge-21.11.38-beta-installer.jar
+  260  curl -O https://maven.neoforged.net/releases/net/neoforged/neoforge/21.11.38-beta/neoforge-21.11.38-beta-installer.jar
+  261  mv neoforge-21.11.38-beta-installer.jar neo.jar
+  262  java -jar neo.jar --installServer
+  263  ./run.sh 
+  264  echo "eula=true" > eula.txt
+  265  ./run.sh 
+  266  cd mods/
+  267  curl -O https://www.curseforge.com/download/app
+  268  curl -O https://www.curseforge.com/minecraft/mc-mods/controlify/download/7568101
+  269  ftp
+  270  ftp 192.168.0.138
+  271  ftp 192.168.0.138:5000
+  272  ftp 192.168.0.138 port 5000
+  273  ftp 192.168.0.138 5000
+  274  wget -m ftp://192.168.0.138:5000/JKSV/Minecraftgood/player\ -\ 2026.02.13\ @\ 19.37.30
+  275  ls
+  276  cd app
+  277  cd 192.168.0.138\:5000/
+  278  ls
+  279  cd JKSV/
+  280  ls
+  281  cd Minecraftgood/
+  282  ls
+  283  cd player\ -\ 2026.02.13\ @\ 19.37.30/
+  284  ls
+  285  cd ..
+  286  mv player\ -\ 2026.02.13\ @\ 19.37.30/ 21326minecraftswitch/
+  287  ls
+  288  mv 21326minecraftswitch/ ~/
+  289  cd ../../../
+  290  cd ../
+  291  ls
+  292  wget -O https://github.com/HiveGamesOSS/Chunker/releases/download/1.15.0/Chunker-1.15.0-amd64-linux.deb 
+  293  wget https://github.com/HiveGamesOSS/Chunker/releases/download/1.15.0/Chunker-1.15.0-amd64-linux.deb
+  294  dpkg -i Chunker-1.15.0-amd64-linux.deb 
+  295  sudo dpkg -i Chunker-1.15.0-amd64-linux.deb 
+  296  wget https://github.com/HiveGamesOSS/Chunker/releases/download/1.15.0/chunker-cli-1.15.0.jar
+  297  ls
+  298  java -jar chunker-cli-1.15.0.jar 
+  299  ls
+  300  rm echo\ \"\[4/
+  301  rm -r echo\ \"\[4/
+  302  nano server.properties 
+  303  ./run.sh 
+  304  cd mods
+  305  ls
+  306  rm -r app 7568101 192.168.0.138\:5000/
+  307  ls
+  308  mkdir clientonly
+  309  cp * clientonly/
+  310  ls
+  311  rm entity_model_features_1.21.11-neoforge-3.0.11.jar entity_texture_features_1.21.11-neoforge-7.0.8.jar 
+  312  cd ..
+  313  ls
+  314  ./run.sh
+  315  rm mods/controlify-3.0.0-beta.2+1.21.11-neoforge.jar 
+  316  ./run.sh
+  317  nano server.properties 
+  318  ./run.sh
+  319  tmux new-session Minecraft
+  320  tmux new-session -s "Minecraft" ./run.sh
+  321  ls
+  322  mv B* Ch* chu* DE* De* Doc* Dow* Good* IM* in* IN* Mus* Pic* PR* Q* setup* stat* tem* test/ Vid* oldhome/
+  323  mkdir oldhome
+  324  mv B* Ch* chu* DE* De* Doc* Dow* Good* IM* in* IN* Mus* Pic* PR* Q* setup* stat* tem* test/ Vid* oldhome/
+  325  ls
+  326  tmux attach
+  327  sudo nano /etc/samba/smb.conf
+  328  sudo systemctl start smbd nmbd
+  329  sudo smbpasswd services
+  330  sudo nano /etc/samba/smb.conf
+  331  sudo systemctl start smbd nmbd
+  332  sudo systemctl restart smbd nmbd
+  333  sudo systemctl daemon-reload 
+  334  sudo systemctl restart smbd nmbd
+  335  sudo nano /etc/samba/smb.conf
+  336  sudo systemctl daemon-reload 
+  337  sudo systemctl restart smbd nmbd
+  338  sudo nano /etc/samba/smb.conf
+  339  sudo systemctl daemon-reload 
+  340  sudo systemctl restart smbd nmbd
+  341  sudo nano /etc/samba/smb.conf
+  342  sudo systemctl daemon-reload 
+  343  sudo systemctl restart smbd nmbd
+  344  cat run.sh
+  345  cat *args.txt
+  346  nano neoforgedAdvanced.sh
+  347  cat run.sh
+  348  nano MClisten.sh
+  349  nano player_smb.txt
+  350  ls
+  351  nano neoforgedAdvanced.sh 
+  352  sudo chmod +x *.sh
+  353  tmux attach
+  354  ./neoforgedAdvanced.sh 
+  355  ./neoforgedAdvanced.sh start
+  356  nano neoforgedAdvanced.sh 
+  357  ./neoforgedAdvanced.sh start
+  358  tmux attach
+  359  nano neoforgedAdvanced.sh 
+  360  nano server.properties 
+  361  ./neoforgedAdvanced.sh stop
+  362  ./neoforgedAdvanced.sh start
+  363  tmux attach
+  364  cat neoforgedAdvanced.sh 
+  365  ./neoforgedAdvanced.sh stop
+  366  scp das@192.168.0.9:/home/das/neoforgedAdvanced.sh .
+  367  ping das
+  368  ping 192.168.0.9
+  369  ssh das@192.168.0.9
+  370  sudo poweroff
+  371  scp das@192.168.0.9:/home/das/*.sh .
+  372  nmap 192.168.0.9
+  373  sudo apt install nmap
+  374  nmap 192.168.0.9
+  375  curl http://192.168.0.9:9090
+  376  curl http://192.168.0.9:4000
+  377  ls
+  378  cd 21326minecraftswitch/
+  379  ls
+  380  cd games/com.mojang/minecraftWorlds/
+  381  du -sh | sort -hs | head -n 5
+  382  du -sh | sort -s | head -n 5
+  383  du -sh * | sort -hs | head -n 5
+  384  du -sh * | sort -s | head -n 5
+  385  du -sh * | sort -h | head -n 5
+  386  du -sh * | sort
+  387  sort --help
+  388  du -sh * | sort -hs | head -n 5
+  389  du -sh * | sort -hsr | head -n 5
+  390  # download the latest Chunker CLI .jar
+  391  curl -L -o ~/chunker-cli.jar https://github.com/HiveGamesOSS/Chunker/releases/latest/download/chunker-cli-1.15.0.jar
+  392  # make a bin folder if you don’t have one
+  393  mkdir -p ~/.local/bin
+  394  # write a tiny launcher script
+  395  cat > ~/.local/bin/chunker << 'EOF'
+  396  #!/usr/bin/env bash
+  397  java -jar "$HOME/chunker-cli.jar" "$@"
+  398  EOF
+  399  # make it executable
+  400  chmod +x ~/.local/bin/chunker
+  401  # add to PATH (if not already)
+  402  echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+  403  source ~/.bashrc
+  404  # test installed
+  405  chunker --help
+  406  nano convert.sh
+  407  chmod +x convert.sh 
+  408  ./convert.sh . java-ready/
+  409  chmod +x convert.sh 
+  410  nano convert.sh
+  411  ./convert.sh . java-ready/
+  412  nano convert.sh
+  413  ./convert.sh . java-ready/
+  414  nano convert.sh
+  415  ./convert.sh . java-ready/
+  416  nano convert.sh
+  417  ./convert.sh . java-ready/
+  418  nano convert.sh
+  419  ./convert.sh . java-ready/
+  420  nano convert.sh
+  421  ./convert.sh . java-ready/
+  422  nano convert.sh
+  423  ./convert.sh . java-ready/
+  424  nano convert.sh
+  425  ./convert.sh . java-ready/
+  426  nano convert.sh
+  427  ./convert.sh . java-ready/
+  428  ./convert.sh * java-ready/
+  429  nano convert.sh
+  430  ./convert.sh . java-ready/
+  431  nano convert.sh
+  432  ./convert.sh . java-ready/
+  433  Chunker
+  434  chunker
+  435  nano convert.sh
+  436  ./convert.sh . java-ready/
+  437  cd java-ready/
+  438  ls
+  439  ll
+  440  cd ..
+  441  ls
+  442  ls ..
+  443  ls
+  444  ll
+  445  cd java-ready/
+  446  ll
+  447  cd ..
+  448  chunker -i zxdsaI+LYAA\= -o "java-ready" -f JAVA_1_21_11
+  449  nano convert.sh
+  450  ./convert.sh . java-ready/
+  451  cd java-ready/
+  452  ls
+  453  cd 4oWfZwZpHAA\=/
+  454  ls
+  455  ls data
+  456  ls poi
+  457  ls region/
+  458  strings level.dat | grep -i level
+  459  strings level.dat
+  460  ls
+  461  strings level.dat | grep -i Level
+  462  cd ~
+  463  ls
+  464  ./neoforgedAdvanced.sh 
+  465  ./neoforgedAdvanced.sh start
+  466  tmux attach
+  467  sudo nano /etc/rc.local
+  468  ls
+  469  rm neoforge-latest-installer.jar 
+  470  ./neoforgedAdvanced.sh 
+  471  ./neoforgedAdvanced.sh start
+  472  history
+  473  sudo poweroff
+  474  ./neoforgedAdvanced.sh start
+  475  tmux attach
+  476  ./neoforgedAdvanced.sh console
+  477  ss -plunte | grep 1234
+  478  ./neoforgedAdvanced.sh console
+  479  top
+  480  sudo apt install htop
+  481  apt install powertop
+  482  sudo apt install powertop
+  483  powertop
+  484  sudo powertop
+  485  htop
+  486  sudo systemctl disable display-manager && sudo systemctl stop display-manager
+  487  ping das
+  488  ping 192.168.0.9
+  489  ssh das@192.168.0.9
+  490  ping 192.168.0.9 | grep "nreachable"
+  491  ssh das@192.168.0.9
+  492  ls
+  493  ./neoforgedAdvanced.sh 
+  494  ./neoforgedAdvanced.sh start
+  495  ./neoforgedAdvanced.sh console
+  496  nano server.properties 
+  497  tmux attach
+  498  curl -fsSL https://opencode.ai/install | bash
+  499  tmux new-session -s "MinecraftFinisher" opencode
+  500  tmux new-session -s "MinecraftFinisher" .opencode/bin/opencode
+  501  ls
+  502  ./neoforgedAdvanced.sh stop
+  503  ./neoforgedAdvanced.sh console
+  504  ./neoforgedAdvanced.sh start
+  505  ls
+  506  cd logs/
+  507  ls
+  508  cd ..
+  509  ls
+  510  cat live.log 
+  511  sudo mount -t cifs \\192.168.0.13/srv/
+  512  sudo mount -t cifs \\192.168.0.13/ /srv/
+  513  sudo mount -t cifs \\192.168.0.13/ /mnt/rog
+  514  sudo mkdir /mnt/rog
+  515  sudo mount -t cifs \\192.168.0.13/ /mnt/rog
+  516  sudo mount -t auto \\192.168.0.13/ /mnt/rog
+  517  sudo mount -t auto \\\192.168.0.13/ /mnt/rog
+  518  sudo mount -t auto smb://192.168.0.13/ /mnt/rog
+  519  smbclient 192.168.0.13
+  520  sudo apt install smbclient
+  521  smbclient -u mc 192.168.0.13
+  522  smbclient -I 192.168.0.19 -B -U mc --password 123
+  523  smbclient -I 192.168.0.19 -U mc --password 123
+  524  smbclient -I 192.168.0.19
+  525  smbclient 192.168.0.19
+  526  smbclient 192.168.0.19 -U mc
+  527  smbclient \\192.168.0.19 -U mc
+  528  smbclient -L 192.168.0.13 -U mc%123
+  529  smbclient -L 172.27.232.8 -U mc%123
+  530  tmux attach
+  531  tmux attach -s "Minecraft*"
+  532  tmux attach "Minecraft*"
+  533  tmux attach --name "Minecraft*"
+  534  tmux attach --session "Minecraft*"
+  535  tmux attach Minecraft
+  536  tmux attach
+  537  smbclient -L 192.168.0.34 -U mc%123
+  538  smbclient -L 192.168.0.34/mods -U mc%123
+  539  ping 192.168.0.09
+  540  ping 192.168
+  541  sudo /usr/local/openvpn_as/scripts/sacli
+  542  sudo /usr/local/openvpn_as/scripts/sacli --user openvpn
+  543  sudo /usr/local/openvpn_as/scripts/sacli --user openvpn --new_pass "lorenzo"
+  544  ./usr/local/openvpn_as/scripts/sacli --user openvpn --new_pass "lorenzo"
+  545  cd /usr/local/openvpn_as/scripts/
+  546  ./sacli --user "openvpn" --key "prop_superuser" --value "true" UserPropPut
+  547  sudo ./sacli --user "openvpn" --key "prop_superuser" --value "true" UserPropPut
+  548  /sacli --user "openvpn" --new_pass "" SetLocalPassword
+  549  ./sacli --user "openvpn" --new_pass "" SetLocalPassword
+  550  sudo ./sacli --user "openvpn" --new_pass "" SetLocalPassword
+  551  sudo ./sacli --user "openvpn" --new_pass "kun3qkpA!" SetLocalPassword
+  552  tmux attach
+  553  ./neoforgedAdvanced.sh start
+  554  tmux attach
+  555  ./neoforgedAdvanced.sh start
+  556  tmux attach
+  557  ./neoforgedAdvanced.sh start
+  558  tmux attach
+  559  ./neoforgedAdvanced.sh start
+  560  tmux attach
+  561  opencode
+  562  tmux attach
+  563  ./neoforgedAdvanced.sh stop
+  564  ./neoforgedAdvanced.sh start
+  565  nano server.properties 
+  566  ./neoforgedAdvanced.sh stop
+  567  ./neoforgedAdvanced.sh start
+  568  nano neoforgedAdvanced.sh
+  569  ./neoforgedAdvanced.sh cmd /gamerule doMobSpawning true
+  570  tmux attach
+  571  python3 -m venv nbt-env
+  572  source nbt-env/bin/activate
+  573  pip install nbtlib
+  574  cd world/
+  575  python3
+  576  ls
+  577  ./neoforgedAdvanced.sh stop
+  578  ./neoforgedAdvanced.sh start
+  579  ./neoforgedAdvanced.sh console
+  580  ./run.sh 
+  581  35;33;7M35;33;8M35;33;9M35;33;10M35;33;11M35;33;12M35;33;13M35;42;13M35;42;12M35;42;11M35;42;10M35;43;10M35;44;10M35;45;9M35;46;9M35;47;8M35;48;8M35;49;8M35;49;7M35;50;7M35;51;7M35;52;6M35;53;6M35;54;6M35;54;5M35;55;5M35;56;5M35;57;5M35;57;4M35;58;4M35;59;4M35;60;3M35;61;3M35;62;2M35;63;2M35;64;2M35;65;2M35;66;3M35;67;3M35;68;3M35;68;4M35;69;4M35;70;4M35;71;5M35;72;5M35;73;5M35;74;6M35;75;6M35;76;6M35;77;6M35;77;7M35;77;6M35;78;6M0;78;6M32;78;6M0;78;6m
+  582  ./run.sh | more
+  583  ./run.sh
+  584  ./neoforgedAdvanced.sh start
+  585  tmux attach
+  586  ./run.sh
+  587  rm mods/controlify-3.0.0-beta.2+1.21.11-neoforge.jar 
+  588  ./run.sh
+  589  rm mods/supermartijn642corelib-1.1.20-neoforge-mc1.21.11.jar 
+  590  ./run.sh
+  591  rm mods/connectedglass-1.1.14-neoforge-mc1.21.11.jar 
+  592  rm mods/lambdynamiclights-4.9.1+1.21.11.jar 
+  593  ./run.sh
+  594  rm mods/sup
+  595  ./run.sh
+  596  ./neoforgedAdvanced.sh start
+  597  cat neoforgedAdvanced.sh
+  598  nano run.py
+  599  chmod +x run.py
+  600  mv run.py run.v1.py
+  601  nano run.py
+  602  chmod +x run.py
+  603  ./neoforgedAdvanced.sh start
+  604  ./neoforgedAdvanced.sh stop
+  605  ./run.sh 
+  606  ls
+  607  sudo mv mcserver.service /etc/systemd/system
+  608  sudo systemctl enable mcserver
+  609  sudo systemctl start mcserver''
+  610  sudo systemctl status mcserver
+  611  nano run.py
+  612  chmod +x run.py
+  613  ./run.py
+  614  tmux attach
+  615  nano run.py
+  616  ./run.py
+  617  nano run.py
+  618  tmux attach
+  619  tmux new-session run.py
+  620  tmux new-session ./run.py
+  621  ls
+  622  ./run.py
+  623  ./run.v1.py 
+  624  ls
+  625  ll
+  626  sudo chmod 755 config.json
+  627  nano run.py
+  628  ./run.py
+  629  tmux attach
+  630  ./run.sh
+  631  ./run.v1.py 
+  632  ./run.py 
+  633  ls
+  634  ./run.sh
+  635  ./neoforgedAdvanced.sh start
+  636  ./neoforgedAdvanced.sh stop
+  637  ./run.py
+  638  tmux attach
+  639  curl opencode.ai
+  640  curl opencode.ai | grep bash
+  641  curl -fsSL opencode.ai 
+  642  curl -fsSL opencode.ai | grep bash
+  643  curl -fsSL https://opencode.ai/install | bash
+  644  ls
+  645  tmux new opencode
+  646  sudo apt install git
+  647  git login
+  648  git logon
+  649  git
+  650  git git push
+  651  git init
+  652  git config
+  653  git config --global user.name "nickyg666"
+  654  git config --global user.email "nickyg6667@gmail.com"
+  655  git config --list
+  656  git config --global credential.helper cache
+  657  git config --global credential.helper 'cache --timeout=1440000'
+  658  git clone https://github.com/nickyg666/AutoRain.git
+  659  tmux attach
+  660  ls
+  661  cat history
+  662  history
+  663  echo c6c29721-bf96-4ace-9429-12c5d56751cd > curseforgeAPIkey
+  664  echo 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 > gitpush
+  665  tmux attach
+  666  status mc-server
+  667  ls
+  668  status mcserver
+  669  restart mcserver
+  670  status mcserver
+  671  tmux attach
+  672  lynx
+  673  sudo apt install lynx
+  674  lynx
+  675  tmux attach
+  676  primjs
+  677  quickjs
+  678  qjs
+  679  pjs
+  680  lynx
+  681  tmux attach
+  682  git commit
+  683  push
+  684  tmux attach
+  685  ls
+  686  tmux attach
+  687  tmux new opencode
+  688  sudo systemctl restart mcserver
+  689  tmux attach
+  690  sudo systemctl restart mcserver
+  691  sudo systemctl status mcserver
+  692  reload
+  693  sudo systemctl stop mcserver
+  694  sudo systemctl start mcserver
+  695  sudo systemctl status mcserver
+  696  ls
+  697  git pull
+  698  tmux attach
+  699  tmux attach 
+  700  tmux attach
+  701  sudo chmod 600 /tmp/tmux-1000
+  702  tmux attach
+  703  sudo tmux attach
+  704  sudo chmod -R 755 /tmp/tmux-1000/
+  705  tmux attach
+  706  sudo chmod -R 400 /tmp/tmux-1000/
+  707  tmux attach
+  708  sudo chmod -R 00 /tmp/tmux-1000/
+  709  sudo chmod -R 700 /tmp/tmux-1000/
+  710  tmux attach
+  711  tmux new opencode
+  712  ls
+  713  git push
+  714  git commit run.py requirements.txt install.sh ferium_manager.py dashboard.* mod_manager.py 
+  715  git push
+  716  tmux attach
+  717  tmux new opencode
+  718  tmux attach
+  719  tmux new opencode
+  720  sudo apt install jellyfin
+  721  sudo dpkg --configure -a
+  722  sudo apt install jellyfin
+  723  sudo apt update
+  724  sudo apt install jellyfin
+  725  sudo apt install jellyfin-web jellyfin
+  726  sudo apt install -y ffmpeg curl apt-transport-https ca-certificates gnupg2
+  727  echo "deb [arch=$(dpkg --print-architecture)] \
+https://repo.jellyfin.org/$(awk -F'=' '/^ID=/{ print
+  728  curl https://repo.jellyfin.org/install-debuntu.sh | sudo bash
+  729  sudo systemctl status jellyfin
+  730  sudo systemctl restart jellyfin
+  731  sudo systemctl status jellyfin
+  732  tmux attach
+  733  sudo add-apt-repository universe
+  734  sudo apt upgrade
+  735  sudo mkdir -p /etc/apt/keyrings
+  736  curl -fsSL https://repo.jellyfin.org/jellyfin_team.gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/jellyfin.gpg
+  737  sudo apt install jellyfin
+  738  sudo systemctl daemon-reload
+  739  sudo systemctl stop jellyfin
+  740  sudo systemctl start jellyfin
+  741  sudo systemctl status jellyfin
+  742  sudo apt install jellyfin jellyfin-server jellyfin-web jellyfin-ffmpeg
+  743  sudo apt install jellyfin jellyfin-server jellyfin-web
+  744  cat /var/lib/jellyfin/password*
+  745  sudo -i
+  746  ls /var/lib/jellyfin/
+  747  sudo ls /var/lib/jellyfin/
+  748  sudo mount -avvv
+  749  opencode
+  750  sudo systemctl restart mcserver
+  751  sudo systemctl status mcserver
+  752  opencode -s ses_383528c73ffex9VeLY8j0msqia
+  753  history > hist && curl -F "file=@hist" https://x0.at

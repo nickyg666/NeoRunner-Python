@@ -1,0 +1,4 @@
+Quarantined: 2026-02-22T20:29:19.238383
+Reason: Conflict: midnightcontrols is blacklisted due to conflict with another installed mod
+Mod ID: midnightcontrols
+OriginalFolder: mods

@@ -9,13 +9,13 @@ from pathlib import Path
 
 class ModInfo:
     """Mod metadata with dependency tracking"""
-    def __init__(self, slug: str, name: str, loader: str, mc_version: str, deps: List[str] = None):
+    def __init__(self, slug: str, name: str, loader: str, mc_version: str, deps: List[str] = None, source: str = "modrinth"):
         self.slug = slug
         self.name = name
         self.loader = loader
         self.mc_version = mc_version
         self.deps = deps or []
-        self.source = source  # 'modrinth' or 'curseforge'
+        self.source = source
         
     def to_dict(self):
         return {
@@ -110,9 +110,9 @@ class ModManager:
                             slug=slug,
                             name=mod.get("title", ""),
                             loader=self.loader,
-                            mc_version=self.mc_version
+                            mc_version=self.mc_version,
+                            source="modrinth"
                         )
-                        mod_info.source = source  # 'modrinth' or 'curseforge'
                         mods[slug] = mod_info
                 
                 offset += 100
@@ -195,9 +195,9 @@ class ModManager:
                         slug=mod.get("slug", ""),
                         name=mod.get("name", ""),
                         loader=self.loader,
-                        mc_version=self.mc_version
+                        mc_version=self.mc_version,
+                        source="curseforge"
                     )
-                        mod_info.source = source  # 'modrinth' or 'curseforge'
                     mods[mod_id] = mod_info
                 
                 page += 1

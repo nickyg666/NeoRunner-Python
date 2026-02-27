@@ -51,22 +51,33 @@ def _ensure_deps():
             print(f"[NeoRunner] WARNING: pip install failed. Try manually:")
             print(f"           pip install {' '.join(missing)}")
     
-    # Ensure Playwright browsers are installed
-    try:
-        import playwright
-        from playwright.sync_api import sync_playwright
+    # Ensure Playwright browsers are installed (only if not already installed)
+    _playwright_marker = os.path.join(os.path.expanduser("~"), ".cache", "ms-playwright", ".neorunner_installed")
+    _needs_browser = False
+    
+    if not os.path.exists(_playwright_marker):
         try:
-            with sync_playwright() as p:
-                if not p.chromium.executable_path or not os.path.exists(p.chromium.executable_path):
-                    raise FileNotFoundError
-        except:
-            raise FileNotFoundError
-    except Exception:
+            import playwright
+            from playwright.sync_api import sync_playwright
+            try:
+                with sync_playwright() as p:
+                    exec_path = p.chromium.executable_path
+                    if not exec_path or not os.path.exists(exec_path):
+                        _needs_browser = True
+            except Exception:
+                _needs_browser = True
+        except ImportError:
+            pass
+    
+    if _needs_browser:
         print("[NeoRunner] Installing Playwright Chromium browser...")
         try:
             subprocess.check_call([sys.executable, "-m", "playwright", "install", "chromium"],
                                   timeout=300)
             print("[NeoRunner] Playwright Chromium installed.")
+            os.makedirs(os.path.dirname(_playwright_marker), exist_ok=True)
+            with open(_playwright_marker, "w") as f:
+                f.write("installed")
         except Exception as e:
             print(f"[NeoRunner] WARNING: Playwright browser install failed: {e}")
             print("           CurseForge scraping will be unavailable.")
@@ -215,6 +226,35 @@ def save_cfg(c):
     """Save config.json"""
     with open(CONFIG, "w") as f:
         json.dump(c, f, indent=2)
+
+CRASH_HISTORY_FILE = None  # Set after CWD is known
+
+def _get_crash_history_file():
+    """Get crash history file path (lazy init after CWD is set)"""
+    global CRASH_HISTORY_FILE
+    if CRASH_HISTORY_FILE is None:
+        CRASH_HISTORY_FILE = os.path.join(CWD, ".crash_history.json")
+    return CRASH_HISTORY_FILE
+
+def load_crash_history():
+    """Load crash history from persistent file"""
+    history_file = _get_crash_history_file()
+    if os.path.exists(history_file):
+        try:
+            with open(history_file) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def save_crash_history(history):
+    """Save crash history to persistent file"""
+    history_file = _get_crash_history_file()
+    try:
+        with open(history_file, "w") as f:
+            json.dump(history, f, indent=2)
+    except Exception:
+        pass
 
 # Setup logging to file and console
 LOG_FILE = os.path.join(CWD, "live.log")
@@ -4178,6 +4218,7 @@ def _try_self_heal(loader_instance, crash_info, cfg, crash_history):
         # Check if we've already tried to fetch this dep before (dep loop)
         dep_key = f"dep_{dep_name}"
         crash_history[dep_key] = crash_history.get(dep_key, 0) + 1
+        save_crash_history(crash_history)
         
         if crash_history[dep_key] > 2:
             # We've tried fetching this dep twice and it still crashes
@@ -4211,6 +4252,7 @@ def _try_self_heal(loader_instance, crash_info, cfg, crash_history):
         
         if culprit:
             crash_history[culprit] = crash_history.get(culprit, 0) + 1
+            save_crash_history(crash_history)
             log_event("SELF_HEAL", f"Quarantining {culprit} (conflict type: {conflict_type})")
             quarantined = _quarantine_mod(mods_dir, culprit, f"Mod conflict ({conflict_type}) with other installed mods")
             if quarantined:
@@ -4272,6 +4314,7 @@ def _try_self_heal(loader_instance, crash_info, cfg, crash_history):
             
             # Track crash count for this mod
             crash_history[culprit] = crash_history.get(culprit, 0) + 1
+            save_crash_history(crash_history)
             log_event("SELF_HEAL", f"Mod error from {culprit} (crash #{crash_history[culprit]})")
             
             if crash_history[culprit] >= 2:
@@ -4989,7 +5032,7 @@ def run_server(cfg):
     os.makedirs(os.path.join(mods_dir, "quarantine"), exist_ok=True)
     
     restart_count = 0
-    crash_history = {}  # Track {mod_id: crash_count} across restarts
+    crash_history = load_crash_history()  # Track {mod_id: crash_count} across restarts, persisted
     tmux_socket = f"/tmp/tmux-{os.getuid()}/default"
     stopped_flag = os.path.join(CWD, ".mc_stopped")
     
@@ -5115,6 +5158,7 @@ def run_server(cfg):
                 # Unknown crash — still restart, but track it
                 restart_count += 1
                 crash_history["_unknown"] = crash_history.get("_unknown", 0) + 1
+                save_crash_history(crash_history)
                 if crash_history["_unknown"] >= 3:
                     log_event("SELF_HEAL", "Too many unknown crashes. Server will not restart.")
                     return False

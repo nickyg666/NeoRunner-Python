@@ -1,4 +1,0 @@
-Quarantined: 2026-02-25T02:01:44.625437
-Reason: Client-only mixin crash - mod still crashed from clientonly/
-Mod ID: rei
-OriginalFolder: clientonly

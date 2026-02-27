@@ -1,4 +1,0 @@
-Quarantined: 2026-02-22T20:29:18.626484
-Reason: Conflict: entity_texture_features is blacklisted due to conflict with another installed mod
-Mod ID: entity_texture_features
-OriginalFolder: mods

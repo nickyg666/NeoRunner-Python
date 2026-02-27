@@ -1,4 +1,0 @@
-Quarantined: 2026-02-22T20:29:18.624758
-Reason: Conflict: entity_model_features is blacklisted due to conflict with another installed mod
-Mod ID: entity_model_features
-OriginalFolder: mods

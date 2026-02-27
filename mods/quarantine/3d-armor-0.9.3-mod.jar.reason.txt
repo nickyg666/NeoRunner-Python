@@ -1,4 +1,0 @@
-Quarantined: 2026-02-22T20:29:17.710620
-Reason: Conflict: armor_3d is blacklisted due to conflict with another installed mod
-Mod ID: armor_3d
-OriginalFolder: mods

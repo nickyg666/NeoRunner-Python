@@ -51,7 +51,7 @@ def _ensure_deps():
             print(f"[NeoRunner] WARNING: pip install failed. Try manually:")
             print(f"           pip install {' '.join(missing)}")
     
-    # Ensure Playwright browsers are installed, SOMETHING ABOUT THIS IS WRONG, TRIGGER EXCEPTION EVERY RUN
+    # Ensure Playwright browsers are installed
     try:
         import playwright
         # Check if chromium is available by looking for the browser path
@@ -67,13 +67,12 @@ def _ensure_deps():
             print("[NeoRunner] Playwright Chromium installed.")
         except Exception as e:
             print(f"[NeoRunner] WARNING: Playwright browser install failed: {e}")
-            # NEVER GETS TO THIS EXC THOUGH
             print("           CurseForge scraping will be unavailable.")
 
 _ensure_deps()
 # ══════════════════════════════════════════════════════════════════════════════
 
-import json, time, threading, logging, hashlib, urllib.request, urllib.error, socket, re, random
+import json, time, threading, logging, hashlib, urllib.request, urllib.error, socket
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -184,6 +183,8 @@ def _get_cf_headers():
         "Sec-Fetch-User": "?1",
         "Cache-Control": "max-age=0",
     }
+import re
+import random
 
 def _get_cwd():
     """Determine the working directory dynamically."""
@@ -1812,16 +1813,47 @@ def http_server(port, mods_dir):
     if FLASK_AVAILABLE:
         def run_flask_app():
             try:
-                from app import create_app
-                app = create_app()
+                import sys as _sys
+                _sys.path.insert(0, CWD)
                 
-                # Import services for use in the Flask context
-                from app.services.config_service import load_cfg, save_cfg
-                from app.services.server_service import get_server_status
-                from app.services.java_service import _get_java_version, _check_jdk_upgrade_available
-                from app.services.mod_service import get_mods, delete_mod, quarantine_mod
-                from app.services.download_service import get_download_link, download_manifest
-                from app.services.api_service import run_cmd
+                from flask import Flask, render_template, jsonify, request, send_file, Response
+                
+                app = Flask(__name__, template_folder=CWD, static_folder=os.path.join(CWD, "static"))
+                app.secret_key = os.urandom(24)
+                
+                def load_cfg():
+                    if os.path.exists(CONFIG):
+                        with open(CONFIG) as f:
+                            c = json.load(f)
+                    else:
+                        c = {}
+                    # Apply runtime defaults for any missing keys
+                    runtime_defaults = {
+                        "hostname": "",
+                        "broadcast_enabled": True,
+                        "broadcast_auto_on_install": True,
+                        "nag_show_mod_list_on_join": True,
+                        "nag_first_visit_modal": True,
+                        "motd_show_download_url": False,
+                        "install_script_types": "all",
+                        "curator_sort": "downloads",
+                        "curator_limit": 100,
+                    }
+                    for k, v in runtime_defaults.items():
+                        if k not in c:
+                            c[k] = v
+                    return c
+                
+                def save_cfg(c):
+                    with open(CONFIG, "w") as f:
+                        json.dump(c, f, indent=2)
+                
+                def run_cmd(cmd):
+                    try:
+                        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+                        return {"success": result.returncode == 0, "stdout": result.stdout, "stderr": result.stderr}
+                    except Exception as e:
+                        return {"success": False, "error": str(e)}
                 
                 def get_server_status():
                     uid = os.getuid()
@@ -1887,7 +1919,44 @@ def http_server(port, mods_dir):
                     # Sort A-Z by name
                     return sorted(mods, key=lambda x: x["name"].lower())
                 
-                # Dashboard routes are now handled by the blueprint in app/blueprints/dashboard.py
+                @app.route("/")
+                def dashboard():
+                    return render_template("dashboard.html")
+                
+                @app.route("/api/status")
+                def api_status():
+                    return jsonify(get_server_status())
+                
+                @app.route("/api/config")
+                def api_config():
+                    c = load_cfg()
+                    c["rcon_pass"] = "***"
+                    props = parse_props()
+                    c["server_port"] = props.get("server-port", c.get("server_port", "25565"))
+                    c["query_port"] = props.get("query.port", "25565")
+                    c["rcon_port"] = props.get("rcon.port", "25575")
+                    return jsonify(c)
+                
+                @app.route("/api/config", methods=["POST"])
+                def api_config_update():
+                    try:
+                        data = request.json
+                        c = load_cfg()
+                        allowed = [
+                            "ferium_update_interval_hours", "ferium_weekly_update_day",
+                            "ferium_weekly_update_hour", "mc_version",
+                            "hostname", "curator_sort", "curator_limit",
+                            "broadcast_enabled", "broadcast_auto_on_install",
+                            "nag_show_mod_list_on_join", "nag_first_visit_modal",
+                            "motd_show_download_url", "install_script_types",
+                        ]
+                        for field in allowed:
+                            if field in data:
+                                c[field] = data[field]
+                        save_cfg(c)
+                        return jsonify({"success": True, "message": "Config updated"})
+                    except Exception as e:
+                        return jsonify({"success": False, "error": str(e)}), 400
                 
                 @app.route("/api/java")
                 def api_java_status():
@@ -2565,7 +2634,7 @@ echo "============================================"
                 
                 @app.route("/api/server/start", methods=["POST"])
                 def api_server_start():
-                    """Start the MC server - resets restart counter and removes stopped flag."""
+                    """Start the MC server (remove stopped flag, run loop will start MC)."""
                     try:
                         uid = os.getuid()
                         tmux_socket = f"/tmp/tmux-{uid}/default"
@@ -2575,21 +2644,15 @@ echo "============================================"
                         if check.get("success"):
                             return jsonify({"success": True, "message": "Server already running"})
                         
-                        # Remove stopped flag
+                        # Remove the stopped flag - run loop will detect and start MC
                         stopped_flag = os.path.join(CWD, ".mc_stopped")
                         if os.path.exists(stopped_flag):
                             os.remove(stopped_flag)
-                        
-                        # Reset restart counter by creating reset flag
-                        reset_flag = os.path.join(CWD, ".mc_reset_counter")
-                        with open(reset_flag, "w") as f:
-                            f.write(str(time.time()))
-                        
-                        log_event("SERVER_START", "Start command - reset restart counter, removed stopped flag")
-                        
-                        # Restart service to re-enter monitoring loop with fresh counter
-                        run_cmd("systemctl --user restart mcserver")
-                        return jsonify({"success": True, "message": "Starting server (restart counter reset)..."})
+                            log_event("SERVER_START", "Start command received via dashboard")
+                            return jsonify({"success": True, "message": "Server starting..."})
+                        else:
+                            # No flag but MC not running - service might need full restart
+                            return jsonify({"success": False, "error": "Service needs restart via systemctl"}), 400
                     except Exception as e:
                         return jsonify({"success": False, "error": str(e)}), 400
                 
@@ -2751,289 +2814,10 @@ echo "============================================"
                         os.remove(jar_path)
                         if os.path.exists(reason_path):
                             os.remove(reason_path)
-                        log_event("QUARANTINE", f"Deleted {filename} from quarantine")
+                        log_event("QUARANTINE", f"Permanently deleted {filename} from quarantine")
                         return jsonify({"success": True, "message": f"Deleted {filename}"})
                     except Exception as e:
                         return jsonify({"success": False, "error": str(e)}), 400
-                
-                # ---- New Quarantine API ----
-                @app.route("/api/quarantine/client-mods", methods=["POST"])
-                def api_quarantine_client_mods():
-                    """Move all client-only mods from root to clientonly/ directory"""
-                    try:
-                        c = load_cfg()
-                        mods_dir = os.path.join(CWD, c.get("mods_dir", "mods"))
-                        clientonly_dir = os.path.join(mods_dir, "clientonly")
-                        
-                        # Find all client-only mods in root
-                        client_mods = []
-                        for fn in os.listdir(mods_dir):
-                            if not fn.endswith(".jar"):
-                                continue
-                            jar_path = os.path.join(mods_dir, fn)
-                            if _is_client_only_mod(jar_path):
-                                client_mods.append(fn)
-                        
-                        # Move them to clientonly/
-                        os.makedirs(clientonly_dir, exist_ok=True)
-                        moved_count = 0
-                        for mod in client_mods:
-                            src = os.path.join(mods_dir, mod)
-                            dst = os.path.join(clientonly_dir, mod)
-                            if not os.path.exists(dst):
-                                shutil.move(src, dst)
-                                moved_count += 1
-                                log_event("SELF_HEAL", f"Moved client-only mod {mod} -> clientonly/")
-                        
-                        return jsonify({"success": True, "message": f"Moved {moved_count} client-only mods to clientonly/", "moved": moved_count})
-                    except Exception as e:
-                        return jsonify({"success": False, "error": str(e)}), 400
-                
-                @app.route("/api/quarantine/all", methods=["POST"])
-                def api_quarantine_all():
-                    """Quarantine all mods that cause crashes (client-only, dependency conflicts, etc.)"""
-                    try:
-                        c = load_cfg()
-                        mods_dir = os.path.join(CWD, c.get("mods_dir", "mods"))
-                        quarantine_dir = os.path.join(mods_dir, "quarantine")
-                        
-                        # Get all mods that need quarantining
-                        mods_to_quarantine = _get_problematic_mods(mods_dir)
-                        
-                        # Quarantine them
-                        quarantined_count = 0
-                        for mod in mods_to_quarantine:
-                            if _quarantine_mod(mods_dir, mod["id"], mod["reason"]):
-                                quarantined_count += 1
-                        
-                        return jsonify({"success": True, "message": f"Quarantined {quarantined_count} problematic mods", "quarantined": quarantined_count})
-                    except Exception as e:
-                        return jsonify({"success": False, "error": str(e)}), 400
-                
-                @app.route("/api/quarantine/mods", methods=["POST"])
-                def api_quarantine_mods():
-                    """Quarantine specific mods by ID"""
-                    try:
-                        data = request.json
-                        mod_ids = data.get("mod_ids", [])
-                        if not mod_ids:
-                            return jsonify({"success": False, "error": "No mod IDs provided"}), 400
-                        
-                        c = load_cfg()
-                        mods_dir = os.path.join(CWD, c.get("mods_dir", "mods"))
-                        
-                        quarantined_count = 0
-                        for mod_id in mod_ids:
-                            if _quarantine_mod(mods_dir, mod_id, "User-requested quarantine"):
-                                quarantined_count += 1
-                        
-                        return jsonify({"success": True, "message": f"Quarantined {quarantined_count} mods", "quarantined": quarantined_count})
-                    except Exception as e:
-                        return jsonify({"success": False, "error": str(e)}), 400
-                
-                # ---- Blacklist API ----
-                @app.route("/api/blacklist")
-                def api_blacklist():
-                    """Get current blacklist and whitelist"""
-                    try:
-                        c = load_cfg()
-                        blacklist = c.get("blacklist", [])
-                        whitelist = c.get("whitelist", [])
-                        user_blacklist = c.get("user_blacklist", [])
-                        user_whitelist = c.get("user_whitelist", [])
-                        blacklist_patterns = c.get("blacklist_patterns", [])
-                        
-                        return jsonify({
-                            "blacklist": blacklist,
-                            "whitelist": whitelist,
-                            "user_blacklist": user_blacklist,
-                            "user_whitelist": user_whitelist,
-                            "blacklist_patterns": blacklist_patterns
-                        })
-                    except Exception as e:
-                        return jsonify({"blacklist": [], "whitelist": [], "error": str(e)}), 500
-                
-                @app.route("/api/blacklist/add", methods=["POST"])
-                def api_blacklist_add():
-                    """Add a mod to blacklist"""
-                    try:
-                        data = request.json
-                        mod_id = data.get("mod_id", "").strip().lower()
-                        if not mod_id:
-                            return jsonify({"success": False, "error": "No mod ID provided"}), 400
-                        
-                        c = load_cfg()
-                        user_blacklist = c.get("user_blacklist", [])
-                        
-                        # Add to user_blacklist if not already present
-                        if mod_id not in user_blacklist:
-                            user_blacklist.append(mod_id)
-                            c["user_blacklist"] = user_blacklist
-                            save_cfg(c)
-                            log_event("BLACKLIST", f"Added {mod_id} to user blacklist")
-                        
-                        return jsonify({"success": True, "message": f"Added {mod_id} to blacklist"})
-                    except Exception as e:
-                        return jsonify({"success": False, "error": str(e)}), 400
-                
-                @app.route("/api/blacklist/remove", methods=["POST"])
-                def api_blacklist_remove():
-                    """Remove a mod from blacklist"""
-                    try:
-                        data = request.json
-                        mod_id = data.get("mod_id", "").strip().lower()
-                        if not mod_id:
-                            return jsonify({"success": False, "error": "No mod ID provided"}), 400
-                        
-                        c = load_cfg()
-                        user_blacklist = c.get("user_blacklist", [])
-                        
-                        # Remove from user_blacklist if present
-                        if mod_id in user_blacklist:
-                            user_blacklist.remove(mod_id)
-                            c["user_blacklist"] = user_blacklist
-                            save_cfg(c)
-                            log_event("BLACKLIST", f"Removed {mod_id} from user blacklist")
-                        
-                        return jsonify({"success": True, "message": f"Removed {mod_id} from blacklist"})
-                    except Exception as e:
-                        return jsonify({"success": False, "error": str(e)}), 400
-                
-                @app.route("/api/blacklist/patterns/add", methods=["POST"])
-                def api_blacklist_pattern_add():
-                    """Add a pattern to blacklist"""
-                    try:
-                        data = request.json
-                        pattern = data.get("pattern", "").strip()
-                        if not pattern:
-                            return jsonify({"success": False, "error": "No pattern provided"}), 400
-                        
-                        # Validate regex pattern
-                        try:
-                            re.compile(pattern)
-                        except re.error as e:
-                            return jsonify({"success": False, "error": f"Invalid regex pattern: {e}"}), 400
-                        
-                        c = load_cfg()
-                        blacklist = c.get("blacklist", [])
-                        
-                        # Add pattern if not already present
-                        if pattern not in blacklist:
-                            blacklist.append(pattern)
-                            c["blacklist"] = blacklist
-                            save_cfg(c)
-                            log_event("BLACKLIST", f"Added blacklist pattern: {pattern}")
-                        
-                        return jsonify({"success": True, "message": "Pattern added to blacklist"})
-                    except Exception as e:
-                        return jsonify({"success": False, "error": str(e)}), 400
-                
-                @app.route("/api/blacklist/patterns")
-                def api_blacklist_patterns():
-                    """Get current blacklist patterns"""
-                    try:
-                        c = load_cfg()
-                        blacklist = c.get("blacklist", [])
-                        
-                        return jsonify({"blacklist_patterns": blacklist})
-                    except Exception as e:
-                        return jsonify({"blacklist_patterns": [], "error": str(e)}), 500
-                
-                @app.route("/api/blacklist/patterns/remove", methods=["POST"])
-                def api_blacklist_pattern_remove():
-                    """Remove a regex pattern from blacklist"""
-                    try:
-                        data = request.json
-                        pattern = data.get("pattern", "").strip()
-                        if not pattern:
-                            return jsonify({"success": False, "error": "No pattern provided"}), 400
-                        
-                        c = load_cfg()
-                        blacklist_patterns = c.get("blacklist_patterns", [])
-                        
-                        # Remove pattern if present
-                        if pattern in blacklist_patterns:
-                            blacklist_patterns.remove(pattern)
-                            c["blacklist_patterns"] = blacklist_patterns
-                            save_cfg(c)
-                            log_event("BLACKLIST", f"Removed pattern {pattern} from blacklist")
-                        
-                        return jsonify({"success": True, "message": f"Removed pattern {pattern} from blacklist"})
-                    except Exception as e:
-                        return jsonify({"success": False, "error": str(e)}), 400
-                
-                @app.route("/api/blacklist/check", methods=["POST"])
-                def api_blacklist_check():
-                    """Check if a mod ID matches any blacklist patterns"""
-                    try:
-                        data = request.json
-                        mod_id = data.get("mod_id", "").strip().lower()
-                        if not mod_id:
-                            return jsonify({"success": False, "error": "No mod ID provided"}), 400
-                        
-                        c = load_cfg()
-                        blacklist = c.get("blacklist", [])
-                        user_blacklist = c.get("user_blacklist", [])
-                        whitelist = c.get("whitelist", [])
-                        user_whitelist = c.get("user_whitelist", [])
-                        blacklist_patterns = c.get("blacklist_patterns", [])
-                        
-                        # Check if mod is explicitly whitelisted
-                        if mod_id in whitelist or mod_id in user_whitelist:
-                            return jsonify({"success": True, "blacklisted": False, "reason": "Whitelisted"})
-                        
-                        # Check if mod is explicitly blacklisted
-                        if mod_id in blacklist or mod_id in user_blacklist:
-                            return jsonify({"success": True, "blacklisted": True, "reason": "Explicitly blacklisted"})
-                        
-                        # Check if mod matches any blacklist patterns
-                        for pattern in blacklist_patterns:
-                            if re.search(pattern, mod_id):
-                                return jsonify({"success": True, "blacklisted": True, "reason": f"Matches pattern: {pattern}", "pattern": pattern})
-                        
-                        # Check MC version compatibility - only allow exact matches
-                        current_mc_version = c.get("mc_version", "1.21.11")
-                        if _is_version_incompatible(mod_id, current_mc_version):
-                            return jsonify({"success": True, "blacklisted": True, "reason": f"Version incompatible - requires exact MC version {current_mc_version}", "required_version": current_mc_version})
-                        
-                        return jsonify({"success": True, "blacklisted": False, "reason": "Not blacklisted"})
-                    except Exception as e:
-                        return jsonify({"success": False, "error": str(e)}), 500
-                
-                def _is_version_incompatible(mod_id, current_mc_version):
-                    """Check if mod ID indicates incompatible MC version"""
-                    # Extract version patterns from mod ID
-                    version_patterns = [
-                        r"-\d+\.\d+(?:\.\d+)?",  # -1.21.11, -1.21.1
-                        r"_\d+\.\d+(?:\.\d+)?",  # _1.21.11, _1.21.1
-                        r"\d+\.\d+(?:\.\d+)?-",  # 1.21.11-, 1.21.1-
-                        r"mc\d+\.\d+(?:\.\d+)?",  # mc1.21.11, mc1.21.1
-                        r"minecraft\d+\.\d+(?:\.\d+)?",  # minecraft1.21.11, minecraft1.21.1
-                    ]
-                    
-                    # Check for exact version match first
-                    exact_pattern = rf"-\d+\.\d+\.\d+"  # -1.21.11
-                    if re.search(exact_pattern, mod_id):
-                        # Check if exact version matches current MC version
-                        match = re.search(r"-(\d+\.\d+\.\d+)", mod_id)
-                        if match:
-                            mod_version = match.group(1)
-                            # Only allow exact match
-                            if mod_version != current_mc_version:
-                                return True  # Incompatible version
-                    
-                    # Check for partial version patterns that would be incompatible
-                    for pattern in version_patterns:
-                        if re.search(pattern, mod_id):
-                            # Extract the version number
-                            match = re.search(r"(\d+\.\d+(?:\.\d+)?)", mod_id)
-                            if match:
-                                mod_version = match.group(1)
-                                # Block if it's a partial version that doesn't match exactly
-                                if mod_version != current_mc_version:
-                                    return True  # Incompatible version
-                    
-                    return False
                 
                 # ---- Server Events API ----
                 @app.route("/api/server-events")
@@ -3101,13 +2885,12 @@ def _quarantine_mod(mods_dir, mod_id_or_slug, reason="unknown"):
                 shutil.move(src, dst)
                 log_event("QUARANTINE", f"Quarantined {fn} -> quarantine/ (reason: {reason})")
                 
-                # Write reason to a sidecar file with original folder
+                # Write reason to a sidecar file
                 reason_file = os.path.join(quarantine_dir, f"{fn}.reason.txt")
                 with open(reason_file, "w") as rf:
                     rf.write(f"Quarantined: {datetime.now().isoformat()}\n")
                     rf.write(f"Reason: {reason}\n")
                     rf.write(f"Mod ID/slug: {mod_id_or_slug}\n")
-                    rf.write(f"OriginalFolder: mods\n")
                 
                 return fn
             except Exception as e:
@@ -3116,57 +2899,6 @@ def _quarantine_mod(mods_dir, mod_id_or_slug, reason="unknown"):
     
     log_event("QUARANTINE", f"Could not find JAR matching '{mod_id_or_slug}' to quarantine")
     return None
-
-
-def _quarantine_dependent_mods(mods_dir, quarantined_mod_id):
-    """Find and quarantine all mods that depend on the given mod_id.
-    
-    When a mod is quarantined, any mods that list it as a dependency
-    should also be quarantined since they won't work without it.
-    """
-    import shutil
-    
-    if not quarantined_mod_id:
-        return []
-    
-    quarantine_dir = os.path.join(mods_dir, "quarantine")
-    os.makedirs(quarantine_dir, exist_ok=True)
-    
-    quarantined_deps = []
-    target_lower = quarantined_mod_id.lower()
-    
-    # Scan all JARs for dependencies on the quarantined mod
-    for fn in os.listdir(mods_dir):
-        if not fn.endswith('.jar'):
-            continue
-        jar_path = os.path.join(mods_dir, fn)
-        if not os.path.isfile(jar_path):
-            continue
-        
-        manifest = _parse_mod_manifest(jar_path)
-        mod_id = manifest.get("mod_id", "")
-        deps = manifest.get("dependencies", {})
-        
-        # Check if this mod depends on the quarantined mod
-        for dep_id in deps.keys():
-            if dep_id.lower() == target_lower:
-                # Quarantine this dependent mod
-                dst = os.path.join(quarantine_dir, fn)
-                try:
-                    shutil.move(jar_path, dst)
-                    reason_file = os.path.join(quarantine_dir, f"{fn}.reason.txt")
-                    with open(reason_file, "w") as rf:
-                        rf.write(f"Quarantined: {datetime.now().isoformat()}\n")
-                        rf.write(f"Reason: Depends on quarantined mod '{quarantined_mod_id}'\n")
-                        rf.write(f"Mod ID: {mod_id}\n")
-                        rf.write(f"OriginalFolder: mods\n")
-                    log_event("QUARANTINE", f"Quarantined {fn} (depends on {quarantined_mod_id})")
-                    quarantined_deps.append((fn, mod_id))
-                except Exception as e:
-                    log_event("QUARANTINE", f"Failed to quarantine dependent {fn}: {e}")
-                break
-    
-    return quarantined_deps
 
 
 def _search_curseforge_live(dep_name, mods_dir, mc_version, loader_name):
@@ -3646,53 +3378,24 @@ def _try_self_heal(loader_instance, crash_info, cfg, crash_history):
             # Client-only mod crash — move to clientonly/ instead of quarantining
             subtype = crash_info.get("subtype", "")
             bad_file = crash_info.get("bad_file")
-            culprits = crash_info.get("culprits", [culprit]) if crash_info.get("culprits") else [culprit]
-            
             if subtype == "client_only" and bad_file:
                 import shutil
                 jar_path = os.path.join(mods_dir, bad_file)
-                clientonly_dir = os.path.join(mods_dir, "clientonly")
-                quarantine_dir = os.path.join(mods_dir, "quarantine")
-                
-                # Check if already in clientonly (crashed from there)
-                clientonly_jar = os.path.join(clientonly_dir, bad_file)
-                if os.path.exists(clientonly_jar):
-                    # Mod is in clientonly/ but still causing crash - quarantine it
-                    os.makedirs(quarantine_dir, exist_ok=True)
-                    dst = os.path.join(quarantine_dir, bad_file)
-                    shutil.move(clientonly_jar, dst)
-                    reason_file = os.path.join(quarantine_dir, f"{bad_file}.reason.txt")
-                    with open(reason_file, "w") as rf:
-                        rf.write(f"Quarantined: {datetime.now().isoformat()}\n")
-                        rf.write(f"Reason: Client-only mixin crash - mod still crashed from clientonly/\n")
-                        rf.write(f"Mod ID: {culprit}\n")
-                        rf.write(f"OriginalFolder: clientonly\n")
-                    log_event("QUARANTINE", f"Quarantined {bad_file} (client-only mixin crash from clientonly/)")
-                    
-                    # Also quarantine mods that depend on this one
-                    _quarantine_dependent_mods(mods_dir, culprit)
-                    return "quarantined"
-                
                 if os.path.exists(jar_path):
+                    clientonly_dir = os.path.join(mods_dir, "clientonly")
                     os.makedirs(clientonly_dir, exist_ok=True)
                     dst = os.path.join(clientonly_dir, bad_file)
                     if not os.path.exists(dst):
                         shutil.move(jar_path, dst)
                         log_event("SELF_HEAL", f"Moved client-only mod {bad_file} -> clientonly/")
-                        
-                        # Move client-only dependencies to clientonly/ directory
-                        if crash_info.get("dependencies"):
-                            for dep in crash_info["dependencies"]:
-                                _move_clientonly_dependency(mods_dir, dep, clientonly_dir)
                     else:
+                        # Already in clientonly, just remove from mods/
                         os.remove(jar_path)
                         log_event("SELF_HEAL", f"Removed duplicate client-only mod {bad_file} from mods/ (already in clientonly/)")
                     return "fixed"
-                
                 # If bad_file not found, quarantine by mod ID
-                quarantined = _quarantine_mod(mods_dir, culprit, f"Client-only mod — crashes server (mixin error)")
+                quarantined = _quarantine_mod(mods_dir, culprit, f"Client-only mod — crashes server (NoClassDefFoundError: net/minecraft/client/gui/screens/Screen)")
                 if quarantined:
-                    _quarantine_dependent_mods(mods_dir, culprit)
                     return "quarantined"
                 return False
             
@@ -3710,7 +3413,6 @@ def _try_self_heal(loader_instance, crash_info, cfg, crash_history):
                         rf.write(f"Quarantined: {datetime.now().isoformat()}\n")
                         rf.write(f"Reason: Invalid JAR file (corrupt download / HTML error page)\n")
                         rf.write(f"Mod ID/slug: {culprit}\n")
-                        rf.write(f"OriginalFolder: mods\n")
                     log_event("QUARANTINE", f"Quarantined invalid JAR {bad_file} -> quarantine/")
                     return "quarantined"
             
@@ -3718,13 +3420,10 @@ def _try_self_heal(loader_instance, crash_info, cfg, crash_history):
             crash_history[culprit] = crash_history.get(culprit, 0) + 1
             log_event("SELF_HEAL", f"Mod error from {culprit} (crash #{crash_history[culprit]})")
             
-            # For mixin-related errors, quarantine immediately (after 1 crash)
-            max_crashes = cfg.get("max_crashes_before_quarantine", 2)
-            if crash_history[culprit] >= max_crashes:
+            if crash_history[culprit] >= 2:
                 log_event("SELF_HEAL", f"Quarantining {culprit} after {crash_history[culprit]} crashes")
                 quarantined = _quarantine_mod(mods_dir, culprit, f"Caused {crash_history[culprit]} crashes")
                 if quarantined:
-                    _quarantine_dependent_mods(mods_dir, culprit)
                     return "quarantined"
             return False
         else:
@@ -4346,7 +4045,7 @@ def run_server(cfg):
     Quarantine: mods/quarantine/ — bad mods moved there with reason files.
     No version fallback — strict MC version matching only.
     """
-    MAX_RESTART_ATTEMPTS = cfg.get("max_restart_attempts", 25)
+    MAX_RESTART_ATTEMPTS = 5
     RESTART_COOLDOWN = 15  # seconds between restart attempts
     MONITOR_TIMEOUT = 3600 * 6  # 6 hours — kill zombie tmux if no activity
     
@@ -4407,16 +4106,8 @@ def run_server(cfg):
     crash_history = {}  # Track {mod_id: crash_count} across restarts
     tmux_socket = f"/tmp/tmux-{os.getuid()}/default"
     stopped_flag = os.path.join(CWD, ".mc_stopped")
-    reset_counter_flag = os.path.join(CWD, ".mc_reset_counter")
     
     while restart_count <= MAX_RESTART_ATTEMPTS:
-        # Check for reset counter flag (from dashboard start button)
-        if os.path.exists(reset_counter_flag):
-            os.remove(reset_counter_flag)
-            restart_count = 0
-            crash_history = {}
-            log_event("SERVER_START", "Restart counter reset via dashboard")
-        
         # Check if MC was intentionally stopped via dashboard
         if os.path.exists(stopped_flag):
             log_event("SERVER_STOPPED", "MC was stopped via dashboard, waiting for start command...")

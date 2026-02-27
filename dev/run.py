@@ -2356,6 +2356,7 @@ def http_server(port, mods_dir):
                     c["server_port"] = props.get("server-port", c.get("server_port", "25565"))
                     c["query_port"] = props.get("query.port", "25565")
                     c["rcon_port"] = props.get("rcon.port", "25575")
+                    c["server_ip"] = get_server_hostname(c)
                     return jsonify(c)
                 
                 @app.route("/api/config", methods=["POST"])

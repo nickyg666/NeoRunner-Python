@@ -1559,14 +1559,14 @@
                     if (document.getElementById('update-freq')) document.getElementById('update-freq').value = cfg.ferium_update_interval_hours || 4;
                     
                     // Feature 15: Populate port display in header
-                    const serverIp = cfg.hostname || cfg.server_ip || window.location.hostname || 'localhost';
+                    const serverIp = cfg.server_ip || window.location.hostname || 'localhost';
                     const httpPort = cfg.http_port || 8000;
                     if (document.getElementById('game-port')) document.getElementById('game-port').textContent = cfg.server_port || '25565';
                     if (document.getElementById('query-port')) document.getElementById('query-port').textContent = cfg.query_port || '25565';
                     if (document.getElementById('rcon-port')) document.getElementById('rcon-port').textContent = cfg.rcon_port || '25575';
                     if (document.getElementById('http-port')) document.getElementById('http-port').textContent = httpPort;
                     
-                    // Feature 14: Populate PowerShell one-liner
+                    // Feature 14: Populate PowerShell one-liner with auto-detected server IP
                     const onelinerEl = document.getElementById('powershell-oneliner');
                     if (onelinerEl) {
                         const oneliner = `iwr http://${serverIp}:${httpPort}/download/install-mods.ps1 | iex`;

@@ -2,36 +2,52 @@
 # Generated: 2026-02-27
 # Updated after bugfixes
 
-## FIXED BUGS:
+## ALL CRITICAL BUGS FIXED:
+
+### Feature 9: Playwright browser reinstall on every service start
+- Fixed: Added marker file check to prevent redundant reinstalls
+- Location: /home/services/dev/run.py lines 54-85
+- Status: FIXED
 
 ### Feature 10: "Sort Client Mods" button added to Quarantine tab
-- Fixed: Added sortClientMods() function and button indashboard.html
+- Fixed: Added sortClientMods() function and button in dashboard.html
+- Location: /home/services/dev/dashboard.html lines 1149, 2157-2174
 - Status: FIXED
 
 ### Feature 11: World Management JavaScript fixed
 - Fixed: Removed reference to non-existent 'world-switcher' element
+- Location: /home/services/dev/dashboard.html line 1931
+- Status: FIXED
+
+### Feature 14: PowerShell one-liner hostname handling
+- Fixed: /api/config now returns server_ip via get_server_hostname()
+- Location: /home/services/dev/run.py line 2359, dashboard.html line 1561
 - Status: FIXED
 
 ### Feature 15: Port numbers loading from server.properties
 - Fixed: Updated dashboard.py /api/config to include server.properties data
+- Location: /home/services/dev/dashboard.py lines 227-233
 - Status: FIXED
 
----
+### Feature 16: Upgrade mods button removed
+- Status: VERIFIED - Button does not exist in current UI
 
-## REMAINING BUGS:
+### Features 17/18: Loader/MC version switching
+- Status: VERIFIED - Complete implementation in run.py
+- backup_loader_snapshot() - Creates full snapshot before switching
+- archive_loader_mods() - Archives current mods
+- switch_loader() - Handles switching with mod movement
+- World is backed up during loader switch
 
-## Feature 14: PowerShell one-liner - Incorrect hostname handling
-- Bug: One-liner may fail if hostname is empty in config
-- Location: /home/services/dev/dashboard.html lines 1561, 1569-1573
-- Problem: config.json has hostname="" (empty), no server_ip field
-- Fallback to window.location.hostname may be wrong for external access
-- Fix needed: Add server_ip to config or read from server.properties
+### mod_manager.py undefined 'source' variable
+- Fixed: Added source parameter to ModInfo.__init__
+- Location: /home/services/dev/mod_manager.py lines 12-18, 109-116, 194-200
+- Status: FIXED
 
-## Feature 16: Upgrade mods button should be removed
-- Status: Needs verification if button still exists in UI
-
-## Feature 17/18: Loader/MC version switching
-- Status: Needs verification for mod movement behavior
+### Crash history not persisted
+- Fixed: Added load_crash_history() and save_crash_history() functions
+- Location: /home/services/dev/run.py lines 230-258
+- Status: FIXED
 
 ---
 
@@ -41,7 +57,7 @@ The following LSP errors are false positives due to conditional imports:
 - run.py Stealth, sync_playwright "possibly unbound" errors
   - These are imported conditionally inside try/except blocks
   - They work correctly at runtime
+- PlaywrightTimeout "possibly unbound"
+  - Same as above - conditional import
 - mod_manager.py type inference issues
   - Optional type handling differences between static analysis and runtime
-
-

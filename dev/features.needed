@@ -1,0 +1,18 @@
+UI: separate tabbed views for server mods and client side mods. option in client side mods contains the option to quarantine all client mods, no longer on home page. still SPA design.
+add echo Eula=true > eula.txt after loader install in run. py
+add multi world support by scanning for alternative world folders (if folder contains level.dat then it is a world folder) by editing server.properties where it asks for the level name
+add world switcher to UI, takes effect on next reboot after modify server.properties. autoscan for world folders on boot to update world switcher in ui
+implement mod modder that will attempt to resolve mixin conflicts by either changing their load order or combining mods that need to share mixin modifications
+attempt to automate the process of mod patching for maximum mixin compatibility
+ensure all install flows work for 1.21.11 and launch each mod server
+only one loader can be run at a time. there should be an option in the interface to allow downloading other loaders and switching between them. if switching from neo to fabric, move all mods to a subfolder neo/{loaderVer}/{mcVer}/clientonly + ../*.jar
+fix pplaywright attempting install on every boot. 
+Quarantine tab - sort client mods and quarantine client mods button seem to be doing the same thing. Sort Client Mods button should move all quarantined mods
+many elements are outside of the CSS cards that make-up the UI. World Management is shown on all tabs, inside the CSS card, but all the data that should have been in that card is below, in an area that could easily be an additional card. "World Management" should be in its own section, not in the tabbed views card.
+Make the UI more futuristic and modern themed.
+Add Mods to Server - button should be updated to reflect it is to add mods from CF/MR, not local disk
+one liner (powershell) dynamic loading failing - read it from somewhere!
+port numbers at top of page - they are not loading in from server.properties or config.json.
+upgrade mods button can be removed - auto upgrade will replace it.
+in addition to the loader switcher, allow the version of minecraft to be switched as well, and fetch that combination {loader}{mcver} to spin up the correct version of the loader and switch to it.
+verify/update if needed - loader switching behavior should include mod movement to the new directory for the current loader+mcver before it is switched. Request loader switch -> backup mods (cp * or .zip) + copy world folder to base_dir/{loader}{mcVer}/ so the tree is root -> run.py etc --> fabric1.21.11/ ---> mods/ ----> *fabric1.21.11.jar etc --> world --> mods --> villagerpacks etc.

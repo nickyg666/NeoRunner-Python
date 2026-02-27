@@ -51,7 +51,7 @@ def _ensure_deps():
             print(f"[NeoRunner] WARNING: pip install failed. Try manually:")
             print(f"           pip install {' '.join(missing)}")
     
-    # Ensure Playwright browsers are installed
+    # Ensure Playwright browsers are installed, SOMETHING ABOUT THIS IS WRONG, TRIGGER EXCEPTION EVERY RUN
     try:
         import playwright
         # Check if chromium is available by looking for the browser path
@@ -67,12 +67,13 @@ def _ensure_deps():
             print("[NeoRunner] Playwright Chromium installed.")
         except Exception as e:
             print(f"[NeoRunner] WARNING: Playwright browser install failed: {e}")
+            # NEVER GETS TO THIS EXC THOUGH
             print("           CurseForge scraping will be unavailable.")
 
 _ensure_deps()
 # ══════════════════════════════════════════════════════════════════════════════
 
-import json, time, threading, logging, hashlib, urllib.request, urllib.error, socket
+import json, time, threading, logging, hashlib, urllib.request, urllib.error, socket, re, random
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -183,8 +184,6 @@ def _get_cf_headers():
         "Sec-Fetch-User": "?1",
         "Cache-Control": "max-age=0",
     }
-import re
-import random
 
 def _get_cwd():
     """Determine the working directory dynamically."""
@@ -1813,47 +1812,16 @@ def http_server(port, mods_dir):
     if FLASK_AVAILABLE:
         def run_flask_app():
             try:
-                import sys as _sys
-                _sys.path.insert(0, CWD)
+                from app import create_app
+                app = create_app()
                 
-                from flask import Flask, render_template, jsonify, request, send_file, Response
-                
-                app = Flask(__name__, template_folder=CWD, static_folder=os.path.join(CWD, "static"))
-                app.secret_key = os.urandom(24)
-                
-                def load_cfg():
-                    if os.path.exists(CONFIG):
-                        with open(CONFIG) as f:
-                            c = json.load(f)
-                    else:
-                        c = {}
-                    # Apply runtime defaults for any missing keys
-                    runtime_defaults = {
-                        "hostname": "",
-                        "broadcast_enabled": True,
-                        "broadcast_auto_on_install": True,
-                        "nag_show_mod_list_on_join": True,
-                        "nag_first_visit_modal": True,
-                        "motd_show_download_url": False,
-                        "install_script_types": "all",
-                        "curator_sort": "downloads",
-                        "curator_limit": 100,
-                    }
-                    for k, v in runtime_defaults.items():
-                        if k not in c:
-                            c[k] = v
-                    return c
-                
-                def save_cfg(c):
-                    with open(CONFIG, "w") as f:
-                        json.dump(c, f, indent=2)
-                
-                def run_cmd(cmd):
-                    try:
-                        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
-                        return {"success": result.returncode == 0, "stdout": result.stdout, "stderr": result.stderr}
-                    except Exception as e:
-                        return {"success": False, "error": str(e)}
+                # Import services for use in the Flask context
+                from app.services.config_service import load_cfg, save_cfg
+                from app.services.server_service import get_server_status
+                from app.services.java_service import _get_java_version, _check_jdk_upgrade_available
+                from app.services.mod_service import get_mods, delete_mod, quarantine_mod
+                from app.services.download_service import get_download_link, download_manifest
+                from app.services.api_service import run_cmd
                 
                 def get_server_status():
                     uid = os.getuid()
@@ -1919,44 +1887,7 @@ def http_server(port, mods_dir):
                     # Sort A-Z by name
                     return sorted(mods, key=lambda x: x["name"].lower())
                 
-                @app.route("/")
-                def dashboard():
-                    return render_template("dashboard.html")
-                
-                @app.route("/api/status")
-                def api_status():
-                    return jsonify(get_server_status())
-                
-                @app.route("/api/config")
-                def api_config():
-                    c = load_cfg()
-                    c["rcon_pass"] = "***"
-                    props = parse_props()
-                    c["server_port"] = props.get("server-port", c.get("server_port", "25565"))
-                    c["query_port"] = props.get("query.port", "25565")
-                    c["rcon_port"] = props.get("rcon.port", "25575")
-                    return jsonify(c)
-                
-                @app.route("/api/config", methods=["POST"])
-                def api_config_update():
-                    try:
-                        data = request.json
-                        c = load_cfg()
-                        allowed = [
-                            "ferium_update_interval_hours", "ferium_weekly_update_day",
-                            "ferium_weekly_update_hour", "mc_version",
-                            "hostname", "curator_sort", "curator_limit",
-                            "broadcast_enabled", "broadcast_auto_on_install",
-                            "nag_show_mod_list_on_join", "nag_first_visit_modal",
-                            "motd_show_download_url", "install_script_types",
-                        ]
-                        for field in allowed:
-                            if field in data:
-                                c[field] = data[field]
-                        save_cfg(c)
-                        return jsonify({"success": True, "message": "Config updated"})
-                    except Exception as e:
-                        return jsonify({"success": False, "error": str(e)}), 400
+                # Dashboard routes are now handled by the blueprint in app/blueprints/dashboard.py
                 
                 @app.route("/api/java")
                 def api_java_status():
@@ -2910,12 +2841,14 @@ echo "============================================"
                         whitelist = c.get("whitelist", [])
                         user_blacklist = c.get("user_blacklist", [])
                         user_whitelist = c.get("user_whitelist", [])
+                        blacklist_patterns = c.get("blacklist_patterns", [])
                         
                         return jsonify({
                             "blacklist": blacklist,
                             "whitelist": whitelist,
                             "user_blacklist": user_blacklist,
-                            "user_whitelist": user_whitelist
+                            "user_whitelist": user_whitelist,
+                            "blacklist_patterns": blacklist_patterns
                         })
                     except Exception as e:
                         return jsonify({"blacklist": [], "whitelist": [], "error": str(e)}), 500
@@ -2968,7 +2901,7 @@ echo "============================================"
                 
                 @app.route("/api/blacklist/patterns/add", methods=["POST"])
                 def api_blacklist_pattern_add():
-                    """Add a regex pattern to blacklist"""
+                    """Add a pattern to blacklist"""
                     try:
                         data = request.json
                         pattern = data.get("pattern", "").strip()
@@ -2982,18 +2915,29 @@ echo "============================================"
                             return jsonify({"success": False, "error": f"Invalid regex pattern: {e}"}), 400
                         
                         c = load_cfg()
-                        blacklist_patterns = c.get("blacklist_patterns", [])
+                        blacklist = c.get("blacklist", [])
                         
                         # Add pattern if not already present
-                        if pattern not in blacklist_patterns:
-                            blacklist_patterns.append(pattern)
-                            c["blacklist_patterns"] = blacklist_patterns
+                        if pattern not in blacklist:
+                            blacklist.append(pattern)
+                            c["blacklist"] = blacklist
                             save_cfg(c)
-                            log_event("BLACKLIST", f"Added pattern {pattern} to blacklist")
+                            log_event("BLACKLIST", f"Added blacklist pattern: {pattern}")
                         
-                        return jsonify({"success": True, "message": f"Added pattern {pattern} to blacklist"})
+                        return jsonify({"success": True, "message": "Pattern added to blacklist"})
                     except Exception as e:
                         return jsonify({"success": False, "error": str(e)}), 400
+                
+                @app.route("/api/blacklist/patterns")
+                def api_blacklist_patterns():
+                    """Get current blacklist patterns"""
+                    try:
+                        c = load_cfg()
+                        blacklist = c.get("blacklist", [])
+                        
+                        return jsonify({"blacklist_patterns": blacklist})
+                    except Exception as e:
+                        return jsonify({"blacklist_patterns": [], "error": str(e)}), 500
                 
                 @app.route("/api/blacklist/patterns/remove", methods=["POST"])
                 def api_blacklist_pattern_remove():

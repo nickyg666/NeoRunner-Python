@@ -1,29 +1,25 @@
 #!/usr/bin/env bash
 # ══════════════════════════════════════════════════════════════════════
-# NeoRunner — One-File Installer
-# Modded Minecraft server manager with web dashboard, dual-source mod
-# curation (Modrinth API + CurseForge scraping), crash recovery, RCON
-# tellraw broadcasts, and auto-generated client install scripts.
-#
+# NeoRunner — Ultimate Installer
+# One-File Installer for all dependencies and configurations
+# 
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/nickyg666/NeoRunner-Python/master/install.sh | sudo bash
 #   — or —
 #   wget -qO- https://raw.githubusercontent.com/nickyg666/NeoRunner-Python/master/install.sh | sudo bash
 #   — or —
 #   chmod +x install.sh && sudo ./install.sh
-#
+# 
 # What this does:
-#   1. Installs system deps (Java 21, Python 3, pip, git, tmux)
+#   1. System dependencies (Java 21, Python 3, pip, git, tmux, etc)
 #   2. Creates service user if needed
-#   3. Clones NeoRunner, downloads ferium for mod management
-#   4. Sets up Python venv + pip packages (Flask, Playwright, etc.)
+#   3. Downloads and configures NeoRunner
+#   4. Sets up Python venv + pip packages (Flask, Playwright, etc)
 #   5. Installs Playwright Chromium (for CurseForge scraping)
 #   6. Creates systemd service (auto-start on boot)
 #   7. Runs NeoRunner (prompts for loader, installs it, starts server)
-#
-# The loader (NeoForge/Fabric/Forge) is installed on first run based on
-# user selection. Run again anytime to update.
-#
+#   8. Sets up complete environment with all features
+# 
 # After install, open http://<your-ip>:8000 for the dashboard.
 # ══════════════════════════════════════════════════════════════════════
 
@@ -48,361 +44,321 @@ if [[ $EUID -ne 0 ]]; then
     fail "This script must be run as root (use sudo)."
 fi
 
-REPO="https://github.com/nickyg666/NeoRunner-Python.git"
-BRANCH="master"
+# ── Configuration ──────────────────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_NAME="NeoRunner"
+PROJECT_DIR="/opt/${PROJECT_NAME,,}"
+USER_NAME="${PROJECT_NAME,,}"
 
-# ── Determine install directory ──────────────────────────────────────
-# Use SUDO_USER's home if available, otherwise /opt/NeoRunner
-if [[ -n "${SUDO_USER:-}" ]]; then
-    SUDO_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
-    INSTALL_DIR="${SUDO_HOME}/NeoRunner"
-    SERVICE_USER="$SUDO_USER"
-else
-    INSTALL_DIR="/opt/NeoRunner"
-    SERVICE_USER="neorunner"
-fi
-
-SERVICE_NAME="mcserver"
-VENV_DIR="$INSTALL_DIR/neorunner_env"
-FERIUM_DIR="$INSTALL_DIR/.local/bin"
-
-echo -e "${BOLD}"
-echo "╔══════════════════════════════════════════════════════════╗"
-echo "║           NeoRunner — Modded MC Server Manager          ║"
-echo "║                    One-File Installer                   ║"
-echo "╚══════════════════════════════════════════════════════════╝"
-echo -e "${NC}"
-
-info "Installing to: $INSTALL_DIR"
-info "Service user: $SERVICE_USER"
-
-# ── 1. System packages ──────────────────────────────────────────────
-step "1/6  Installing system packages"
-
-export DEBIAN_FRONTEND=noninteractive
-
-# Detect package manager
-if command -v apt-get &>/dev/null; then
-    PKG="apt"
-elif command -v dnf &>/dev/null; then
-    PKG="dnf"
-elif command -v yum &>/dev/null; then
-    PKG="yum"
-else
-    fail "Unsupported package manager. Need apt, dnf, or yum."
-fi
-
-if [[ "$PKG" == "apt" ]]; then
-    info "Updating apt cache..."
-    apt-get update -qq
-
-    info "Installing Java 21, Python 3, git, tmux..."
-    apt-get install -y -qq \
-        python3 python3-pip python3-venv \
-        git tmux curl wget unzip \
-        2>&1 | tail -5
-
-    # Install Playwright browser dependencies
-    info "Installing Playwright browser dependencies..."
-    apt-get install -y -qq \
-        libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
-        libxcursor1 libxdamage1 libxfixes3 libxi6 libxrandr2 libxss1 libxtst6 \
-        libgbm1 libpango-1.0-0 libcairo2 libasound2 libnspr4 libnss3 libgtk-3-0 \
-        2>&1 | tail -5 || warn "Some Playwright deps may be missing"
-
-    # Try multiple Java 21 providers (openjdk, temurin, corretto)
-    if ! java -version 2>&1 | grep -qE "21|22|23"; then
-        info "Installing Java 21..."
-        apt-get install -y -qq openjdk-21-jre-headless 2>&1 | tail -3 || \
-            { info "Trying Eclipse Temurin..."; apt-get install -y -qq temurin-21-jre 2>&1 | tail -3; } || \
-            { info "Trying Amazon Corretto..."; apt-get install -y -qq java-21-amazon-corretto-jre 2>&1 | tail-3; } || \
-            warn "Could not auto-install Java 21, please install manually"
-    fi
-elif [[ "$PKG" == "dnf" ]] || [[ "$PKG" == "yum" ]]; then
-    # Detect Fedora vs RHEL/Amazon Linux
-    DISTRO="rhel"
-    if [[ -f /etc/fedora-release ]]; then
-        DISTRO="fedora"
-    elif [[ -f /etc/system-release ]] && grep -q "Amazon Linux" /etc/system-release; then
-        DISTRO="amazon"
-    fi
-    
-    info "Detected distro: $DISTRO"
-    info "Installing Java 21, Python 3, git, tmux..."
-    $PKG install -y --skip-broken \
-        python3 python3-pip \
-        git tmux curl wget unzip \
-        2>&1 | tail -5
-
-    # Install Playwright browser dependencies
-    info "Installing Playwright browser dependencies..."
-    if [[ "$DISTRO" == "fedora" ]]; then
-        # Fedora package names
-        $PKG install -y --skip-broken \
-            atk at-spi2-atk cups-libs libdrm libxkbcommon libXcomposite libXcursor \
-            libXdamage libXfixes libXi libXrandr libXScrnSaver libXtst mesa-libgbm \
-            pango alsa-lib nss nspr gtk3 libwayland-client libwayland-egl \
-            2>&1 | tail -5 || warn "Some Playwright deps may be missing"
+# ── System Detection ──────────────────────────────────────────────
+DETECT_OS() {
+    if [[ -f /etc/os-release ]]; then
+        . /etc/os-release
+        OS=$NAME
+        OS_VERSION=$VERSION_ID
+        OS_ID=$ID
     else
-        # RHEL/Amazon Linux package names (different capitalization)
-        $PKG install -y --skip-broken \
-            atk at-spi2-atk cups-libs libdrm libxkbcommon libxcomposite libxcursor \
-            libxdamage libxfixes libxi libxrandr libxscrnsaver libxtst mesa-libgbm \
-            pango alsa-lib nss nspr gtk3 \
-            2>&1 | tail -5 || warn "Some Playwright deps may be missing"
-    fi
-
-    # Try multiple Java 21 providers
-    if ! java -version 2>&1 | grep -qE "21|22|23"; then
-        info "Installing Java 21..."
-        if [[ "$DISTRO" == "fedora" ]]; then
-            # Fedora has different java package naming
-            $PKG install -y --skip-broken java-21-openjdk-headless 2>&1 | tail -3 || \
-                $PKG install -y --skip-broken java-openjdk21 2>&1 | tail -3 || \
-                $PKG install -y --skip-broken java-latest-openjdk-headless 2>&1 | tail -3 || \
-                warn "Could not auto-install Java 21, please install manually"
-        else
-            # RHEL/Amazon Linux
-            $PKG install -y --skip-broken java-21-openjdk-headless 2>&1 | tail -3 || \
-                $PKG install -y --skip-broken java-21-amazon-corretto 2>&1 | tail -3 || \
-                $PKG install -y --skip-broken java-21-temurin 2>&1 | tail -3 || \
-                warn "Could not auto-install Java 21, please install manually"
-        fi
+        fail "Cannot detect operating system"
     fi
     
-    # Amazon Linux 2 extras for newer packages
-    if [[ "$DISTRO" == "amazon" ]] && grep -q "Amazon Linux 2" /etc/system-release; then
-        info "Enabling Amazon Linux 2 extras..."
-        amazon-linux-extras install -y epel 2>/dev/null || true
-    fi
-fi
-
-# Verify critical deps
-command -v java    &>/dev/null || fail "Java not installed - please install Java 21+ manually"
-command -v python3 &>/dev/null || fail "Python 3 not installed"
-command -v tmux    &>/dev/null || fail "tmux not installed"
-
-# Verify Java version (accept any 21+)
-JAVA_VER=$(java -version 2>&1 | head -1)
-if ! echo "$JAVA_VER" | grep -qE "21|22|23|24"; then
-    warn "Java version may be too old: $JAVA_VER"
-    warn "NeoRunner requires Java 21+. Server may fail to start."
-fi
-
-PYTHON_VER=$(python3 --version)
-ok "Java:   $JAVA_VER"
-ok "Python: $PYTHON_VER"
-
-# ── 2. Create service user ──────────────────────────────────────────
-step "2/6  Setting up '$SERVICE_USER' user"
-
-if id "$SERVICE_USER" &>/dev/null; then
-    ok "User '$SERVICE_USER' already exists"
-else
-    info "Creating user '$SERVICE_USER'..."
-    useradd -m -s /bin/bash "$SERVICE_USER"
-    ok "User '$SERVICE_USER' created"
-fi
-
-# ── 3. Clone repo ───────────────────────────────────────────────────
-step "3/6  Cloning NeoRunner"
-
-if [[ -d "$INSTALL_DIR/.git" ]]; then
-    info "Existing repo found, pulling latest..."
-    su - "$SERVICE_USER" -c "cd $INSTALL_DIR && git pull origin $BRANCH" 2>&1 | tail -3
-    ok "Repository updated"
-else
-    if [[ -d "$INSTALL_DIR" ]] && [[ "$(ls -A $INSTALL_DIR 2>/dev/null)" ]]; then
-        # Home dir exists with stuff in it but no git repo
-        info "Existing files found in $INSTALL_DIR, cloning into temp and merging..."
-        TMPDIR=$(mktemp -d)
-        git clone --branch "$BRANCH" "$REPO" "$TMPDIR" 2>&1 | tail -3
-        # Copy repo files (don't overwrite existing config/mods)
-        cp -rn "$TMPDIR/." "$INSTALL_DIR/" 2>/dev/null || true
-        # Make sure .git is there
-        cp -r "$TMPDIR/.git" "$INSTALL_DIR/.git"
-        rm -rf "$TMPDIR"
-        chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
-        ok "Repo merged into existing directory"
-    else
-        info "Cloning fresh..."
-        git clone --branch "$BRANCH" "$REPO" "$INSTALL_DIR" 2>&1 | tail -3
-        chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
-        ok "Repository cloned to $INSTALL_DIR"
-    fi
-fi
-
-# ── 3.5. Download Ferium ─────────────────────────────────────────────
-info "Downloading Ferium mod manager..."
-
-mkdir -p "$FERIUM_DIR"
-
-if [[ -x "$FERIUM_DIR/ferium" ]]; then
-    ok "Ferium already installed at $FERIUM_DIR/ferium"
-else
-    FERIUM_TMP=$(mktemp -d)
-    cd "$FERIUM_TMP"
-    
-    # Detect architecture
-    ARCH=$(uname -m)
-    case "$ARCH" in
-        x86_64)  FERIUM_ZIP="ferium-linux-nogui.zip" ;;
-        aarch64) FERIUM_ZIP="ferium-linux-armv7-nogui.zip" ;;
-        armv7l)  FERIUM_ZIP="ferium-linux-armv7-nogui.zip" ;;
-        *)       warn "Unknown arch $ARCH, trying x86_64"; FERIUM_ZIP="ferium-linux-nogui.zip" ;;
+    case $OS_ID in
+        ubuntu|debian)
+            PACKAGE_MANAGER="apt"
+            PACKAGE_INSTALL="apt-get install -y"
+            SYSTEM_PKGS="git python3 python3-pip python3-venv tmux default-jre-headless curl wget"
+            PYTHON="python3"
+            PIP="pip3"
+            ;;
+        fedora|centos|rhel)
+            PACKAGE_MANAGER="dnf"
+            PACKAGE_INSTALL="dnf install -y"
+            SYSTEM_PKGS="git python3 python3-pip python3-virtualenv tmux java-17-openjdk-headless curl wget"
+            PYTHON="python3"
+            PIP="pip3"
+            ;;
+        amazonlinux)
+            PACKAGE_MANAGER="yum"
+            PACKAGE_INSTALL="yum install -y"
+            SYSTEM_PKGS="git python3 python3-pip python3-venv tmux java-17-amazon-corretto-headless curl wget"
+            PYTHON="python3"
+            PIP="pip3"
+            ;;
+        arch)
+            PACKAGE_MANAGER="pacman"
+            PACKAGE_INSTALL="pacman -S --noconfirm"
+            SYSTEM_PKGS="git python python-pip python-virtualenv tmux jre-openjdk-headless curl wget"
+            PYTHON="python"
+            PIP="pip"
+            ;;
+        *)
+            fail "Unsupported operating system: $OS_ID"
+            ;;
     esac
+}
+
+# ── System Update ──────────────────────────────────────────────────
+UPDATE_SYSTEM() {
+    step "Updating system packages"
+    case $PACKAGE_MANAGER in
+        apt)
+            apt-get update && apt-get upgrade -y
+            ;;
+        dnf)
+            dnf update -y
+            ;;
+        yum)
+            yum update -y
+            ;;
+        pacman)
+            pacman -Syu --noconfirm
+            ;;
+    esac
+}
+
+# ── Install System Dependencies ─────────────────────────────────
+INSTALL_SYSTEM_DEPS() {
+    step "Installing system dependencies"
+    $PACKAGE_INSTALL $SYSTEM_PKGS
     
-    info "Downloading $FERIUM_ZIP for $ARCH..."
-    wget -q "https://github.com/gorilla-devs/ferium/releases/download/v4.7.1/$FERIUM_ZIP" -O ferium.zip
-    unzip -q ferium.zip
-    
-    # Find the ferium binary (might be in a subdirectory)
-    FERIUM_BIN=$(find . -name "ferium" -type f 2>/dev/null | head -1)
-    if [[ -n "$FERIUM_BIN" ]]; then
-        mv "$FERIUM_BIN" "$FERIUM_DIR/ferium"
-        chmod +x "$FERIUM_DIR/ferium"
-        chown "$SERVICE_USER:$SERVICE_USER" "$FERIUM_DIR/ferium"
-        ok "Ferium installed to $FERIUM_DIR/ferium"
-    else
-        warn "Could not find ferium binary in downloaded zip"
+    # Check Java version
+    if ! command -v java &> /dev/null; then
+        fail "Java installation failed"
     fi
     
-    cd "$INSTALL_DIR"
-    rm -rf "$FERIUM_TMP"
-fi
-
-# ── 4. Python venv + packages ───────────────────────────────────────
-step "4/6  Setting up Python environment"
-
-if [[ ! -d "$VENV_DIR" ]]; then
-    info "Creating virtual environment..."
-    su - "$SERVICE_USER" -c "python3 -m venv $VENV_DIR"
-fi
-
-info "Installing Python packages..."
-su - "$SERVICE_USER" -c "$VENV_DIR/bin/pip install --upgrade pip -q"
-su - "$SERVICE_USER" -c "$VENV_DIR/bin/pip install -q -r $INSTALL_DIR/requirements.txt"
-ok "Python packages installed"
-
-# Also install to system Python so systemd can use either
-info "Installing core packages to system Python (fallback)..."
-pip3 install --break-system-packages -q Flask requests playwright playwright-stealth 2>/dev/null || \
-    pip3 install -q Flask requests playwright playwright-stealth 2>/dev/null || \
-    warn "System pip install failed (non-fatal, venv will be used)"
-
-# ── 5. Playwright browser ───────────────────────────────────────────
-step "5/6  Installing Playwright Chromium"
-
-info "This downloads ~150 MB of Chromium for headless CurseForge scraping..."
-# Install browser
-su - "$SERVICE_USER" -c "$VENV_DIR/bin/python3 -m playwright install chromium" 2>&1 | tail -10 || \
-    warn "Playwright browser install had issues"
-
-# Install system deps for Playwright (requires root)
-info "Installing Playwright system dependencies..."
-$VENV_DIR/bin/python3 -m playwright install-deps chromium 2>&1 | tail -5 || {
-    warn "Automatic dep install failed, trying manual packages..."
-    # Already installed above, but try again for good measure
-    if command -v apt-get &>/dev/null; then
-        apt-get install -y -qq libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 libxcomposite1 \
-            libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 \
-            libnspr4 libnss3 libgtk-3-0 2>&1 | tail -3
-    elif command -v yum &>/dev/null || command -v dnf &>/dev/null; then
-        PKG_CMD="yum"
-        command -v dnf &>/dev/null && PKG_CMD="dnf"
-        $PKG_CMD install -y --skip-broken atk at-spi2-atk cups-libs libxkbcommon libxcomposite \
-            libxdamage libxfixes libxrandr libxtst mesa-libgbm pango alsa-lib nss nspr gtk3 2>&1 | tail -3
+    JAVA_VERSION=$(java -version 2>&1 | head -1 | cut -d'"' -f2)
+    if [[ ! $JAVA_VERSION =~ ^21.* ]] && [[ ! $JAVA_VERSION =~ ^17.* ]]; then
+        warn "Recommended Java 21 or 17, found: $JAVA_VERSION"
     fi
 }
-ok "Playwright Chromium installed"
 
-# ── 6. Systemd user service ──────────────────────────────────────────
-step "6/6  Creating systemd user service"
+# ── Create User ───────────────────────────────────────────────────
+CREATE_USER() {
+    step "Creating service user"
+    if ! id "$USER_NAME" &>/dev/null; then
+        useradd -r -s /bin/false -d "$PROJECT_DIR" "$USER_NAME"
+        mkdir -p "$PROJECT_DIR"
+        chown -R "$USER_NAME:$USER_NAME" "$PROJECT_DIR"
+        ok "User $USER_NAME created"
+    else
+        ok "User $USER_NAME already exists"
+    fi
+}
 
-# Create user systemd directory
-SYSTEMD_USER_DIR="/home/$SERVICE_USER/.config/systemd/user"
-su - "$SERVICE_USER" -c "mkdir -p $SYSTEMD_USER_DIR"
+# ── Clone Project ────────────────────────────────────────────────
+CLONE_PROJECT() {
+    step "Cloning NeoRunner project"
+    if [[ ! -d "$PROJECT_DIR" ]]; then
+        git clone https://github.com/nickyg666/NeoRunner-Python.git "$PROJECT_DIR"
+        chown -R "$USER_NAME:$USER_NAME" "$PROJECT_DIR"
+        ok "Project cloned to $PROJECT_DIR"
+    else
+        warn "Project directory already exists"
+        cd "$PROJECT_DIR"
+        git pull
+        ok "Project updated"
+    fi
+}
 
-# Write user service file (no root required to manage)
-su - "$SERVICE_USER" -c "cat > $SYSTEMD_USER_DIR/${SERVICE_NAME}.service" << SERVICEEOF
+# ── Setup Python Virtual Environment ─────────────────────────────
+SETUP_PYTHON_ENV() {
+    step "Setting up Python virtual environment"
+    cd "$PROJECT_DIR"
+    
+    if [[ ! -d "neorunner_env" ]]; then
+        $PYTHON -m venv neorunner_env
+        chown -R "$USER_NAME:$USER_NAME" neorunner_env
+        ok "Virtual environment created"
+    else
+        ok "Virtual environment already exists"
+    fi
+    
+    # Activate and install dependencies
+    source neorunner_env/bin/activate
+    
+    # Upgrade pip
+    $PIP install --upgrade pip
+    
+    # Install requirements
+    $PIP install -r requirements.txt
+    
+    # Install Playwright with stealth
+    $PIP install playwright playwright-stealth
+    
+    # Install Playwright browsers
+    playwright install chromium
+    
+    ok "Python environment setup complete"
+}
+
+# ── Setup Ferium ────────────────────────────────────────────────
+SETUP_FERIUM() {
+    step "Setting up Ferium mod manager"
+    cd "$PROJECT_DIR"
+    
+    # Create .local directory
+    mkdir -p .local/bin
+    
+    # Download Ferium
+    if [[ ! -f ".local/bin/ferium" ]]; then
+        FERIUM_URL="https://github.com/Altare4/ferium/releases/latest/download/ferium-linux-x86_64"
+        curl -L -o .local/bin/ferium $FERIUM_URL
+        chmod +x .local/bin/ferium
+        chown -R "$USER_NAME:$USER_NAME" .local
+        ok "Ferium downloaded"
+    else
+        ok "Ferium already installed"
+    fi
+    
+    # Initialize Ferium profile
+    if [[ ! -d "$HOME/.config/ferium" ]]; then
+        .local/bin/ferium --help > /dev/null 2>&1 || true
+        ok "Ferium profile initialized"
+    fi
+}
+
+# ── Create Systemd Service ──────────────────────────────────────
+CREATE_SYSTEMD_SERVICE() {
+    step "Creating systemd service"
+    SERVICE_FILE="/etc/systemd/system/${PROJECT_NAME,,}.service"
+    
+    cat > "$SERVICE_FILE" << EOF
 [Unit]
-Description=NeoRunner Minecraft Server
+Description=${PROJECT_NAME} Minecraft Server Manager
 After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=$INSTALL_DIR
-ExecStart=$VENV_DIR/bin/python3 $INSTALL_DIR/run.py run
+User=$USER_NAME
+WorkingDirectory=$PROJECT_DIR
+ExecStart=$PROJECT_DIR/neorunner_env/bin/python $PROJECT_DIR/run.py run
 Restart=always
 RestartSec=10
-StandardOutput=append:$INSTALL_DIR/live.log
-StandardError=append:$INSTALL_DIR/live.log
-Environment="PATH=$VENV_DIR/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-Environment="PYTHONPATH=$INSTALL_DIR"
-Environment="NEORUNNER_HOME=$INSTALL_DIR"
+StandardOutput=journal
+StandardError=journal
 
 [Install]
-WantedBy=default.target
-SERVICEEOF
+WantedBy=multi-user.target
+EOF
 
-# Enable lingering so user services start at boot without login
-loginctl enable-linger "$SERVICE_USER" 2>/dev/null || true
+    systemctl daemon-reload
+    systemctl enable ${PROJECT_NAME,,}.service
+    ok "Systemd service created and enabled"
+}
 
-# Reload and enable user service
-su - "$SERVICE_USER" -c "XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user daemon-reload"
-su - "$SERVICE_USER" -c "XDG_RUNTIME_DIR=/run/user/\$(id -u) systemctl --user enable $SERVICE_NAME" 2>/dev/null || true
-ok "User service '$SERVICE_NAME' created and enabled"
-info "Manage with: systemctl --user start/stop/restart $SERVICE_NAME"
-
-# ── Create directories ──────────────────────────────────────────────
-su - "$SERVICE_USER" -c "mkdir -p $INSTALL_DIR/mods/clientonly"
-su - "$SERVICE_USER" -c "mkdir -p $INSTALL_DIR/backups"
-
-# ── Accept EULA (required for MC server to start) ───────────────────
-if [[ ! -f "$INSTALL_DIR/eula.txt" ]]; then
-    info "Pre-accepting Minecraft EULA..."
-    su - "$SERVICE_USER" -c "echo 'eula=true' > $INSTALL_DIR/eula.txt"
-fi
-
-# Fix ownership
-chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
-
-ok "System ready"
-
-# ── Run NeoRunner ───────────────────────────────────────────────────
-echo ""
-echo -e "${BOLD}╔══════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}║${NC}  ${GREEN}System prep complete!${NC}                                   ${BOLD}║${NC}"
-echo -e "${BOLD}╠══════════════════════════════════════════════════════════╣${NC}"
-echo -e "${BOLD}║${NC}                                                          ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}  NeoRunner will now:                                     ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}    • Ask you to pick a loader (NeoForge/Fabric/Forge)   ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}    • Download and install it                             ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}    • Start the Minecraft server in tmux                  ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}                                                          ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}  ${CYAN}After startup:${NC}                                          ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}    Dashboard: http://<your-ip>:8000                      ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}    MC Server: <your-ip>:25565                            ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}    Logs:      tail -f $INSTALL_DIR/live.log       ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}    MC Console: tmux attach -t MC                        ${BOLD}║${NC}"
-echo -e "${BOLD}║${NC}                                                          ${BOLD}║${NC}"
-echo -e "${BOLD}╚══════════════════════════════════════════════════════════╝${NC}"
-echo ""
-
-read -rp "Start NeoRunner now? [Y/n] " START_NOW
-START_NOW=${START_NOW:-Y}
-if [[ "${START_NOW,,}" == "y" ]]; then
-    info "Starting NeoRunner..."
-    cd "$INSTALL_DIR"
+# ── Configure Project ────────────────────────────────────────────
+CONFIGURE_PROJECT() {
+    step "Configuring project"
+    cd "$PROJECT_DIR"
     
-    # Run interactively so user can select loader
-    su - "$SERVICE_USER" -c "cd '$INSTALL_DIR' && NEORUNNER_HOME='$INSTALL_DIR' $VENV_DIR/bin/python3 run.py run"
+    # Create config.json if it doesn't exist
+    if [[ ! -f "config.json" ]]; then
+        cat > config.json << EOF
+{
+  "server_jar": "neo.jar",
+  "rcon_pass": "1",
+  "rcon_port": "25575",
+  "rcon_host": "127.0.0.1",
+  "http_port": "8000",
+  "mods_dir": "mods",
+  "clientonly_dir": "mods/clientonly",
+  "autostart": "yes",
+  "loader": "neoforge",
+  "mc_version": "1.21.11",
+  "max_download_mb": 600,
+  "rate_limit_seconds": 2,
+  "run_curator_on_startup": true,
+  "curator_limit": 250,
+  "curator_show_optional_audit": true,
+  "curator_max_depth": 3,
+  "hostname": "127.0.0.1",
+  "broadcast_enabled": true,
+  "broadcast_auto_on_install": true,
+  "nag_show_mod_list_on_join": false,
+  "nag_first_visit_modal": false,
+  "motd_show_download_url": false,
+  "install_script_types": "ps1",
+  "curator_sort": "downloads",
+  "ferium_update_interval_hours": 24,
+  "ferium_weekly_update_day": "mon",
+  "ferium_weekly_update_hour": 2
+}
+EOF
+        chown "$USER_NAME:$USER_NAME" config.json
+        ok "config.json created"
+    else
+        ok "config.json already exists"
+    fi
     
-    cd - > /dev/null
-else
-    info "Start manually with:"
-    info "  cd $INSTALL_DIR && $VENV_DIR/bin/python3 run.py run"
-    info ""
-    info "Or use systemd (non-interactive, uses saved config):"
-    info "  sudo systemctl start $SERVICE_NAME"
-fi
+    # Create necessary directories
+    mkdir -p mods mods/clientonly mixins patches manifests logs
+    chown -R "$USER_NAME:$USER_NAME" mods patches manifests logs
+    
+    ok "Project configured"
+}
+
+# ── Start Service ───────────────────────────────────────────────
+START_SERVICE() {
+    step "Starting ${PROJECT_NAME} service"
+    systemctl start ${PROJECT_NAME,,}
+    
+    # Wait for service to start
+    sleep 5
+    
+    if systemctl is-active --quiet ${PROJECT_NAME,,}; then
+        ok "${PROJECT_NAME} service is running"
+        info "Dashboard available at: http://$(hostname -I | cut -d' ' -f1):8000"
+        info "Server port: 1234"
+        info "RCON port: 25575"
+    else
+        fail "Failed to start ${PROJECT_NAME} service"
+    fi
+}
+
+# ── Display Summary ─────────────────────────────────────────────
+DISPLAY_SUMMARY() {
+    step "Installation complete!"
+    echo -e "${GREEN}✓ Installation successful!${NC}"
+    echo ""
+    echo "${BOLD}Project:${NC}       ${PROJECT_NAME}"
+    echo "${BOLD}Directory:${NC}      $PROJECT_DIR"
+    echo "${BOLD}Service:${NC}        ${PROJECT_NAME,,}"
+    echo "${BOLD}Dashboard:${NC}      http://$(hostname -I | cut -d' ' -f1):8000"
+    echo "${BOLD}Server Port:${NC}    1234"
+    echo "${BOLD}RCON Port:${NC}     25575"
+    echo ""
+    echo "${BOLD}Commands:${NC}"
+    echo "  Start service:    systemctl start ${PROJECT_NAME,,}"
+    echo "  Stop service:     systemctl stop ${PROJECT_NAME,,}"
+    echo "  View logs:        journalctl -u ${PROJECT_NAME,,} -f"
+    echo "  Access dashboard: http://$(hostname -I | cut -d' ' -f1):8000"
+    echo ""
+    echo "${BOLD}First run:${NC} The system will prompt you to select a Minecraft loader (NeoForge/Fabric/Forge)"
+    echo "and install the server. This may take several minutes depending on your internet connection."
+}
+
+# ────────────────────────────────────────────────────────────────
+# MAIN EXECUTION
+# ────────────────────────────────────────────────────────────────
+
+main() {
+    step "Starting ${PROJECT_NAME} installation"
+    
+    info "Detected OS: $OS $OS_VERSION"
+    info "Package manager: $PACKAGE_MANAGER"
+    
+    UPDATE_SYSTEM
+    INSTALL_SYSTEM_DEPS
+    CREATE_USER
+    CLONE_PROJECT
+    SETUP_PYTHON_ENV
+    SETUP_FERIUM
+    CONFIGURE_PROJECT
+    CREATE_SYSTEMD_SERVICE
+    START_SERVICE
+    DISPLAY_SUMMARY
+}
+
+# ────────────────────────────────────────────────────────────────
+trap 'fail "Installation interrupted"' INT TERM EXIT
+main
+exit 0

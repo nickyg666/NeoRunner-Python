@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mod Editing System</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #333;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .nav-tabs {
+            display: flex;
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .nav-tabs button {
+            flex: 1;
+            padding: 15px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 1.1em;
+            transition: all 0.3s;
+            border-bottom: 3px solid transparent;
+        }
+
+        .nav-tabs button.active {
+            background: white;
+            border-bottom-color: #667eea;
+            color: #667eea;
+        }
+
+        .tab-content {
+            padding: 30px;
+        }
+
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .status-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            border-left: 5px solid #667eea;
+        }
+
+        .status-card .value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .status-card .label {
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .mod-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 15px;
+        }
+
+        .mod-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 10px;
+            border-left: 3px solid #28a745;
+            transition: transform 0.2s;
+        }
+
+        .mod-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+
+        .mod-item.client-only {
+            border-left-color: #dc3545;
+        }
+
+        .mod-item.quarantined {
+            border-left-color: #ffc107;
+            opacity: 0.7;
+        }
+
+        .mod-name {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .mod-info {
+            font-size: 0.9em;
+            color: #666;
+        }
+
+        .warning-item {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            color: #721c24;
+        }
+
+        .btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: background 0.3s;
+        }
+
+        .btn:hover {
+            background: #5a6fd8;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+        }
+
+        .btn-warning {
+            background: #ffc107;
+            color: #212529;
+        }
+
+        .btn-warning:hover {
+            background: #e0a800;
+        }
+
+        .refresh-btn {
+            float: right;
+            margin-bottom: 20px;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .active {
+            display: block;
+        }
+
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #28a745;
+            color: white;
+            padding: 15px 20px;
+            border-radius: 5px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            z-index: 1000;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        .toast.error {
+            background: #dc3545;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+        }
+
+        .modal-content {
+            background: white;
+            margin: 10% auto;
+            padding: 30px;
+            border-radius: 10px;
+            width: 90%;
+            max-width: 500px;
+        }
+
+        .close {
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .close:hover {
+            color: #dc3545;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 1em;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .result-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        .result-table th,
+        .result-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .result-table th {
+            background: #f8f9fa;
+            font-weight: bold;
+        }
+
+        .result-table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .badge {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            font-weight: bold;
+        }
+
+        .badge-success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .badge-warning {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .badge-danger {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .progress {
+            width: 100%;
+            height: 10px;
+            background: #e9ecef;
+            border-radius: 5px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: #28a745;
+            transition: width 0.3s ease;
+        }
+
+        .info-box {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            color: #0c5460;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Mod Editing System</h1>
+            <p>Automated Minecraft mod management and troubleshooting</p>
+        </header>
+
+        <div class="nav-tabs">
+            <button class="active" onclick="showTab('dashboard')">Dashboard</button>
+            <button onclick="showTab('mods')">Mods</button>
+            <button onclick="showTab('warnings')">Warnings</button>
+            <button onclick="showTab('manifests')">Manifests</button>
+            <button onclick="showTab('status')">System Status</button>
+        </div>
+
+        <div class="tab-content">
+            <!-- Dashboard Tab -->
+            <div id="dashboard" class="tab-pane active">
+                <h2>Dashboard</h2>
+                
+                <div class="status-grid">
+                    <div class="status-card">
+                        <div class="value" id="total-mods">0</div>
+                        <div class="label">Total Mods</div>
+                    </div>
+                    <div class="status-card">
+                        <div class="value" id="client-only-mods">0</div>
+                        <div class="label">Client-Only Mods</div>
+                    </div>
+                    <div class="status-card">
+                        <div class="value" id="quarantined-mods">0</div>
+                        <div class="label">Quarantined Mods</div>
+                    </div>
+                    <div class="status-card">
+                        <div class="value" id="warnings-count">0</div>
+                        <div class="label">Active Warnings</div>
+                    </div>
+                </div>
+
+                <div class="info-box">
+                    <strong>Last Scan:</strong> <span id="last-scan">Never</span>
+                    <button class="btn refresh-btn" onclick="refreshData()">
+                        <span id="refresh-icon" class="loading"></span> Refresh
+                    </button>
+                </div>
+
+                <div id="quick-actions">
+                    <h3>Quick Actions</h3>
+                    <button class="btn" onclick="generateManifest()">Generate Manifest</button>
+                    <button class="btn btn-warning" onclick="scanMods()">Scan Mods</button>
+                    <button class="btn btn-danger" onclick="clearWarnings()">Clear Warnings</button>
+                </div>
+            </div>
+
+            <!-- Mods Tab -->
+            <div id="mods" class="tab-pane hidden">
+                <h2>Mod Management</h2>
+                
+                <div class="mod-list" id="mod-list">
+                    <!-- Mods will be loaded here -->
+                </div>
+            </div>
+
+            <!-- Warnings Tab -->
+            <div id="warnings" class="tab-pane hidden">
+                <h2>Active Warnings</h2>
+                
+                <div id="warnings-list">
+                    <!-- Warnings will be loaded here -->
+                </div>
+            </div>
+
+            <!-- Manifests Tab -->
+            <div id="manifests" class="tab-pane hidden">
+                <h2>Manifest Management</h2>
+                
+                <button class="btn" onclick="generateManifest()">Generate New Manifest</button>
+                
+                <div id="manifests-list">
+                    <!-- Manifests will be loaded here -->
+                </div>
+            </div>
+
+            <!-- System Status Tab -->
+            <div id="status" class="tab-pane hidden">
+                <h2>System Status</h2>
+                
+                <div id="system-status">
+                    <!-- System status will be loaded here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast hidden"></div>
+
+    <!-- Loading Modal -->
+    <div id="loading-modal" class="modal hidden">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('loading-modal')">&times;</span>
+            <h3>Processing...</h3>
+            <div class="progress">
+                <div class="progress-bar" id="progress-bar" style="width: 0%"></div>
+            </div>
+            <p id="progress-text">Please wait...</p>
+        </div>
+    </div>
+
+    <script>
+        let currentTab = 'dashboard';
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshData();
+            setInterval(refreshData, 30000); // Auto-refresh every 30 seconds
+        });
+
+        function showTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-pane').forEach(tab => {
+                tab.classList.add('hidden');
+            });
+            
+            // Remove active class from all nav buttons
+            document.querySelectorAll('.nav-tabs button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            // Show selected tab
+            document.getElementById(tabName).classList.remove('hidden');
+            event.target.classList.add('active');
+            currentTab = tabName;
+            
+            // Load tab-specific data
+            if (tabName === 'mods') {
+                loadMods();
+            } else if (tabName === 'warnings') {
+                loadWarnings();
+            } else if (tabName === 'manifests') {
+                loadManifests();
+            } else if (tabName === 'status') {
+                loadSystemStatus();
+            }
+        }
+
+        function refreshData() {
+            showLoading();
+            
+            // Refresh dashboard data
+            fetch('/status')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('total-mods').textContent = data.mods_count;
+                    document.getElementById('client-only-mods').textContent = data.clientonly_count;
+                    document.getElementById('quarantined-mods').textContent = data.quarantine_count;
+                    document.getElementById('warnings-count').textContent = data.warnings_count;
+                    document.getElementById('last-scan').textContent = data.last_scan;
+                    
+                    hideLoading();
+                    showToast('Data refreshed successfully', 'success');
+                })
+                .catch(error => {
+                    hideLoading();
+                    showToast('Error refreshing data', 'error');
+                });
+        }
+
+        function loadMods() {
+            fetch('/mods/client-only')
+                .then(response => response.json())
+                .then(clientOnly => {
+                    fetch('/mods/quarantine')
+                        .then(response => response.json())
+                        .then(quarantined => {
+                            let html = '';
+                            
+                            // Client-only mods
+                            html += '<h3>Client-Only Mods</h3>';
+                            if (clientOnly.length > 0) {
+                                clientOnly.forEach(mod => {
+                                    html += `<div class="mod-item client-only">
+                                                <div class="mod-name">${mod}</div>
+                                                <div class="mod-info">Client-side only</div>
+                                            </div>`;
+                                });
+                            } else {
+                                html += '<p>No client-only mods found.</p>';
+                            }
+                            
+                            // Quarantined mods
+                            html += '<h3>Quarantined Mods</h3>';
+                            if (quarantined.length > 0) {
+                                quarantined.forEach(mod => {
+                                    html += `<div class="mod-item quarantined">
+                                                <div class="mod-name">${mod}</div>
+                                                <div class="mod-info">Quarantined</div>
+                                            </div>`;
+                                });
+                            } else {
+                                html += '<p>No quarantined mods.</p>';
+                            }
+                            
+                            document.getElementById('mod-list').innerHTML = html;
+                        });
+                });
+        }
+
+        function loadWarnings() {
+            fetch('/warnings')
+                .then(response => response.json())
+                .then(warnings => {
+                    let html = '';
+                    
+                    if (warnings.length > 0) {
+                        warnings.forEach(warning => {
+                            html += `<div class="warning-item">
+                                        <strong>Warning:</strong> ${warning}
+                                    </div>`;
+                        });
+                    } else {
+                        html += '<p>No active warnings.</p>';
+                    }
+                    
+                    document.getElementById('warnings-list').innerHTML = html;
+                });
+        }
+
+        function loadManifests() {
+            // This would list existing manifests
+            document.getElementById('manifests-list').innerHTML = 
+                '<p>Manifest generation not yet implemented.</p>';
+        }
+
+        function loadSystemStatus() {
+            fetch('/status')
+                .then(response => response.json())
+                .then(data => {
+                    let html = `
+                        <table class="result-table">
+                            <tr><th>Metric</th><th>Value</th></tr>
+                            <tr><td>Service Running</td><td>${data.service_running ? '<span class="badge badge-success">Yes</span>' : '<span class="badge badge-danger">No</span>'}</td></tr>
+                            <tr><td>Initialized</td><td>${data.initialized ? '<span class="badge badge-success">Yes</span>' : '<span class="badge badge-danger">No</span>'}</td></tr>
+                            <tr><td>Total Mods</td><td>${data.mods_count}</td></tr>
+                            <tr><td>Client-Only Mods</td><td>${data.clientonly_count}</td></tr>
+                            <tr><td>Quarantined Mods</td><td>${data.quarantine_count}</td></tr>
+                            <tr><td>Active Warnings</td><td>${data.warnings_count}</td></tr>
+                            <tr><td>Last Scan</td><td>${data.last_scan}</td></tr>
+                        </table>
+                    `;
+                    document.getElementById('system-status').innerHTML = html;
+                });
+        }
+
+        function generateManifest() {
+            showModal('loading-modal');
+            document.getElementById('progress-text').textContent = 'Generating manifest...';
+            
+            fetch('/manifest/generate', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                hideModal('loading-modal');
+                if (data.status === 'success') {
+                    showToast(`Manifest generated: ${data.filename}`, 'success');
+                    // You could add download functionality here
+                } else {
+                    showToast(`Error: ${data.error}`, 'error');
+                }
+            })
+            .catch(error => {
+                hideModal('loading-modal');
+                showToast('Error generating manifest', 'error');
+            });
+        }
+
+        function scanMods() {
+            showModal('loading-modal');
+            document.getElementById('progress-text').textContent = 'Scanning mods...';
+            
+            fetch('/scan', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                hideModal('loading-modal');
+                if (data.status === 'scan_complete') {
+                    showToast('Mod scan completed', 'success');
+                    refreshData();
+                    if (currentTab === 'mods') {
+                        loadMods();
+                    }
+                }
+            })
+            .catch(error => {
+                hideModal('loading-modal');
+                showToast('Error scanning mods', 'error');
+            });
+        }
+
+        function clearWarnings() {
+            // This would clear warnings from log file
+            showToast('Warning clearing not yet implemented', 'warning');
+        }
+
+        function showLoading() {
+            document.getElementById('refresh-icon').classList.add('loading');
+        }
+
+        function hideLoading() {
+            document.getElementById('refresh-icon').classList.remove('loading');
+        }
+
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `toast ${type}`;
+            toast.classList.remove('hidden');
+            
+            setTimeout(() => {
+                toast.classList.add('hidden');
+            }, 3000);
+        }
+
+        function showModal(modalId) {
+            document.getElementById(modalId).classList.remove('hidden');
+        }
+
+        function hideModal(modalId) {
+            document.getElementById(modalId).classList.add('hidden');
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.add('hidden');
+        }
+    </script>
+</body>
+</html>

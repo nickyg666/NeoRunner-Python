@@ -1,0 +1,3188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mod Editing System</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #667eea;
+            --secondary: #764ba2;
+            --accent: #f093fb;
+            --dark: #1e3c72;
+            --darker: #2a5298;
+            --light: #f8f9fa;
+            --success: #28a745;
+            --warning: #ffc107;
+            --danger: #dc3545;
+            --text-primary: #333;
+            --text-secondary: #666;
+            --text-muted: #999;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, var(--dark) 0%, var(--darker) 100%);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .glass-morphism {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 20px;
+            box-shadow: 
+                0 8px 32px rgba(0, 0, 0, 0.1),
+                inset 0 1px 0 rgba(255, 255, 255, 0.5);
+        }
+
+        .floating-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 25px;
+            box-shadow: 
+                0 20px 60px rgba(0, 0, 0, 0.2),
+                inset 0 1px 0 rgba(255, 255, 255, 0.3);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .floating-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+            transition: left 0.5s ease;
+        }
+
+        .floating-card:hover::before {
+            left: 100%;
+        }
+
+        .floating-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 
+                0 25px 80px rgba(0, 0, 0, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.4);
+        }
+
+        .gradient-border {
+            position: relative;
+            border-radius: 20px;
+            padding: 20px;
+        }
+
+        .gradient-border::before {
+            content: '';
+            position: absolute;
+            top: -2px;
+            left: -2px;
+            right: -2px;
+            bottom: -2px;
+            background: linear-gradient(45deg, var(--primary), var(--secondary), var(--accent));
+            border-radius: 20px;
+            z-index: -1;
+            animation: gradientShift 3s ease infinite;
+        }
+
+        @keyframes gradientShift {
+            0% { filter: hue-rotate(0deg); }
+            100% { filter: hue-rotate(360deg); }
+        }
+
+        .neon-text {
+            color: var(--primary);
+            text-shadow: 
+                0 0 10px var(--primary),
+                0 0 20px var(--primary),
+                0 0 30px var(--primary),
+                0 0 40px var(--primary);
+            animation: neonFlicker 2s ease-in-out infinite;
+        }
+
+        @keyframes neonFlicker {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.8; }
+        }
+
+        .scanlines {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1000;
+        }
+
+        .scanlines::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 2px,
+                rgba(255, 255, 255, 0.03) 2px,
+                rgba(255, 255, 255, 0.03) 4px
+            );
+            animation: scanlines 8s linear infinite;
+        }
+
+        @keyframes scanlines {
+            from { transform: translateY(0); }
+            to { transform: translateY(50px); }
+        }
+
+        .noise {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 999;
+            opacity: 0.02;
+        }
+
+        .noise::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMDAiIGhlaWdodD0iMzAwIj48ZmlsdGVyIGlkPSJhIj48ZmVUdXJidWxlbmNlIGJhc2VGcmVxdWVuY3k9Ii43NSIgbnVtT2N0YXZlcz0iMTAiLz48ZmVDb2xvck1hdHJpeCB2YWx1ZXM9IjAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDAgMCAwIDEgMCIvPjwvZmlsdGVyPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbHRlcj0idXJsKCNhKSIgb3BhY2l0eT0iLjA1Ii8+PC9zdmc+');
+            animation: noiseAnimation 2s steps(10) infinite;
+        }
+
+        @keyframes noiseAnimation {
+            0%, 100% { background-position: 0 0; }
+            10% { background-position: -5% -10%; }
+            20% { background-position: -15% 5%; }
+            30% { background-position: 10% -15%; }
+            40% { background-position: -10% 15%; }
+            50% { background-position: 0 0; }
+            60% { background-position: 15% -25%; }
+            70% { background-position: -5% 25%; }
+            80% { background-position: -15% -25%; }
+            90% { background-position: 25% 15%; }
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 40px 20px;
+        }
+
+        header h1 {
+            font-size: 3.5em;
+            font-weight: 800;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary), var(--accent));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            animation: glow 2s ease-in-out infinite alternate;
+        }
+
+        @keyframes glow {
+            from { filter: drop-shadow(0 0 20px rgba(102, 126, 234, 0.5)); }
+            to { filter: drop-shadow(0 0 30px rgba(102, 126, 234, 0.8)); }
+        }
+
+        header p {
+            font-size: 1.3em;
+            color: var(--accent);
+            opacity: 0.9;
+            margin-bottom: 20px;
+        }
+
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 25px;
+            margin-bottom: 40px;
+        }
+
+        .status-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 20px;
+            padding: 25px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .status-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(45deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+            transform: translateX(-100%);
+            transition: transform 0.6s ease;
+        }
+
+        .status-card:hover::before {
+            transform: translateX(100%);
+        }
+
+        .status-card:hover {
+            transform: translateY(-5px);
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+
+        .status-card .value {
+            font-size: 2.5em;
+            font-weight: 700;
+            color: var(--accent);
+            margin-bottom: 5px;
+            text-shadow: 0 0 10px rgba(240, 147, 251, 0.5);
+        }
+
+        .status-card .label {
+            color: var(--accent);
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .status-card .icon {
+            font-size: 2em;
+            margin-bottom: 15px;
+            color: var(--primary);
+        }
+
+        .tab-container {
+            margin-top: 30px;
+        }
+
+        .tab-buttons {
+            display: flex;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 15px;
+            overflow: hidden;
+            margin-bottom: 30px;
+        }
+
+        .tab-buttons button {
+            flex: 1;
+            padding: 20px 30px;
+            background: none;
+            border: none;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 1.1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .tab-buttons button:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--accent);
+        }
+
+        .tab-buttons button.active {
+            background: rgba(255, 255, 255, 0.2);
+            color: var(--accent);
+            box-shadow: inset 0 -2px 0 var(--accent);
+        }
+
+        .tab-content {
+            min-height: 500px;
+        }
+
+        .tab-pane {
+            display: none;
+        }
+
+        .tab-pane.active {
+            display: block;
+        }
+
+        .mod-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .mod-item {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 20px;
+            padding: 25px;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .mod-item::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(45deg, transparent, rgba(255, 255, 255, 0.05), transparent);
+            transform: translateX(-100%);
+            transition: transform 0.5s ease;
+        }
+
+        .mod-item:hover::before {
+            transform: translateX(100%);
+        }
+
+        .mod-item:hover {
+            transform: translateY(-5px);
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+
+        .mod-item.client-only {
+            border-left: 4px solid var(--danger);
+            background: rgba(220, 53, 69, 0.1);
+        }
+
+        .mod-item.quarantined {
+            border-left: 4px solid var(--warning);
+            background: rgba(255, 193, 7, 0.1);
+            opacity: 0.8;
+        }
+
+        .mod-name {
+            font-size: 1.3em;
+            font-weight: 700;
+            margin-bottom: 10px;
+            color: var(--accent);
+        }
+
+        .mod-info {
+            font-size: 0.95em;
+            color: rgba(255, 255, 255, 0.8);
+            line-height: 1.6;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.8em;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .badge-success {
+            background: rgba(40, 167, 69, 0.2);
+            color: var(--success);
+            border: 1px solid rgba(40, 167, 69, 0.3);
+        }
+
+        .badge-warning {
+            background: rgba(255, 193, 7, 0.2);
+            color: var(--warning);
+            border: 1px solid rgba(255, 193, 7, 0.3);
+        }
+
+        .badge-danger {
+            background: rgba(220, 53, 69, 0.2);
+            color: var(--danger);
+            border: 1px solid rgba(220, 53, 69, 0.3);
+        }
+
+        .warning-item {
+            background: rgba(220, 53, 69, 0.1);
+            border: 1px solid rgba(220, 53, 69, 0.3);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 15px;
+            color: var(--danger);
+            transition: all 0.3s ease;
+        }
+
+        .warning-item:hover {
+            background: rgba(220, 53, 69, 0.15);
+            transform: translateX(5px);
+        }
+
+        .warning-item strong {
+            color: var(--accent);
+            font-weight: 700;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 15px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.3);
+            transform: translate(-50%, -50%);
+            transition: width 0.6s, height 0.6s;
+        }
+
+        .btn:hover::before {
+            width: 300px;
+            height: 300px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 15px 40px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, var(--danger), #c82333);
+        }
+
+        .btn-warning {
+            background: linear-gradient(135deg, var(--warning), #e0a800);
+            color: var(--text-dark);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .refresh-btn {
+            float: right;
+            margin-bottom: 20px;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-top: 3px solid var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .active {
+            display: block;
+        }
+
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(40, 167, 69, 0.95);
+            color: white;
+            padding: 20px 25px;
+            border-radius: 15px;
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.3);
+            z-index: 2000;
+            transform: translateX(100%);
+            transition: transform 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .toast.show {
+            transform: translateX(0);
+        }
+
+        .toast.error {
+            background: rgba(220, 53, 69, 0.95);
+        }
+
+        .toast.warning {
+            background: rgba(255, 193, 7, 0.95);
+            color: var(--text-dark);
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 3000;
+            backdrop-filter: blur(10px);
+        }
+
+        .modal.show {
+            display: block;
+        }
+
+        .modal-content {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            margin: 10% auto;
+            padding: 40px;
+            border-radius: 25px;
+            width: 90%;
+            max-width: 600px;
+            position: relative;
+            animation: modalSlideIn 0.3s ease-out;
+        }
+
+        @keyframes modalSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-50px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .close {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            color: var(--text-muted);
+            transition: color 0.3s ease;
+        }
+
+        .close:hover {
+            color: var(--danger);
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--text-primary);
+            font-weight: 600;
+            font-size: 1.1em;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-radius: 15px;
+            background: rgba(255, 255, 255, 0.9);
+            color: var(--text-primary);
+            font-size: 1em;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+            background: rgba(255, 255, 255, 0.95);
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 120px;
+        }
+
+        .result-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 30px;
+        }
+
+        .result-table th,
+        .result-table td {
+            padding: 18px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        .result-table th {
+            background: rgba(255, 255, 255, 0.05);
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-size: 0.9em;
+        }
+
+        .result-table tr:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .result-table tr:nth-child(even) {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .progress-container {
+            margin: 20px 0;
+        }
+
+        .progress {
+            width: 100%;
+            height: 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary), var(--secondary));
+            border-radius: 10px;
+            transition: width 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .progress-bar::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(
+                45deg,
+                transparent,
+                rgba(255, 255, 255, 0.3),
+                transparent,
+                rgba(255, 255, 255, 0.3),
+                transparent
+            );
+            animation: progressShine 2s ease-in-out infinite;
+        }
+
+        @keyframes progressShine {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+
+        .info-box {
+            background: rgba(52, 58, 64, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 25px;
+            border-radius: 20px;
+            margin-bottom: 30px;
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        .info-box strong {
+            color: var(--accent);
+            font-weight: 700;
+        }
+
+        .quick-actions {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .quick-action-btn {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 20px;
+            padding: 25px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .quick-action-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+            transition: left 0.5s ease;
+        }
+
+        .quick-action-btn:hover::before {
+            left: 100%;
+        }
+
+        .quick-action-btn:hover {
+            transform: translateY(-3px);
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+
+        .quick-action-btn .icon {
+            font-size: 2.5em;
+            margin-bottom: 15px;
+            color: var(--primary);
+        }
+
+        .quick-action-btn .action-name {
+            font-size: 1.1em;
+            font-weight: 600;
+            color: var(--accent);
+            margin-bottom: 5px;
+        }
+
+        .quick-action-btn .action-desc {
+            font-size: 0.9em;
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .system-check {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .system-check-item {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 20px;
+            padding: 20px;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        .system-check-item.success {
+            border-color: rgba(40, 167, 69, 0.3);
+            background: rgba(40, 167, 69, 0.1);
+        }
+
+        .system-check-item.error {
+            border-color: rgba(220, 53, 69, 0.3);
+            background: rgba(220, 53, 69, 0.1);
+        }
+
+        .system-check-item.warning {
+            border-color: rgba(255, 193, 7, 0.3);
+            background: rgba(255, 193, 7, 0.1);
+        }
+
+        .system-check-item .status-icon {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        .system-check-item.success .status-icon {
+            color: var(--success);
+        }
+
+        .system-check-item.error .status-icon {
+            color: var(--danger);
+        }
+
+        .system-check-item.warning .status-icon {
+            color: var(--warning);
+        }
+
+        .system-check-item .status-text {
+            font-weight: 600;
+            color: var(--accent);
+            margin-bottom: 5px;
+        }
+
+        .system-check-item .status-detail {
+            font-size: 0.9em;
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .commit-history {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .commit-item {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 15px;
+            margin-bottom: 10px;
+            transition: all 0.3s ease;
+        }
+
+        .commit-item:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateX(5px);
+        }
+
+        .commit-hash {
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            color: var(--accent);
+            margin-bottom: 5px;
+        }
+
+        .commit-message {
+            color: rgba(255, 255, 255, 0.9);
+            margin-bottom: 5px;
+        }
+
+        .commit-author {
+            font-size: 0.9em;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .commit-date {
+            font-size: 0.8em;
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .repo-selector {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+
+        .repo-selector select {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-radius: 15px;
+            background: rgba(255, 255, 255, 0.9);
+            color: var(--text-primary);
+            font-size: 1em;
+            transition: all 0.3s ease;
+        }
+
+        .repo-selector select:focus {
+            outline: none;
+            border-color: var(--accent);
+            background: rgba(255, 255, 255, 0.95);
+        }
+
+        .file-explorer {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .file-tree {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 15px;
+            padding: 20px;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .file-tree-item {
+            padding: 8px 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 0.95em;
+        }
+
+        .file-tree-item:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--accent);
+        }
+
+        .file-tree-item.active {
+            background: rgba(102, 126, 234, 0.2);
+            color: var(--accent);
+            border-left: 3px solid var(--accent);
+        }
+
+        .file-tree-item.directory {
+            font-weight: 600;
+            color: var(--primary);
+        }
+
+        .file-content {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 15px;
+            padding: 25px;
+            min-height: 500px;
+        }
+
+        .file-content h3 {
+            margin-bottom: 20px;
+            color: var(--text-primary);
+            font-size: 1.3em;
+        }
+
+        .code-editor {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            border-radius: 10px;
+            padding: 20px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            white-space: pre;
+            overflow-x: auto;
+        }
+
+        .code-editor .comment {
+            color: #6a9955;
+        }
+
+        .code-editor .keyword {
+            color: #569cd6;
+        }
+
+        .code-editor .string {
+            color: #ce9178;
+        }
+
+        .code-editor .number {
+            color: #b5cea8;
+        }
+
+        .code-editor .function {
+            color: #4ec9b0;
+        }
+
+        .code-editor .class {
+            color: #4fc1ff;
+        }
+
+        .code-editor .operator {
+            color: #d4d4d4;
+        }
+
+        .code-editor .punctuation {
+            color: #d4d4d4;
+        }
+
+        .code-editor .variable {
+            color: #9cdcfe;
+        }
+
+        .code-editor .attribute {
+            color: #9cdcfe;
+        }
+
+        .diff-added {
+            background: rgba(40, 167, 69, 0.2);
+            border-left: 3px solid var(--success);
+            padding-left: 10px;
+        }
+
+        .diff-removed {
+            background: rgba(220, 53, 69, 0.2);
+            border-left: 3px solid var(--danger);
+            padding-left: 10px;
+        }
+
+        .diff-modified {
+            background: rgba(255, 193, 7, 0.2);
+            border-left: 3px solid var(--warning);
+            padding-left: 10px;
+        }
+
+        .file-actions {
+            margin-top: 20px;
+        }
+
+        .file-actions .btn {
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+
+        .installation-guide {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 30px;
+        }
+
+        .installation-guide h3 {
+            color: var(--accent);
+            margin-bottom: 20px;
+            font-size: 1.5em;
+        }
+
+        .os-tabs {
+            display: flex;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 15px;
+            overflow: hidden;
+            margin-bottom: 25px;
+        }
+
+        .os-tabs button {
+            flex: 1;
+            padding: 15px;
+            background: none;
+            border: none;
+            color: rgba(255, 255, 255, 0.7);
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border-bottom: 3px solid transparent;
+        }
+
+        .os-tabs button:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--accent);
+        }
+
+        .os-tabs button.active {
+            background: rgba(255, 255, 255, 0.2);
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+
+        .os-content {
+            display: none;
+        }
+
+        .os-content.active {
+            display: block;
+        }
+
+        .command {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+            padding: 15px;
+            margin: 10px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 0.95em;
+            color: var(--accent);
+            transition: all 0.3s ease;
+        }
+
+        .command:hover {
+            background: rgba(0, 0, 0, 0.4);
+            transform: translateX(5px);
+        }
+
+        .command.success {
+            background: rgba(40, 167, 69, 0.2);
+            border-color: rgba(40, 167, 69, 0.3);
+            color: var(--success);
+        }
+
+        .command.error {
+            background: rgba(220, 53, 69, 0.2);
+            border-color: rgba(220, 53, 69, 0.3);
+            color: var(--danger);
+        }
+
+        .command.warning {
+            background: rgba(255, 193, 7, 0.2);
+            border-color: rgba(255, 193, 7, 0.3);
+            color: var(--warning);
+        }
+
+        .command-prefix {
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        .command-output {
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.4);
+            border-radius: 8px;
+            font-size: 0.9em;
+            color: rgba(255, 255, 255, 0.8);
+            white-space: pre-wrap;
+        }
+
+        .realtime-updates {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(40, 167, 69, 0.95);
+            color: white;
+            padding: 15px 20px;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            z-index: 2000;
+            animation: pulse 2s ease-in-out infinite;
+            backdrop-filter: blur(10px);
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        .realtime-updates.error {
+            background: rgba(220, 53, 69, 0.95);
+        }
+
+        .realtime-updates.warning {
+            background: rgba(255, 193, 7, 0.95);
+            color: var(--text-dark);
+        }
+
+        .realtime-updates.hidden {
+            display: none;
+        }
+
+        .settings-panel {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 30px;
+        }
+
+        .settings-panel h3 {
+            color: var(--accent);
+            margin-bottom: 25px;
+            font-size: 1.5em;
+        }
+
+        .setting-item {
+            margin-bottom: 25px;
+        }
+
+        .setting-item label {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--accent);
+            font-weight: 600;
+            font-size: 1.1em;
+        }
+
+        .setting-item .description {
+            font-size: 0.9em;
+            color: rgba(255, 255, 255, 0.8);
+            margin-bottom: 10px;
+        }
+
+        .setting-item input[type="text"],
+        .setting-item input[type="number"],
+        .setting-item select,
+        .setting-item textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.9);
+            color: var(--text-primary);
+            font-size: 1em;
+            transition: all 0.3s ease;
+        }
+
+        .setting-item input:focus,
+        .setting-item select:focus,
+        .setting-item textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+            background: rgba(255, 255, 255, 0.95);
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .setting-item textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 60px;
+            height: 30px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 15px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .toggle-switch.enabled {
+            background: var(--success);
+        }
+
+        .toggle-switch .toggle-knob {
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 24px;
+            height: 24px;
+            background: white;
+            border-radius: 50%;
+            transition: all 0.3s ease;
+        }
+
+        .toggle-switch.enabled .toggle-knob {
+            left: 33px;
+        }
+
+        .color-picker {
+            width: 50px;
+            height: 50px;
+            border-radius: 8px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .color-picker:hover {
+            transform: scale(1.1);
+            border-color: var(--accent);
+        }
+
+        .theme-selector {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .theme-option {
+            flex: 1;
+            padding: 15px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-radius: 15px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .theme-option:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: var(--accent);
+        }
+
+        .theme-option.active {
+            background: rgba(102, 126, 234, 0.2);
+            border-color: var(--primary);
+        }
+
+        .theme-option.light {
+            background: white;
+            color: black;
+        }
+
+        .theme-option.dark {
+            background: #1e1e1e;
+            color: white;
+        }
+
+        .theme-option.night {
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+            color: white;
+        }
+
+        .theme-option.retro {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+        }
+
+        .theme-option.futuristic {
+            background: linear-gradient(135deg, #667eea, #764ba2, #f093fb);
+            color: white;
+        }
+
+        .theme-preview {
+            width: 100%;
+            height: 200px;
+            border-radius: 15px;
+            margin-bottom: 15px;
+            transition: all 0.3s ease;
+        }
+
+        .theme-preview.light {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+        }
+
+        .theme-preview.dark {
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+        }
+
+        .theme-preview.night {
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+        }
+
+        .theme-preview.retro {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+        }
+
+        .theme-preview.futuristic {
+            background: linear-gradient(135deg, #667eea, #764ba2, #f093fb);
+        }
+
+        .backup-manager {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 30px;
+        }
+
+        .backup-manager h3 {
+            color: var(--accent);
+            margin-bottom: 25px;
+            font-size: 1.5em;
+        }
+
+        .backup-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .backup-item {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 15px;
+            margin-bottom: 10px;
+            transition: all 0.3s ease;
+        }
+
+        .backup-item:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateX(5px);
+        }
+
+        .backup-item .backup-name {
+            font-weight: 600;
+            color: var(--accent);
+            margin-bottom: 5px;
+        }
+
+        .backup-item .backup-date {
+            font-size: 0.9em;
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .backup-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .backup-actions .btn {
+            padding: 8px 15px;
+            font-size: 0.9em;
+        }
+
+        .realtime-log {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 20px;
+            padding: 25px;
+            max-height: 500px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .log-entry {
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+            transition: all 0.2s ease;
+        }
+
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+
+        .log-entry.info {
+            color: #6a9955;
+        }
+
+        .log-entry.success {
+            color: var(--success);
+        }
+
+        .log-entry.warning {
+            color: var(--warning);
+        }
+
+        .log-entry.error {
+            color: var(--danger);
+        }
+
+        .log-entry.system {
+            color: var(--primary);
+        }
+
+        .log-timestamp {
+            color: rgba(0, 0, 0, 0.5);
+            margin-right: 10px;
+        }
+
+        .log-source {
+            color: rgba(0, 0, 0, 0.7);
+            margin-right: 10px;
+            font-weight: 600;
+        }
+
+        .log-message {
+            color: rgba(0, 0, 0, 0.9);
+        }
+
+        .auto-refresh {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(40, 167, 69, 0.95);
+            color: white;
+            padding: 12px 18px;
+            border-radius: 25px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            z-index: 2000;
+            backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .auto-refresh:hover {
+            background: rgba(40, 167, 69, 0.8);
+            transform: scale(1.05);
+        }
+
+        .auto-refresh.error {
+            background: rgba(220, 53, 69, 0.95);
+        }
+
+        .auto-refresh.warning {
+            background: rgba(255, 193, 7, 0.95);
+            color: var(--text-dark);
+        }
+
+        .auto-refresh .toggle {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: white;
+            position: relative;
+        }
+
+        .auto-refresh.enabled .toggle {
+            background: var(--success);
+        }
+
+        .auto-refresh .toggle::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 8px;
+            height: 8px;
+            background: var(--text-dark);
+            border-radius: 50%;
+        }
+
+        .auto-refresh.enabled .toggle::before {
+            background: white;
+        }
+
+        .dashboard-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 25px;
+            margin-bottom: 40px;
+        }
+
+        .stat-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 20px;
+            padding: 30px;
+            text-align: center;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(45deg, transparent, rgba(255, 255, 255, 0.05), transparent);
+            transform: translateX(-100%);
+            transition: transform 0.6s ease;
+        }
+
+        .stat-card:hover::before {
+            transform: translateX(100%);
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+
+        .stat-card .stat-value {
+            font-size: 2.5em;
+            font-weight: 700;
+            color: var(--accent);
+            margin-bottom: 5px;
+            text-shadow: 0 0 10px rgba(240, 147, 251, 0.5);
+        }
+
+        .stat-card .stat-label {
+            color: var(--accent);
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .stat-card .stat-icon {
+            font-size: 2.5em;
+            margin-bottom: 15px;
+            color: var(--primary);
+        }
+
+        .stat-card.success .stat-value {
+            color: var(--success);
+        }
+
+        .stat-card.warning .stat-value {
+            color: var(--warning);
+        }
+
+        .stat-card.error .stat-value {
+            color: var(--danger);
+        }
+
+        .stat-card.info .stat-value {
+            color: var(--primary);
+        }
+
+        .version-info {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .version-info .version {
+            font-size: 1.2em;
+            color: var(--accent);
+            font-weight: 600;
+        }
+
+        .version-info .build-date {
+            font-size: 0.9em;
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .action-buttons {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .action-buttons .btn {
+            padding: 18px 25px;
+            font-size: 1em;
+        }
+
+        .advanced-settings {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 30px;
+        }
+
+        .advanced-settings h3 {
+            color: var(--accent);
+            margin-bottom: 25px;
+            font-size: 1.5em;
+        }
+
+        .setting-group {
+            margin-bottom: 25px;
+        }
+
+        .setting-group h4 {
+            color: var(--primary);
+            margin-bottom: 15px;
+            font-size: 1.2em;
+        }
+
+        .setting-group .description {
+            font-size: 0.9em;
+            color: rgba(255, 255, 255, 0.8);
+            margin-bottom: 15px;
+        }
+
+        .setting-controls {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .setting-controls label {
+            color: var(--accent);
+            font-weight: 600;
+        }
+
+        .setting-controls input[type="text"],
+        .setting-controls input[type="number"],
+        .setting-controls select,
+        .setting-controls textarea {
+            padding: 12px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.9);
+            color: var(--text-primary);
+            font-size: 1em;
+            transition: all 0.3s ease;
+        }
+
+        .setting-controls input:focus,
+        .setting-controls select:focus,
+        .setting-controls textarea:focus {
+            outline: none;
+            border-color: var(--accent);
+            background: rgba(255, 255, 255, 0.95);
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .setting-controls textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .setting-controls .toggle-switch {
+            margin-top: 5px;
+        }
+
+        .preview-area {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 30px;
+        }
+
+        .preview-area h3 {
+            color: var(--text-primary);
+            margin-bottom: 20px;
+            font-size: 1.5em;
+        }
+
+        .preview-content {
+            background: #1e1e1e;
+            border-radius: 15px;
+            padding: 25px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            color: #d4d4d4;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .preview-content .highlight {
+            background: rgba(102, 126, 234, 0.2);
+            border-left: 3px solid var(--primary);
+            padding-left: 15px;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .preview-content .warning {
+            color: var(--warning);
+            font-weight: 600;
+        }
+
+        .preview-content .error {
+            color: var(--danger);
+            font-weight: 600;
+        }
+
+        .preview-content .success {
+            color: var(--success);
+            font-weight: 600;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 30px;
+        }
+
+        .data-table th,
+        .data-table td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        .data-table th {
+            background: rgba(255, 255, 255, 0.05);
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-size: 0.9em;
+        }
+
+        .data-table tr:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .data-table tr:nth-child(even) {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .data-table .action-col {
+            text-align: center;
+        }
+
+        .data-table .action-btn {
+            background: none;
+            border: none;
+            color: var(--accent);
+            cursor: pointer;
+            padding: 5px 10px;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            font-size: 0.9em;
+        }
+
+        .data-table .action-btn:hover {
+            background: rgba(102, 126, 234, 0.2);
+            transform: translateY(-1px);
+        }
+
+        .data-table .action-btn.danger:hover {
+            background: rgba(220, 53, 69, 0.2);
+            color: var(--danger);
+        }
+
+        .data-table .action-btn.warning:hover {
+            background: rgba(255, 193, 7, 0.2);
+            color: var(--warning);
+        }
+
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 4000;
+            backdrop-filter: blur(10px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.show {
+            display: flex;
+        }
+
+        .modal-window {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            border-radius: 25px;
+            padding: 40px;
+            max-width: 800px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            animation: modalSlideIn 0.3s ease-out;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+
+        .modal-title {
+            font-size: 1.8em;
+            color: var(--text-primary);
+            font-weight: 700;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 28px;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: color 0.3s ease;
+            padding: 5px;
+        }
+
+        .modal-close:hover {
+            color: var(--danger);
+        }
+
+        .modal-body {
+            margin-bottom: 30px;
+        }
+
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 15px;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 25px;
+        }
+
+        .form-row .form-group {
+            margin-bottom: 0;
+        }
+
+        .dependency-check {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 30px;
+        }
+
+        .dependency-check h3 {
+            color: var(--accent);
+            margin-bottom: 25px;
+            font-size: 1.5em;
+        }
+
+        .dependency-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .dependency-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .dependency-item:last-child {
+            border-bottom: none;
+        }
+
+        .dependency-name {
+            font-weight: 600;
+            color: var(--accent);
+        }
+
+        .dependency-status {
+            font-weight: 600;
+            padding: 5px 12px;
+            border-radius: 12px;
+            font-size: 0.9em;
+        }
+
+        .dependency-status.installed {
+            background: rgba(40, 167, 69, 0.2);
+            color: var(--success);
+            border: 1px solid rgba(40, 167, 69, 0.3);
+        }
+
+        .dependency-status.missing {
+            background: rgba(220, 53, 69, 0.2);
+            color: var(--danger);
+            border: 1px solid rgba(220, 53, 69, 0.3);
+        }
+
+        .dependency-status.installing {
+            background: rgba(255, 193, 7, 0.2);
+            color: var(--warning);
+            border: 1px solid rgba(255, 193, 7, 0.3);
+        }
+
+        .dependency-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .dependency-actions .btn {
+            padding: 8px 15px;
+            font-size: 0.9em;
+        }
+
+        .installation-progress {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 30px;
+        }
+
+        .installation-progress h3 {
+            color: var(--accent);
+            margin-bottom: 25px;
+            font-size: 1.5em;
+        }
+
+        .progress-steps {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .progress-step {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            border-left: 3px solid transparent;
+            transition: all 0.3s ease;
+        }
+
+        .progress-step.completed {
+            background: rgba(40, 167, 69, 0.1);
+            border-left-color: var(--success);
+        }
+
+        .progress-step.error {
+            background: rgba(220, 53, 69, 0.1);
+            border-left-color: var(--danger);
+        }
+
+        .progress-step .step-number {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+
+        .progress-step.completed .step-number {
+            background: var(--success);
+            color: white;
+        }
+
+        .progress-step.error .step-number {
+            background: var(--danger);
+            color: white;
+        }
+
+        .progress-step.pending .step-number {
+            background: rgba(255, 255, 255, 0.2);
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .progress-step .step-content {
+            flex: 1;
+        }
+
+        .progress-step .step-title {
+            font-weight: 600;
+            color: var(--accent);
+            margin-bottom: 5px;
+        }
+
+        .progress-step .step-description {
+            font-size: 0.9em;
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .progress-step .step-status {
+            font-size: 0.9em;
+            font-weight: 600;
+        }
+
+        .progress-step.completed .step-status {
+            color: var(--success);
+        }
+
+        .progress-step.error .step-status {
+            color: var(--danger);
+        }
+
+        .progress-step.pending .step-status {
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .installation-results {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 20px;
+            padding: 25px;
+            margin-top: 20px;
+        }
+
+        .installation-results h4 {
+            color: var(--text-primary);
+            margin-bottom: 15px;
+            font-size: 1.2em;
+        }
+
+        .result-item {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 12px;
+            border-radius: 10px;
+            margin-bottom: 10px;
+        }
+
+        .result-item.success {
+            background: rgba(40, 167, 69, 0.1);
+            border-left: 3px solid var(--success);
+        }
+
+        .result-item.error {
+            background: rgba(220, 53, 69, 0.1);
+            border-left: 3px solid var(--danger);
+        }
+
+        .result-item.warning {
+            background: rgba(255, 193, 7, 0.1);
+            border-left: 3px solid var(--warning);
+        }
+
+        .result-icon {
+            font-size: 1.5em;
+        }
+
+        .result-content {
+            flex: 1;
+        }
+
+        .result-title {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .result-message {
+            font-size: 0.9em;
+            color: rgba(0, 0, 0, 0.7);
+        }
+
+        .result-message.error {
+            color: var(--danger);
+        }
+
+        .result-message.success {
+            color: var(--success);
+        }
+
+        .result-message.warning {
+            color: var(--warning);
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+            
+            header h1 {
+                font-size: 2.5em;
+            }
+            
+            .status-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .tab-buttons {
+                flex-direction: column;
+            }
+            
+            .mod-list {
+                grid-template-columns: 1fr;
+            }
+            
+            .file-explorer {
+                grid-template-columns: 1fr;
+            }
+            
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+            
+            .action-buttons {
+                grid-template-columns: 1fr;
+            }
+            
+            .dashboard-stats {
+                grid-template-columns: 1fr;
+            }
+            
+            .system-check {
+                grid-template-columns: 1fr;
+            }
+            
+            .quick-actions {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Scanlines and Noise Effects -->
+    <div class="scanlines"></div>
+    <div class="noise"></div>
+
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <h1 class="neon-text">Mod Editing System</h1>
+            <p>Automated Minecraft mod management and troubleshooting</p>
+        </header>
+
+        <!-- Real-time Status Indicator -->
+        <div id="realtime-status" class="realtime-updates hidden">
+            <span class="loading"></span>
+            <span id="realtime-text">System updating...</span>
+        </div>
+
+        <!-- Dashboard Stats -->
+        <div class="dashboard-stats">
+            <div class="stat-card info">
+                <div class="stat-icon">📁</div>
+                <div class="stat-value" id="total-mods">0</div>
+                <div class="stat-label">Total Mods</div>
+            </div>
+            <div class="stat-card success">
+                <div class="stat-icon">🚀</div>
+                <div class="stat-value" id="active-mods">0</div>
+                <div class="stat-label">Active Mods</div>
+            </div>
+            <div class="stat-card warning">
+                <div class="stat-icon">⚠️</div>
+                <div class="stat-value" id="warnings-count">0</div>
+                <div class="stat-label">Warnings</div>
+            </div>
+            <div class="stat-card danger">
+                <div class="stat-icon">🚨</div>
+                <div class="stat-value" id="errors-count">0</div>
+                <div class="stat-label">Errors</div>
+            </div>
+        </div>
+
+        <!-- Tab Navigation -->
+        <div class="tab-container">
+            <div class="tab-buttons">
+                <button class="active" onclick="showTab('dashboard')">
+                    📊 Dashboard
+                </button>
+                <button onclick="showTab('mods')">
+                    🐎 Mods
+                </button>
+                <button onclick="showTab('mixins')">
+                    🧰 Mixins
+                </button>
+                <button onclick="showTab('patches')">
+                    🔧 Patches
+                </button>
+                <button onclick="showTab('manifests')">
+                    📋 Manifests
+                </button>
+                <button onclick="showTab('git')">
+                    🔄 Git
+                </button>
+                <button onclick="showTab('settings')">
+                    ⚙️ Settings
+                </button>
+                <button onclick="showTab('installation')">
+                    🛠️ Installation
+                </button>
+            </div>
+
+            <!-- Tab Content -->
+            <div class="tab-content">
+                <!-- Dashboard Tab -->
+                <div id="dashboard" class="tab-pane active">
+                    <div class="floating-card">
+                        <h2>Dashboard Overview</h2>
+                        <div class="info-box">
+                            <p><strong>System Status:</strong> <span id="system-status">Loading...</span></p>
+                            <p><strong>Last Scan:</strong> <span id="last-scan">Never</span></p>
+                        </div>
+
+                        <div class="quick-actions">
+                            <div class="quick-action-btn" onclick="refreshData()">
+                                <div class="icon">🔄</div>
+                                <div class="action-name">Refresh Data</div>
+                                <div class="action-desc">Update all system information</div>
+                            </div>
+                            <div class="quick-action-btn" onclick="scanMods()">
+                                <div class="icon">🔍</div>
+                                <div class="action-name">Scan Mods</div>
+                                <div class="action-desc">Analyze all installed mods</div>
+                            </div>
+                            <div class="quick-action-btn" onclick="generateManifest()">
+                                <div class="icon">📋</div>
+                                <div class="action-name">Generate Manifest</div>
+                                <div class="action-desc">Create CurseForge manifest</div>
+                            </div>
+                            <div class="quick-action-btn" onclick="checkDependencies()">
+                                <div class="icon">⚙️</div>
+                                <div class="action-name">Check Dependencies</div>
+                                <div class="action-desc">Verify system requirements</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Mods Tab -->
+                <div id="mods" class="tab-pane">
+                    <div class="floating-card">
+                        <h2>Mod Management</h2>
+                        <div class="mod-list" id="mod-list">
+                            <!-- Mods will be loaded here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Mixins Tab -->
+                <div id="mixins" class="tab-pane">
+                    <div class="floating-card">
+                        <h2>Mixin Management</h2>
+                        <div class="repo-selector">
+                            <select id="mixin-repo" onchange="loadMixinFiles()">
+                                <option value="">Select Repository</option>
+                            </select>
+                        </div>
+                        <div class="file-explorer">
+                            <div class="file-tree" id="mixin-tree">
+                                <!-- Mixin tree will be loaded here -->
+                            </div>
+                            <div class="file-content" id="mixin-content">
+                                <h3>Select a mixin file to view</h3>
+                            </div>
+                        </div>
+                        <div class="file-actions">
+                            <button class="btn" onclick="createNewMixin()">Create New Mixin</button>
+                            <button class="btn btn-danger" onclick="deleteSelectedMixin()">Delete Mixin</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Patches Tab -->
+                <div id="patches" class="tab-pane">
+                    <div class="floating-card">
+                        <h2>Patch Management</h2>
+                        <div class="repo-selector">
+                            <select id="patch-repo" onchange="loadPatchFiles()">
+                                <option value="">Select Repository</option>
+                            </select>
+                        </div>
+                        <div class="file-explorer">
+                            <div class="file-tree" id="patch-tree">
+                                <!-- Patch tree will be loaded here -->
+                            </div>
+                            <div class="file-content" id="patch-content">
+                                <h3>Select a patch file to view</h3>
+                            </div>
+                        </div>
+                        <div class="file-actions">
+                            <button class="btn" onclick="createNewPatch()">Create New Patch</button>
+                            <button class="btn btn-danger" onclick="deleteSelectedPatch()">Delete Patch</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Manifests Tab -->
+                <div id="manifests" class="tab-pane">
+                    <div class="floating-card">
+                        <h2>Manifest Management</h2>
+                        <div class="action-buttons">
+                            <button class="btn" onclick="generateManifest()">Generate Manifest</button>
+                            <button class="btn btn-warning" onclick="downloadLatestManifest()">Download Latest</button>
+                            <button class="btn btn-danger" onclick="deleteManifest()">Delete Manifest</button>
+                        </div>
+                        <div class="manifest-list" id="manifest-list">
+                            <!-- Manifests will be loaded here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Git Tab -->
+                <div id="git" class="tab-pane">
+                    <div class="floating-card">
+                        <h2>Git Repository Management</h2>
+                        <div class="dependency-check">
+                            <h3>Git Status</h3>
+                            <div class="dependency-list" id="git-status-list">
+                                <!-- Git status will be loaded here -->
+                            </div>
+                        </div>
+                        <div class="action-buttons">
+                            <button class="btn" onclick="setupGitRepo()">Setup Repository</button>
+                            <button class="btn btn-warning" onclick="commitChanges()">Commit Changes</button>
+                            <button class="btn btn-danger" onclick="pushChanges()">Push Changes</button>
+                        </div>
+                        <div class="commit-history" id="commit-history">
+                            <!-- Commit history will be loaded here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Settings Tab -->
+                <div id="settings" class="tab-pane">
+                    <div class="floating-card">
+                        <h2>System Settings</h2>
+                        <div class="settings-panel">
+                            <h3>General Settings</h3>
+                            <div class="setting-item">
+                                <label>Server Port</label>
+                                <div class="setting-controls">
+                                    <input type="number" id="server-port" value="25565" min="1024" max="65535">
+                                </div>
+                            </div>
+                            <div class="setting-item">
+                                <label>Mod Directory</label>
+                                <div class="setting-controls">
+                                    <input type="text" id="mod-dir" value="/home/services/mods">
+                                </div>
+                            </div>
+                            <div class="setting-item">
+                                <label>Auto-Refresh Interval</label>
+                                <div class="setting-controls">
+                                    <input type="number" id="refresh-interval" value="30" min="5" max="300">
+                                    <span>seconds</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="settings-panel">
+                            <h3>Theme Settings</h3>
+                            <div class="theme-selector">
+                                <div class="theme-option active" data-theme="futuristic">
+                                    <div class="theme-preview futuristic"></div>
+                                    <div>Futuristic</div>
+                                </div>
+                                <div class="theme-option" data-theme="dark">
+                                    <div class="theme-preview dark"></div>
+                                    <div>Dark</div>
+                                </div>
+                                <div class="theme-option" data-theme="night">
+                                    <div class="theme-preview night"></div>
+                                    <div>Night</div>
+                                </div>
+                                <div class="theme-option" data-theme="retro">
+                                    <div class="theme-preview retro"></div>
+                                    <div>Retro</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="action-buttons">
+                            <button class="btn" onclick="saveSettings()">Save Settings</button>
+                            <button class="btn btn-warning" onclick="resetSettings()">Reset Settings</button>
+                            <button class="btn btn-danger" onclick="restoreDefaults()">Restore Defaults</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Installation Tab -->
+                <div id="installation" class="tab-pane">
+                    <div class="floating-card">
+                        <h2>System Installation</h2>
+                        <div class="os-tabs">
+                            <button class="active" onclick="showOS('debian')">Debian/Ubuntu</button>
+                            <button onclick="showOS('fedora')">Fedora</button>
+                            <button onclick="showOS('amazon')">Amazon Linux</button>
+                            <button onclick="showOS('arch')">Arch Linux</button>
+                        </div>
+                        <div class="os-content active" id="debian">
+                            <div class="installation-guide">
+                                <h3>Debian/Ubuntu Installation</h3>
+                                <div class="command" onclick="copyCommand(this)">
+                                    <span class="command-prefix">$</span> sudo apt-get update
+                                </div>
+                                <div class="command" onclick="copyCommand(this)">
+                                    <span class="command-prefix">$</span> sudo apt-get install -y git python3 python3-pip python3-venv
+                                </div>
+                                <div class="command" onclick="copyCommand(this)">
+                                    <span class="command-prefix">$</span> python3 -m venv mod-editing-env
+                                </div>
+                                <div class="command" onclick="copyCommand(this)">
+                                    <span class="command-prefix">$</span> source mod-editing-env/bin/activate && pip install gitpython flask
+                                </div>
+                            </div>
+                        </div>
+                        <div class="os-content" id="fedora">
+                            <div class="installation-guide">
+                                <h3>Fedora Installation</h3>
+                                <div class="command" onclick="copyCommand(this)">
+                                    <span class="command-prefix">$</span> sudo dnf update
+                                </div>
+                                <div class="command" onclick="copyCommand(this)">
+                                    <span class="command-prefix">$</span> sudo dnf install -y git python3 python3-pip python3-virtualenv
+                                </div>
+                                <div class="command" onclick="copyCommand(this)">
+                                    <span class="command-prefix">$</span> python3 -m venv mod-editing-env
+                                </div>
+                                <div class="command" onclick="copyCommand(this)">
+                                    <span class="command-prefix">$</span> source mod-editing-env/bin/activate && pip install gitpython flask
+                                </div>
+                            </div>
+                        </div>
+                        <div class="os-content" id="amazon">
+                            <div class="installation-guide">
+                                <h3>Amazon Linux Installation</h3>
+                                <div class="command" onclick="copyCommand(this)">
+                                    <span class="command-prefix">$</span> sudo yum update
+                                </div>
+                                <div class="command" onclick="copyCommand(this)">
+                                    <span class="command-prefix">$</span> sudo yum install -y git python3 python3-pip python3-venv
+                                </div>
+                                <div class="command" onclick="copyCommand(this)">
+                                    <span class="command-prefix">$</span> python3 -m venv mod-editing-env
+                                </div>
+                                <div class="command" onclick="copyCommand(this)">
+                                    <span class="command-prefix">$</span> source mod-editing-env/bin/activate && pip install gitpython flask
+                                </div>
+                            </div>
+                        </div>
+                        <div class="os-content" id="arch">
+                            <div class="installation-guide">
+                                <h3>Arch Linux Installation</h3>
+                                <div class="command" onclick="copyCommand(this)">
+                                    <span class="command-prefix">$</span> sudo pacman -Syu
+                                </div>
+                                <div class="command" onclick="copyCommand(this)">
+                                    <span class="command-prefix">$</span> sudo pacman -S --noconfirm git python python-pip python-virtualenv
+                                </div>
+                                <div class="command" onclick="copyCommand(this)">
+                                    <span class="command-prefix">$</span> python -m venv mod-editing-env
+                                </div>
+                                <div class="command" onclick="copyCommand(this)">
+                                    <span class="command-prefix">$</span> source mod-editing-env/bin/activate && pip install gitpython flask
+                                </div>
+                            </div>
+                        </div>
+                        <div class="action-buttons">
+                            <button class="btn" onclick="checkDependencies()">Check Dependencies</button>
+                            <button class="btn btn-warning" onclick="installDependencies()">Install Dependencies</button>
+                            <button class="btn btn-danger" onclick="resetInstallation()">Reset Installation</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast" class="toast hidden"></div>
+
+    <!-- Loading Modal -->
+    <div id="loading-modal" class="modal-overlay hidden">
+        <div class="modal-window">
+            <div class="modal-header">
+                <h3 class="modal-title">Processing...</h3>
+                <button class="modal-close" onclick="closeModal('loading-modal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="progress-container">
+                    <div class="progress">
+                        <div class="progress-bar" id="progress-bar" style="width: 0%"></div>
+                    </div>
+                    <p id="progress-text">Please wait...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Real-time Log -->
+    <div class="realtime-log hidden" id="realtime-log">
+        <h3>Real-time System Log</h3>
+        <div class="log-entries" id="log-entries">
+            <!-- Log entries will be added here -->
+        </div>
+    </div>
+
+    <!-- Auto-refresh Toggle -->
+    <div class="auto-refresh" onclick="toggleAutoRefresh()">
+        <div class="toggle" id="refresh-toggle"></div>
+        <span>Auto-refresh: ON</span>
+    </div>
+
+    <script>
+        let currentTab = 'dashboard';
+        let autoRefreshEnabled = true;
+        let refreshInterval = 30000; // 30 seconds
+        let autoRefreshTimer;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeSystem();
+            startAutoRefresh();
+        });
+
+        function initializeSystem() {
+            showLoading();
+            
+            // Load initial data
+            Promise.all([
+                fetchSystemStatus(),
+                fetchMods(),
+                fetchGitRepos(),
+                fetchMixins(),
+                fetchPatches()
+            ]).then(([status, mods, gitRepos, mixins, patches]) => {
+                updateDashboard(status);
+                populateMods(mods);
+                populateGitRepos(gitRepos);
+                populateMixinTree(mixins);
+                populatePatchTree(patches);
+                hideLoading();
+            }).catch(error => {
+                console.error('Error initializing system:', error);
+                hideLoading();
+                showToast('Failed to initialize system', 'error');
+            });
+        }
+
+        function showTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-pane').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Remove active class from all nav buttons
+            document.querySelectorAll('.tab-buttons button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            // Show selected tab
+            document.getElementById(tabName).classList.add('active');
+            event.target.classList.add('active');
+            currentTab = tabName;
+            
+            // Load tab-specific data
+            switch(tabName) {
+                case 'mods':
+                    if (!document.getElementById('mod-list').innerHTML.trim()) {
+                        loadMods();
+                    }
+                    break;
+                case 'mixins':
+                    if (!document.getElementById('mixin-tree').innerHTML.trim()) {
+                        loadMixinFiles();
+                    }
+                    break;
+                case 'patches':
+                    if (!document.getElementById('patch-tree').innerHTML.trim()) {
+                        loadPatchFiles();
+                    }
+                    break;
+                case 'git':
+                    if (!document.getElementById('git-status-list').innerHTML.trim()) {
+                        loadGitStatus();
+                    }
+                    break;
+            }
+        }
+
+        function refreshData() {
+            showLoading();
+            
+            fetchSystemStatus().then(status => {
+                updateDashboard(status);
+                hideLoading();
+                showToast('Data refreshed successfully', 'success');
+            }).catch(error => {
+                hideLoading();
+                showToast('Error refreshing data', 'error');
+            });
+        }
+
+        function scanMods() {
+            showModal('loading-modal');
+            document.getElementById('progress-text').textContent = 'Scanning mods...';
+            
+            fetch('/api/scan', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                hideModal('loading-modal');
+                if (data.status === 'scan_complete') {
+                    showToast('Mod scan completed', 'success');
+                    refreshData();
+                }
+            })
+            .catch(error => {
+                hideModal('loading-modal');
+                showToast('Error scanning mods', 'error');
+            });
+        }
+
+        function generateManifest() {
+            showModal('loading-modal');
+            document.getElementById('progress-text').textContent = 'Generating manifest...';
+            
+            fetch('/api/manifest/generate', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                hideModal('loading-modal');
+                if (data.status === 'success') {
+                    showToast(`Manifest generated: ${data.filename}`, 'success');
+                    // You could add download functionality here
+                } else {
+                    showToast(`Error: ${data.error}`, 'error');
+                }
+            })
+            .catch(error => {
+                hideModal('loading-modal');
+                showToast('Error generating manifest', 'error');
+            });
+        }
+
+        function checkDependencies() {
+            showModal('loading-modal');
+            document.getElementById('progress-text').textContent = 'Checking dependencies...';
+            
+            fetch('/api/system/check-deps')
+            .then(response => response.json())
+            .then(data => {
+                hideModal('loading-modal');
+                showDependencyCheck(data);
+            })
+            .catch(error => {
+                hideModal('loading-modal');
+                showToast('Error checking dependencies', 'error');
+            });
+        }
+
+        function installDependencies() {
+            showModal('loading-modal');
+            document.getElementById('progress-text').textContent = 'Installing dependencies...';
+            
+            fetch('/api/install-deps', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                hideModal('loading-modal');
+                if (data.status === 'success') {
+                    showToast('Dependencies installed successfully', 'success');
+                    checkDependencies();
+                } else {
+                    showToast(`Error: ${data.error}`, 'error');
+                }
+            })
+            .catch(error => {
+                hideModal('loading-modal');
+                showToast('Error installing dependencies', 'error');
+            });
+        }
+
+        function setupGitRepo() {
+            showModal('loading-modal');
+            document.getElementById('progress-text').textContent = 'Setting up git repository...';
+            
+            fetch('/api/git/setup', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                hideModal('loading-modal');
+                if (data.status === 'success') {
+                    showToast(`Git repository created: ${data.repo_path}`, 'success');
+                    loadGitRepos();
+                } else {
+                    showToast(`Error: ${data.error}`, 'error');
+                }
+            })
+            .catch(error => {
+                hideModal('loading-modal');
+                showToast('Error setting up git repository', 'error');
+            });
+        }
+
+        function commitChanges() {
+            showModal('loading-modal');
+            document.getElementById('progress-text').textContent = 'Committing changes...';
+            
+            fetch('/api/git/commit', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    repo_name: getSelectedRepo(),
+                    message: 'Automated commit'
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                hideModal('loading-modal');
+                if (data.status === 'success') {
+                    showToast(`Changes committed: ${data.commit}`, 'success');
+                    loadGitStatus();
+                } else {
+                    showToast(`Error: ${data.error}`, 'error');
+                }
+            })
+            .catch(error => {
+                hideModal('loading-modal');
+                showToast('Error committing changes', 'error');
+            });
+        }
+
+        function loadMods() {
+            fetch('/api/mods/client-only')
+            .then(response => response.json())
+            .then(clientOnly => {
+                fetch('/api/mods/quarantine')
+                .then(response => response.json())
+                .then(quarantined => {
+                    let html = '';
+                    
+                    // Client-only mods
+                    html += '<h3>Client-Only Mods</h3>';
+                    if (clientOnly.length > 0) {
+                        clientOnly.forEach(mod => {
+                            html += `<div class="mod-item client-only">
+                                        <div class="mod-name">${mod}</div>
+                                        <div class="mod-info">Client-side only</div>
+                                        <div class="mod-actions">
+                                            <button class="btn btn-danger" onclick="moveToActive('${mod}')">Move to Active</button>
+                                            <button class="btn btn-warning" onclick="editMod('${mod}')">Edit</button>
+                                        </div>
+                                    </div>`;
+                        });
+                    } else {
+                        html += '<p>No client-only mods found.</p>';
+                    }
+                    
+                    // Quarantined mods
+                    html += '<h3>Quarantined Mods</h3>';
+                    if (quarantined.length > 0) {
+                        quarantined.forEach(mod => {
+                            html += `<div class="mod-item quarantined">
+                                        <div class="mod-name">${mod}</div>
+                                        <div class="mod-info">Quarantined</div>
+                                        <div class="mod-actions">
+                                            <button class="btn btn-success" onclick="restoreMod('${mod}')">Restore</button>
+                                            <button class="btn btn-danger" onclick="deleteMod('${mod}')">Delete</button>
+                                        </div>
+                                    </div>`;
+                        });
+                    } else {
+                        html += '<p>No quarantined mods.</p>';
+                    }
+                    
+                    document.getElementById('mod-list').innerHTML = html;
+                });
+            });
+        }
+
+        function loadGitRepos() {
+            fetch('/api/status')
+            .then(response => response.json())
+            .then(data => {
+                const select = document.getElementById('mixin-repo');
+                const patchSelect = document.getElementById('patch-repo');
+                
+                data.git_repos.forEach((repo, name) => {
+                    const option = document.createElement('option');
+                    option.value = name;
+                    option.textContent = name;
+                    select.appendChild(option);
+                    
+                    const patchOption = document.createElement('option');
+                    patchOption.value = name;
+                    patchOption.textContent = name;
+                    patchSelect.appendChild(patchOption);
+                });
+            });
+        }
+
+        function loadMixinFiles() {
+            const repoName = getSelectedRepo();
+            if (!repoName) return;
+            
+            fetch(`/api/mixins/${repoName}`)
+            .then(response => response.json())
+            .then(files => {
+                let html = '';
+                files.forEach(file => {
+                    html += `<div class="file-tree-item" onclick="selectFile('${file}')">${file}</div>`;
+                });
+                document.getElementById('mixin-tree').innerHTML = html;
+            });
+        }
+
+        function loadPatchFiles() {
+            const repoName = getSelectedRepo();
+            if (!repoName) return;
+            
+            fetch(`/api/patches/${repoName}`)
+            .then(response => response.json())
+            .then(files => {
+                let html = '';
+                files.forEach(file => {
+                    html += `<div class="file-tree-item" onclick="selectFile('${file}')">${file}</div>`;
+                });
+                document.getElementById('patch-tree').innerHTML = html;
+            });
+        }
+
+        function loadGitStatus() {
+            fetch('/api/status')
+            .then(response => response.json())
+            .then(data => {
+                let html = '';
+                Object.entries(data.git_repos).forEach(([name, repo]) => {
+                    html += `<div class="dependency-item">
+                                <div class="dependency-name">${name}</div>
+                                <div class="dependency-status ${repo.modified_files > 0 ? 'warning' : 'installed'}">
+                                    ${repo.modified_files > 0 ? `${repo.modified_files} modified` : 'Clean'}
+                                </div>
+                                <div class="dependency-actions">
+                                    <button class="btn btn-success" onclick="commitChanges('${name}')">Commit</button>
+                                    <button class="btn btn-danger" onclick="resetRepo('${name}')">Reset</button>
+                                </div>
+                            </div>`;
+                });
+                document.getElementById('git-status-list').innerHTML = html;
+            });
+        }
+
+        function updateDashboard(status) {
+            document.getElementById('total-mods').textContent = status.mods_count;
+            document.getElementById('active-mods').textContent = status.mods_count - status.quarantine_count;
+            document.getElementById('warnings-count').textContent = status.warnings_count;
+            document.getElementById('errors-count').textContent = 0; // Placeholder
+            document.getElementById('system-status').textContent = status.system_deps_installed ? 'Healthy' : 'Needs Setup';
+            document.getElementById('last-scan').textContent = status.last_scan || 'Never';
+        }
+
+        function showLoading() {
+            const refreshBtn = document.querySelector('.refresh-btn');
+            if (refreshBtn) {
+                refreshBtn.innerHTML = '<span class="loading"></span> Loading...';
+            }
+            document.getElementById('realtime-status').classList.remove('hidden');
+            document.getElementById('realtime-text').textContent = 'Loading...';
+        }
+
+        function hideLoading() {
+            const refreshBtn = document.querySelector('.refresh-btn');
+            if (refreshBtn) {
+                refreshBtn.innerHTML = '<span id="refresh-icon"></span> Refresh';
+            }
+            document.getElementById('realtime-status').classList.add('hidden');
+        }
+
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `toast ${type}`;
+            toast.classList.remove('hidden');
+            
+            setTimeout(() => {
+                toast.classList.add('hidden');
+            }, 3000);
+        }
+
+        function showModal(modalId) {
+            document.getElementById(modalId).classList.add('show');
+        }
+
+        function hideModal(modalId) {
+            document.getElementById(modalId).classList.remove('show');
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('show');
+        }
+
+        function copyCommand(element) {
+            const command = element.textContent.replace('$ ', '');
+            navigator.clipboard.writeText(command).then(() => {
+                showToast('Command copied to clipboard', 'success');
+                element.classList.add('success');
+                setTimeout(() => {
+                    element.classList.remove('success');
+                }, 1000);
+            });
+        }
+
+        function showOS(osName) {
+            // Hide all OS content
+            document.querySelectorAll('.os-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            
+            // Remove active class from all OS tabs
+            document.querySelectorAll('.os-tabs button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            // Show selected OS content
+            document.getElementById(osName).classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        function toggleAutoRefresh() {
+            autoRefreshEnabled = !autoRefreshEnabled;
+            const toggle = document.getElementById('refresh-toggle');
+            const container = event.target;
+            
+            if (autoRefreshEnabled) {
+                container.classList.remove('error');
+                container.classList.remove('warning');
+                container.classList.add('enabled');
+                container.querySelector('span').textContent = 'Auto-refresh: ON';
+                startAutoRefresh();
+            } else {
+                container.classList.remove('enabled');
+                container.classList.add('warning');
+                container.querySelector('span').textContent = 'Auto-refresh: OFF';
+                stopAutoRefresh();
+            }
+        }
+
+        function startAutoRefresh() {
+            if (autoRefreshEnabled) {
+                autoRefreshTimer = setInterval(refreshData, refreshInterval);
+            }
+        }
+
+        function stopAutoRefresh() {
+            if (autoRefreshTimer) {
+                clearInterval(autoRefreshTimer);
+            }
+        }
+
+        function getSelectedRepo() {
+            const select = document.getElementById('mixin-repo');
+            return select.value || '';
+        }
+
+        function saveSettings() {
+            // Collect settings from form
+            const settings = {
+                serverPort: document.getElementById('server-port').value,
+                modDir: document.getElementById('mod-dir').value,
+                refreshInterval: document.getElementById('refresh-interval').value
+            };
+            
+            // Save to localStorage or send to API
+            localStorage.setItem('modEditingSettings', JSON.stringify(settings));
+            showToast('Settings saved successfully', 'success');
+        }
+
+        function resetSettings() {
+            // Reset to default values
+            document.getElementById('server-port').value = '25565';
+            document.getElementById('mod-dir').value = '/home/services/mods';
+            document.getElementById('refresh-interval').value = '30';
+            showToast('Settings reset to defaults', 'success');
+        }
+
+        function restoreDefaults() {
+            // Restore all default settings
+            resetSettings();
+            // Additional default restoration logic
+            showToast('All settings restored to factory defaults', 'success');
+        }
+
+        function resetInstallation() {
+            // Reset installation process
+            showToast('Installation reset. Please restart the installation process.', 'warning');
+        }
+
+        function showDependencyCheck(data) {
+            // Show dependency check results in a modal or toast
+            const message = data.installed ? 
+                'All system dependencies are installed!' : 
+                `Missing dependencies: ${data.missing.join(', ')}`;
+            showToast(message, data.installed ? 'success' : 'error');
+        }
+
+        function createNewMixin() {
+            showToast('Create new mixin functionality coming soon', 'info');
+        }
+
+        function deleteSelectedMixin() {
+            showToast('Delete mixin functionality coming soon', 'info');
+        }
+
+        function createNewPatch() {
+            showToast('Create new patch functionality coming soon', 'info');
+        }
+
+        function deleteSelectedPatch() {
+            showToast('Delete patch functionality coming soon', 'info');
+        }
+
+        function downloadLatestManifest() {
+            showToast('Download manifest functionality coming soon', 'info');
+        }
+
+        function deleteManifest() {
+            showToast('Delete manifest functionality coming soon', 'info');
+        }
+
+        function pushChanges() {
+            showToast('Push changes functionality coming soon', 'info');
+        }
+
+        function resetRepo(repoName) {
+            showToast(`Reset repository ${repoName} functionality coming soon`, 'info');
+        }
+
+        function moveModToActive(modName) {
+            showToast(`Move ${modName} to active functionality coming soon`, 'info');
+        }
+
+        function editMod(modName) {
+            showToast(`Edit mod ${modName} functionality coming soon`, 'info');
+        }
+
+        function restoreMod(modName) {
+            showToast(`Restore mod ${modName} functionality coming soon`, 'info');
+        }
+
+        function deleteMod(modName) {
+            showToast(`Delete mod ${modName} functionality coming soon`, 'info');
+        }
+
+        // Initialize theme
+        const themeOptions = document.querySelectorAll('.theme-option');
+        themeOptions.forEach(option => {
+            option.addEventListener('click', function() {
+                // Remove active class from all options
+                themeOptions.forEach(opt => opt.classList.remove('active'));
+                // Add active class to selected option
+                this.classList.add('active');
+                
+                // Apply theme
+                const theme = this.dataset.theme;
+                applyTheme(theme);
+                
+                showToast(`Theme changed to ${theme}`, 'success');
+            });
+        });
+
+        function applyTheme(theme) {
+            // Apply theme styles
+            document.body.className = theme;
+        }
+
+        // Initialize real-time log
+        function startRealTimeLog() {
+            // Simulate real-time log updates
+            setInterval(() => {
+                const logEntries = document.getElementById('log-entries');
+                const entry = document.createElement('div');
+                entry.className = 'log-entry info';
+                entry.innerHTML = `
+                    <span class="log-timestamp">${new Date().toLocaleTimeString()}</span>
+                    <span class="log-source">System</span>
+                    <span class="log-message">System running smoothly</span>
+                `;
+                logEntries.appendChild(entry);
+                
+                // Keep only last 50 entries
+                if (logEntries.children.length > 50) {
+                    logEntries.removeChild(logEntries.firstChild);
+                }
+            }, 5000);
+        }
+
+        // Start real-time log
+        startRealTimeLog();
+    </script>
+</body>
+</html>

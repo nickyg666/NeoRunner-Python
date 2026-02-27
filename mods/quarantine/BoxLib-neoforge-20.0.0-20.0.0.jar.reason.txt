@@ -1,0 +1,3 @@
+Quarantined: 2026-02-22T21:23:25.213844
+Reason: Client-only mod — crashes server (NoClassDefFoundError: net/minecraft/client/gui/screens/Screen)
+Mod ID/slug: boxlib

@@ -1,0 +1,2117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NeoRunner - Server Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #333;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+        
+        header h1 {
+            color: #2a5298;
+            margin-bottom: 10px;
+        }
+        
+        header p {
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 20px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        
+        .card h2 {
+            color: #2a5298;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        
+        .stat {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .stat:last-child {
+            border-bottom: none;
+        }
+        
+        .stat-label {
+            color: #666;
+            font-weight: 500;
+        }
+        
+        .stat-value {
+            color: #2a5298;
+            font-weight: bold;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        
+        .status-running {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-stopped {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        button {
+            background: #2a5298;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+            margin-top: 10px;
+            margin-right: 10px;
+        }
+        
+        button:hover:not(:disabled) {
+            background: #1e3c72;
+        }
+        
+        button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            filter: grayscale(40%);
+        }
+        
+        button.danger {
+            background: #dc3545;
+        }
+        
+        button.danger:hover:not(:disabled) {
+            background: #c82333;
+        }
+        
+        button.success {
+            background: #28a745;
+        }
+        
+        button.success:hover:not(:disabled) {
+            background: #218838;
+        }
+        
+        input, select, textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin: 8px 0;
+            font-family: inherit;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #333;
+            font-weight: 500;
+        }
+        
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #eee;
+        }
+        
+        .tab-button {
+            background: none;
+            border: none;
+            color: #666;
+            padding: 10px 20px;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s;
+            margin: 0;
+        }
+        
+        .tab-button.active {
+            color: #2a5298;
+            border-bottom-color: #2a5298;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .mod-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .mod-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            border: 1px solid #eee;
+            margin-bottom: 5px;
+            border-radius: 4px;
+        }
+        
+        .mod-info {
+            flex: 1;
+        }
+        
+        .mod-name {
+            font-weight: bold;
+            color: #2a5298;
+        }
+        
+        .mod-size {
+            font-size: 12px;
+            color: #999;
+        }
+        
+        .logs {
+            background: #1e1e1e;
+            color: #00ff00;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            line-height: 1.4;
+            margin-top: 10px;
+        }
+        
+        .log-line {
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #2a5298;
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .alert {
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+        
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .alert-info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        
+        .alert-warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffc107;
+        }
+        
+        /* Client installer download buttons */
+        .installer-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 14px 24px;
+            border-radius: 8px;
+            text-decoration: none;
+            color: white;
+            font-weight: 600;
+            transition: transform 0.15s, box-shadow 0.15s;
+            min-width: 120px;
+            cursor: pointer;
+        }
+        .installer-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+        }
+        .installer-bat { background: linear-gradient(135deg, #0078d4, #005a9e); }
+        .installer-ps1 { background: linear-gradient(135deg, #012456, #1e3a5f); }
+        .installer-sh  { background: linear-gradient(135deg, #e95420, #c34113); }
+        .installer-icon { font-size: 22px; margin-bottom: 4px; }
+        .installer-label { font-size: 16px; font-weight: bold; }
+        .installer-desc { font-size: 11px; opacity: 0.85; margin-top: 2px; }
+        
+        /* Quarantine items */
+        .quarantine-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #fff8e1;
+            border: 1px solid #ffe082;
+            border-radius: 6px;
+            padding: 8px 12px;
+            margin-bottom: 6px;
+            font-size: 13px;
+        }
+        .quarantine-item .q-info { flex: 1; }
+        .quarantine-item .q-name { font-weight: 600; color: #333; }
+        .quarantine-item .q-reason { color: #888; font-size: 12px; }
+        .quarantine-item .q-restore {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 4px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-left: 10px;
+        }
+        .quarantine-item .q-restore:hover { background: #388E3C; }
+        .quarantine-item .q-delete {
+            background: #f44336;
+            color: white;
+            border: none;
+            padding: 4px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-left: 6px;
+        }
+        .quarantine-item .q-delete:hover { background: #d32f2f; }
+        
+        /* Server events timeline */
+        .event-timeline { max-height: 300px; overflow-y: auto; }
+        .event-item {
+            display: flex;
+            gap: 8px;
+            padding: 6px 0;
+            border-bottom: 1px solid #eee;
+            font-size: 13px;
+        }
+        .event-item:last-child { border-bottom: none; }
+        .event-time { color: #999; font-size: 11px; white-space: nowrap; }
+        .event-type {
+            font-weight: 600;
+            font-size: 11px;
+            padding: 1px 6px;
+            border-radius: 3px;
+            white-space: nowrap;
+        }
+        .event-type-crash { background: #f8d7da; color: #721c24; }
+        .event-type-heal { background: #d4edda; color: #155724; }
+        .event-type-quarantine { background: #fff3cd; color: #856404; }
+        .event-type-restart { background: #d1ecf1; color: #0c5460; }
+        .event-type-default { background: #e2e3e5; color: #383d41; }
+        .event-msg { color: #333; flex: 1; }
+        
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .tabs {
+                flex-wrap: wrap;
+            }
+            
+            button {
+                width: 100%;
+                margin-right: 0;
+                margin-bottom: 10px;
+            }
+        }
+
+        /* Mod Selection Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .modal-overlay.active {
+            display: flex;
+        }
+        .modal {
+            background: white;
+            border-radius: 12px;
+            max-width: 800px;
+            width: 100%;
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+        }
+        .modal-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .modal-header h2 {
+            color: #2a5298;
+            margin: 0;
+        }
+        .modal-header .close-btn {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #999;
+            padding: 0;
+            margin: 0;
+            line-height: 1;
+        }
+        .modal-header .close-btn:hover {
+            color: #333;
+        }
+        .modal-toolbar {
+            padding: 12px 24px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .modal-toolbar button {
+            margin: 0;
+            padding: 6px 14px;
+            font-size: 13px;
+        }
+        .modal-toolbar .search-box {
+            flex: 1;
+            min-width: 200px;
+            margin: 0;
+        }
+        .modal-toolbar .selected-count {
+            color: #666;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .modal-body {
+            overflow-y: auto;
+            padding: 0;
+            flex: 1;
+        }
+        .modal-mod-item {
+            display: flex;
+            align-items: center;
+            padding: 10px 24px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .modal-mod-item:hover {
+            background: #f5f8ff;
+        }
+        .modal-mod-item input[type="checkbox"] {
+            width: auto;
+            margin: 0 12px 0 0;
+            cursor: pointer;
+        }
+        .modal-mod-item .mod-title {
+            font-weight: 600;
+            color: #333;
+            flex: 1;
+        }
+        .modal-mod-item .mod-source {
+            font-size: 10px;
+            font-weight: bold;
+            padding: 2px 6px;
+            border-radius: 3px;
+            color: white;
+            margin-right: 6px;
+            flex-shrink: 0;
+        }
+        .mod-source.modrinth { background: #1bd96a; }
+        .mod-source.curseforge { background: #f16436; }
+        .mod-source.both { background: #7c4dff; }
+        .mod-installed-badge {
+            font-size: 9px;
+            font-weight: bold;
+            padding: 1px 5px;
+            border-radius: 3px;
+            background: #2196f3;
+            color: white;
+            margin-right: 6px;
+            flex-shrink: 0;
+        }
+        .modal-mod-item.installed {
+            opacity: 0.55;
+        }
+        .modal-mod-item.installed input[type="checkbox"] {
+            cursor: not-allowed;
+        }
+        .modal-mod-item .mod-downloads {
+            color: #888;
+            font-size: 12px;
+        }
+        .modal-footer {
+            padding: 16px 24px;
+            border-top: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .modal-footer .footer-info {
+            color: #666;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎮 NeoRunner - Minecraft Server Dashboard</h1>
+            <p>Manage your modded server with ease | <strong>Ports:</strong> Game: <span id="game-port">-</span> | Query: <span id="query-port">-</span> | RCON: <span id="rcon-port">-</span> | HTTP: <span id="http-port">-</span></p>
+        </header>
+        
+        <div id="alerts"></div>
+        
+        <div class="grid">
+            <!-- Server Status Card -->
+            <div class="card">
+                <h2>Server Status</h2>
+                <div id="status-content">
+                    <div class="loading"></div> Loading...
+                </div>
+            </div>
+            
+             <!-- Quick Actions Card -->
+            <div class="card">
+                <h2>Quick Actions</h2>
+                <button id="btn-start" class="success" onclick="startServer()">▶ Start</button>
+                <button id="btn-stop" class="danger" onclick="stopServer()" disabled>⏹ Stop</button>
+                <button id="btn-restart" onclick="restartServer()" style="background:#FF9800;">🔄 Restart</button>
+                <br><br>
+                <button class="success" onclick="upgradeMods()">📦 Upgrade Mods</button>
+                <button onclick="openModSelector()">📋 Browse & Add Mods</button>
+                <button onclick="openConvertModal()" style="background:#9C27B0;">🔄 Convert Modpack</button>
+            </div>
+        </div>
+        
+        <!-- Client Installers Card -->
+        <div class="card" style="margin-bottom: 20px;">
+            <h2>Client Mod Installer</h2>
+            <p style="color:#666; font-size:13px; margin-bottom:12px;">Download a script, run it on your PC, and your client mods folder will be synced with the server. Pick the one that matches your OS:</p>
+            <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                <a href="/download/install-mods.bat" class="installer-btn installer-bat" download>
+                    <span class="installer-icon">&#x1F4E5;</span>
+                    <span class="installer-label">.bat</span>
+                    <span class="installer-desc">Windows (double-click)</span>
+                </a>
+                <a href="/download/install-mods.ps1" class="installer-btn installer-ps1" download>
+                    <span class="installer-icon">&#x1F4E5;</span>
+                    <span class="installer-label">.ps1</span>
+                    <span class="installer-desc">PowerShell 5.1+</span>
+                </a>
+                <a href="/download/install-mods.sh" class="installer-btn installer-sh" download>
+                    <span class="installer-icon">&#x1F4E5;</span>
+                    <span class="installer-label">.sh</span>
+                    <span class="installer-desc">Linux / macOS</span>
+                </a>
+            </div>
+            <p style="color:#888; font-size:11px; margin-top:10px;">
+                <strong>One-liner (PowerShell):</strong> Right-click in PowerShell and paste, or run: 
+                <code id="powershell-oneliner" style="background:#2a2a2a;padding:2px 6px;border-radius:3px;cursor:pointer;font-family:monospace;" onclick="copyToClipboard(this)" title="Click to copy">Loading...</code>
+                <br><span style="color:#666;">If double-clicking .bat opens Notepad, use the one-liner or right-click .bat → "Run with PowerShell"</span>
+            </p>
+        </div>
+        
+        <!-- Tabbed Section -->
+        <div class="card">
+            <div class="tabs">
+                <button class="tab-button active" onclick="switchTab('mods')">📦 Mods</button>
+                <button class="tab-button" onclick="switchTab('quarantine')">🔒 Quarantine</button>
+                <button class="tab-button" onclick="switchTab('blacklist')">🚫 Blacklist</button>
+                <button class="tab-button" onclick="switchTab('config')">⚙️ Configuration</button>
+                <button class="tab-button" onclick="switchTab('events')">🔔 Events</button>
+                <button class="tab-button" onclick="switchTab('logs')">📝 Logs</button>
+            </div>
+            
+            <!-- Mods Tab -->
+            <div id="mods" class="tab-content active">
+                <h2>Installed Mods</h2>
+                <div style="margin-bottom: 15px;">
+                    <button class="success" onclick="openModSelector()" style="margin-right: 8px;">+ Add Mods</button>
+                    <button onclick="broadcastModUpdate()" style="background: #e67e22; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;" title="Send clickable download link to all online players via in-game chat">Notify Players</button>
+                    <button onclick="quarantineAllClientMods()" style="background: #FF9800; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-left: 8px;" title="Move all client-only mods from root to clientonly folder (clients can still download)">Sort Client Mods</button>
+                    <button onclick="quarantineAllClientMods()" style="background: #FF9800; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-left: 8px;" title="Quarantine all mods with client-side functionality (render methods, client classes, etc.)">Quarantine Client Mods</button>
+                    <button onclick="quarantineAllMods()" style="background: #e74c3c; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-left: 8px;" title="Quarantine all mods that cause crashes (client-only mods, dependency conflicts, etc.)">Quarantine All</button>
+                    <button onclick="rescanMods()" style="background: #9b59b6; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-left: 8px;" title="Scan all mods for corrupt/incomplete files">🔍 Rescan</button>
+                </div>
+                <div id="mods-content">
+                    <div class="loading"></div> Loading mods...
+                </div>
+            </div>
+            
+            <!-- Quarantine Tab -->
+            <div id="quarantine" class="tab-content">
+                <h2>🔒 Quarantined Mods</h2>
+                <p style="color:#888; font-size:13px; margin-bottom:15px;">Mods that were automatically removed due to crashes or compatibility issues. Restore them if the issue has been resolved.</p>
+                <div style="margin-bottom: 15px;">
+                    <button onclick="restoreAllQuarantined()" style="background: #27ae60; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-right: 8px;" title="Restore all quarantined mods to their original folders">Restore All</button>
+                    <button onclick="quarantineAllClientMods()" style="background: #FF9800; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;" title="Move all client-only mods from root to clientonly folder">Sort Client Mods</button>
+                    <button onclick="quarantineAllClientMods()" style="background: #FF9800; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-left: 8px;" title="Quarantine all mods with client-side functionality (render methods, client classes, etc.)">Quarantine Client Mods</button>
+                    <button onclick="quarantineAllMods()" style="background: #e74c3c; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-left: 8px;" title="Quarantine all mods that cause crashes (client-only mods, dependency conflicts, etc.)">Quarantine All</button>
+                </div>
+                <div id="quarantine-tab-content">
+                    <div class="loading"></div> Loading...
+                </div>
+            </div>
+            
+            <!-- Blacklist Tab -->
+            <div id="blacklist" class="tab-content">
+                <h2>🚫 Blacklist & Whitelist</h2>
+                <p style="color:#888; font-size:13px; margin-bottom:15px;">Manage mods that are automatically quarantined. Blacklisted mods are always blocked, whitelisted mods are never auto-quarantined.</p>
+                
+                <h3 style="color:#e74c3c; border-bottom:1px solid #333; padding-bottom:8px;">Blacklist</h3>
+                <p style="color:#888; font-size:12px;">Mods in this list will be automatically quarantined on startup or when detected.</p>
+                <div style="display:flex; gap:8px; margin-bottom:10px;">
+                    <input type="text" id="blacklist-add-input" placeholder="mod_id (e.g. emf) or regex pattern (e.g. 'decocraft.*1\.21\.1$')" style="flex:1; padding:8px; border-radius:4px; border:1px solid #555; background:#2a2a2a; color:#fff;">
+                    <button onclick="addToBlacklist()" style="background: #e74c3c; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Add</button>
+                </div>
+                <div style="display:flex; gap:8px; margin-bottom:10px;">
+                    <input type="text" id="blacklist-pattern-add-input" placeholder="regex pattern (e.g. '.*1\.21\.1$')" style="flex:1; padding:8px; border-radius:4px; border:1px solid #555; background:#2a2a2a; color:#fff;">
+                    <button onclick="addToBlacklistPattern()" style="background: #e74c3c; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Add Pattern</button>
+                </div>
+                <div id="blacklist-content" style="margin-bottom:20px;"></div>
+                
+                <h3 style="color:#ff9800; border-bottom:1px solid #333; padding-bottom:8px;">Blacklist Patterns</h3>
+                <p style="color:#888; font-size:12px;">Regex patterns to automatically blacklist mods matching version patterns. Use with caution!</p>
+                <div style="display:flex; gap:8px; margin-bottom:10px;">
+                    <input type="text" id="blacklist-pattern-remove-input" placeholder="pattern to remove" style="flex:1; padding:8px; border-radius:4px; border:1px solid #555; background:#2a2a2a; color:#fff;">
+                    <button onclick="removeFromBlacklistPattern()" style="background: #ff9800; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Remove Pattern</button>
+                </div>
+                <div id="blacklist-patterns-content" style="margin-bottom:20px;"></div>
+                
+                <h3 style="color:#27ae60; border-bottom:1px solid #333; padding-bottom:8px;">Whitelist</h3>
+                <p style="color:#888; font-size:12px;">Mods in this list will never be auto-quarantined (overrides blacklist).</p>
+                <div style="display:flex; gap:8px; margin-bottom:10px;">
+                    <input type="text" id="whitelist-add-input" placeholder="mod_id (e.g. sodium)" style="flex:1; padding:8px; border-radius:4px; border:1px solid #555; background:#2a2a2a; color:#fff;">
+                    <button onclick="addToWhitelist()" style="background: #27ae60; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Add</button>
+                </div>
+                <div id="whitelist-content"></div>
+            </div>
+            
+            <!-- Configuration Tab -->
+            <div id="config" class="tab-content">
+                <h2>Server Configuration</h2>
+                
+                <h3 style="margin-top:0;color:#4CAF50;border-bottom:1px solid #333;padding-bottom:8px;">Network</h3>
+                <div class="form-group">
+                    <label>Hostname / Public IP</label>
+                    <input type="text" id="cfg-hostname" placeholder="e.g. play.myserver.com or 192.168.0.19">
+                    <small>Public-facing address for install scripts and broadcasts. Leave blank to auto-detect from server.properties.</small>
+                </div>
+                <div class="form-group">
+                    <label>Minecraft Version</label>
+                    <input type="text" id="mc-version" value="1.21.11">
+                </div>
+                
+                <h3 style="color:#2196F3;border-bottom:1px solid #333;padding-bottom:8px;">Mod Curator</h3>
+                <div class="form-group">
+                    <label>Curator Sort Order</label>
+                    <select id="cfg-curator-sort">
+                        <option value="downloads">Downloads (most popular)</option>
+                        <option value="relevance">Relevance</option>
+                        <option value="follows">Follows</option>
+                        <option value="newest">Newest</option>
+                        <option value="updated">Recently Updated</option>
+                    </select>
+                    <small>Default sort for Modrinth/CurseForge mod searches</small>
+                </div>
+                <div class="form-group">
+                    <label>Curator Limit (per source)</label>
+                    <input type="number" id="cfg-curator-limit" min="10" max="200" value="100" step="10">
+                    <small>Max mods to fetch from each source (10-200)</small>
+                </div>
+                
+                <h3 style="color:#e74c3c;border-bottom:1px solid #333;padding-bottom:8px;">Server Recovery</h3>
+                <div class="form-group">
+                    <label>Max Restart Attempts</label>
+                    <input type="number" id="cfg-max-restarts" min="1" max="100" value="25">
+                    <small>How many times to auto-restart after crashes before giving up (1-100)</small>
+                </div>
+                <div class="form-group">
+                    <label>Max Crashes Before Quarantine</label>
+                    <input type="number" id="cfg-max-crashes" min="1" max="10" value="3">
+                    <small>How many times a mod can crash before being auto-quarantined (1-10)</small>
+                </div>
+                
+                <h3 style="color:#FF9800;border-bottom:1px solid #333;padding-bottom:8px;">Broadcasts &amp; Notifications</h3>
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                        <input type="checkbox" id="cfg-broadcast-enabled" style="width:auto;margin:0;">
+                        Enable In-Game Broadcasts
+                    </label>
+                    <small>Master toggle for all tellraw broadcasts to players</small>
+                </div>
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                        <input type="checkbox" id="cfg-broadcast-auto" style="width:auto;margin:0;">
+                        Auto-Broadcast After Mod Install
+                    </label>
+                    <small>Automatically notify players when new mods are installed via dashboard</small>
+                </div>
+                
+                <h3 style="color:#9C27B0;border-bottom:1px solid #333;padding-bottom:8px;">Nag Screens</h3>
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                        <input type="checkbox" id="cfg-nag-modlist" style="width:auto;margin:0;">
+                        Show Mod List on Player Join
+                    </label>
+                    <small>Send mod list via tellraw when a player joins the server</small>
+                </div>
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                        <input type="checkbox" id="cfg-nag-firstvisit" style="width:auto;margin:0;">
+                        First-Visit Mod Selector
+                    </label>
+                    <small>Auto-open mod selector on first dashboard visit</small>
+                </div>
+                
+                <h3 style="color:#00BCD4;border-bottom:1px solid #333;padding-bottom:8px;">Install Scripts</h3>
+                <div class="form-group">
+                    <label>Script Types to Generate</label>
+                    <select id="cfg-script-types">
+                        <option value="all">All (.ps1 + .sh)</option>
+                        <option value="ps1">PowerShell .ps1 only</option>
+                        <option value="sh">Linux/Mac .sh only</option>
+                    </select>
+                    <small>Which install scripts to generate for players</small>
+                </div>
+                
+                <h3 style="color:#E91E63;border-bottom:1px solid #333;padding-bottom:8px;">
+                    Java Memory
+                    <button onclick="openJavaModal()" style="float:right; padding:4px 10px; font-size:12px; background:#607D8B;">☕ Version Manager</button>
+                </h3>
+                <div class="form-group">
+                    <label>Max Heap Size (-Xmx)</label>
+                    <input type="text" id="cfg-xmx" value="6G" placeholder="e.g. 6G, 4096M, 8G">
+                    <small>Maximum memory for server JVM (e.g. 6G, 8G, 16384M). Requires server restart.</small>
+                </div>
+                <div class="form-group">
+                    <label>Initial Heap Size (-Xms)</label>
+                    <input type="text" id="cfg-xms" value="4G" placeholder="e.g. 4G, 2048M, 6G">
+                    <small>Starting memory allocation (e.g. 4G, 6G). Should be less than or equal to max. Requires server restart.</small>
+                </div>
+                
+                <h3 style="color:#607D8B;border-bottom:1px solid #333;padding-bottom:8px;">Update Schedule</h3>
+                <div class="form-group">
+                    <label>Mod Update Frequency (hours)</label>
+                    <input type="number" id="update-freq" min="1" max="24" value="4" step="1">
+                    <small>How often to check for mod updates (1-24 hours)</small>
+                </div>
+                <div class="form-group">
+                    <label>Weekly Update Day</label>
+                    <select id="weekly-day">
+                        <option value="mon">Monday</option>
+                        <option value="tue">Tuesday</option>
+                        <option value="wed">Wednesday</option>
+                        <option value="thu">Thursday</option>
+                        <option value="fri">Friday</option>
+                        <option value="sat">Saturday</option>
+                        <option value="sun">Sunday</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Weekly Update Time (hour)</label>
+                    <input type="number" id="weekly-hour" min="0" max="23" value="2" step="1">
+                    <small>Time of day for weekly strict version check (0-23)</small>
+                </div>
+                
+                <div style="margin-top:20px;display:flex;gap:10px;">
+                    <button class="success" onclick="saveConfig()">Save Configuration</button>
+                    <button onclick="loadConfig()">Reload</button>
+                </div>
+            </div>
+            
+            <!-- Events Tab -->
+            <div id="events" class="tab-content">
+                <h2>Server Events</h2>
+                <p style="color:#666; font-size:13px; margin-bottom:12px;">Crash detection, self-healing actions, and quarantine events. Auto-refreshes every 10 seconds.</p>
+                <button onclick="loadEvents()">🔄 Refresh</button>
+                <button onclick="clearEvents()" class="danger" style="margin-left:8px;">Clear Events</button>
+                <div id="events-content" class="event-timeline" style="margin-top:12px;">
+                    <div class="loading"></div> Loading events...
+                </div>
+            </div>
+            
+            <!-- Logs Tab -->
+            <div id="logs" class="tab-content">
+                <h2>Live Logs</h2>
+                <button onclick="refreshLogs()">🔄 Refresh Logs</button>
+                <div id="logs-content" class="logs">
+                    <div class="loading"></div> Loading logs...
+                </div>
+            </div>
+        </div>
+
+        <!-- Mod Selection Modal -->
+        <div id="mod-selector-modal" class="modal-overlay">
+            <div class="modal">
+                <div class="modal-header">
+                    <h2>Add Mods to Server</h2>
+                    <button class="close-btn" onclick="closeModSelector()">&times;</button>
+                </div>
+                <div class="modal-toolbar">
+                    <button class="success" onclick="selectAllMods()">Select All</button>
+                    <button onclick="deselectAllMods()">Deselect All</button>
+                    <input type="text" class="search-box" id="mod-search" placeholder="Search mods..." oninput="filterModList()">
+                    <span class="selected-count" id="selected-count">0 selected</span>
+                </div>
+                <div class="modal-body" id="modal-mod-list">
+                    <div style="padding: 40px; text-align: center; color: #666;">Loading mod list...</div>
+                </div>
+                <div class="modal-footer">
+                    <span class="footer-info" id="modal-footer-info">Top mods from Modrinth</span>
+                    <div>
+                        <button onclick="closeModSelector()">Cancel</button>
+                        <button class="success" onclick="installSelectedMods()" id="install-btn">Install Selected</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modpack Conversion Modal -->
+        <div id="convert-modal" class="modal-overlay">
+            <div class="modal" style="max-width: 900px;">
+                <div class="modal-header">
+                    <h2 style="color: #9C27B0;">🔄 Convert Modpack</h2>
+                    <button class="close-btn" onclick="closeConvertModal()">&times;</button>
+                </div>
+                <div class="modal-body" style="padding: 24px;">
+                    <!-- Step 1: Input -->
+                    <div id="convert-input">
+                        <p style="color:#666; margin-bottom:15px;">
+                            Paste your mod folder's filenames below (one per line), or drag & drop .jar files. 
+                            The server will search Modrinth for each mod and check if a compatible version exists 
+                            for your server's MC version and loader.
+                        </p>
+                        <div style="display:flex; gap:15px; margin-bottom:15px;">
+                            <div style="flex:1;">
+                                <label>Source Loader <small style="color:#999;">(optional)</small></label>
+                                <select id="convert-source-loader" style="margin-top:4px;">
+                                    <option value="fabric">Fabric</option>
+                                    <option value="forge">Forge</option>
+                                    <option value="neoforge">NeoForge</option>
+                                    <option value="quilt">Quilt</option>
+                                    <option value="unknown">Unknown</option>
+                                </select>
+                            </div>
+                            <div style="flex:1;">
+                                <label>Source MC Version <small style="color:#999;">(optional)</small></label>
+                                <input type="text" id="convert-source-version" placeholder="e.g. 1.21.4" style="margin-top:4px;">
+                            </div>
+                        </div>
+                        <div id="convert-dropzone" style="border: 2px dashed #ccc; border-radius:8px; padding:30px; text-align:center; cursor:pointer; margin-bottom:15px; transition: border-color 0.2s, background 0.2s;">
+                            <p style="color:#888; margin:0;">📂 Drag & drop .jar files here, or click to browse</p>
+                            <input type="file" id="convert-file-input" multiple accept=".jar" style="display:none;" onchange="handleConvertFiles(this.files)">
+                        </div>
+                        <label>Or paste filenames (one per line):</label>
+                        <textarea id="convert-filenames" rows="8" placeholder="sodium-fabric-0.6.5+mc1.21.4.jar&#10;iris-fabric-1.8.8+mc1.21.4.jar&#10;modmenu-13.0.3.jar&#10;..." style="font-family: monospace; font-size:12px;"></textarea>
+                        <div style="margin-top:10px; display:flex; justify-content:flex-end;">
+                            <button onclick="closeConvertModal()">Cancel</button>
+                            <button class="success" onclick="runConversion()" id="convert-run-btn" style="background:#9C27B0;">Analyze Modpack</button>
+                        </div>
+                    </div>
+                    <!-- Step 2: Results (hidden until analysis completes) -->
+                    <div id="convert-results" style="display:none;">
+                        <div id="convert-summary" style="margin-bottom:15px;"></div>
+                        <div id="convert-results-list" style="max-height:400px; overflow-y:auto;"></div>
+                        <div style="margin-top:15px; display:flex; justify-content:space-between; align-items:center;">
+                            <button onclick="showConvertInput()">← Back</button>
+                            <div>
+                                <span id="convert-select-count" style="color:#666; font-size:13px; margin-right:10px;">0 selected</span>
+                                <button class="success" onclick="installConvertedMods()" id="convert-install-btn" style="background:#9C27B0;">Install Selected</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Java Upgrade Modal -->
+        <div id="java-modal" class="modal-overlay">
+            <div class="modal" style="max-width: 600px;">
+                <div class="modal-header">
+                    <h2>☕ Java Version Manager</h2>
+                    <button class="close-btn" onclick="closeJavaModal()">×</button>
+                </div>
+                <div class="modal-body" style="padding: 24px;">
+                    <div style="background:#2a2a2a; padding:15px; border-radius:8px; margin-bottom:20px;">
+                        <div style="font-size:12px; color:#888;">Current Java Version</div>
+                        <div id="java-current" style="font-size:24px; font-weight:bold; color:#4CAF50;">Loading...</div>
+                    </div>
+                    
+                    <div id="java-quarantined-section" style="display:none; margin-bottom:20px;">
+                        <h3 style="color:#FF5722; margin-bottom:10px;">⚠️ Quarantined Mods</h3>
+                        <p style="color:#888; font-size:13px; margin-bottom:10px;">These mods need a newer Java version:</p>
+                        <div id="java-quarantined-list" style="max-height:150px; overflow-y:auto;"></div>
+                    </div>
+                    
+                    <div id="java-upgrade-section">
+                        <h3 style="margin-bottom:10px;">Available JDK Upgrades</h3>
+                        <div id="java-upgrades-list">Loading available packages...</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button onclick="closeJavaModal()">Close</button>
+                    <button id="java-unquarantine-btn" class="success" onclick="unquarantineJavaMods()" style="display:none;">Restore Quarantined Mods</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Auto-refresh status every 5 seconds
+        setInterval(refreshStatus, 5000);
+        setInterval(refreshMods, 30000);
+        setInterval(loadQuarantine, 15000);
+        setInterval(loadEvents, 10000);
+        
+        // Initial load
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshStatus();
+            loadMods();
+            loadConfig();
+            refreshLogs();
+            loadQuarantine();
+            loadBlacklist();
+            loadEvents();
+
+            // First-visit check: show mod selector if never loaded AND config allows it
+            if (!localStorage.getItem('neorunner-mods-loaded')) {
+                fetch('/api/config').then(r => r.json()).then(cfg => {
+                    if (cfg.nag_first_visit_modal !== false) {
+                        setTimeout(openModSelector, 1500);
+                    }
+                }).catch(() => {
+                    // If config fetch fails, still show modal (safe default)
+                    setTimeout(openModSelector, 1500);
+                });
+            }
+        });
+
+        // ---- Mod Selector Modal ----
+        let cachedModList = [];
+
+        function openModSelector() {
+            document.getElementById('mod-selector-modal').classList.add('active');
+            document.getElementById('mod-search').value = '';
+            loadModListForSelector();
+        }
+
+        function closeModSelector() {
+            document.getElementById('mod-selector-modal').classList.remove('active');
+        }
+
+        function loadModListForSelector() {
+            const listEl = document.getElementById('modal-mod-list');
+            listEl.innerHTML = '<div style="padding: 40px; text-align: center; color: #666;">Loading mod list...</div>';
+
+            fetch('/api/mod-lists')
+                .then(r => {
+                    if (!r.ok) throw new Error('No mod list cached. Run: python3 run.py curator');
+                    return r.json();
+                })
+                .then(data => {
+                    // data might be {neoforge: [...], ...} or a flat list
+                    // Extract the first loader's list
+                    if (Array.isArray(data)) {
+                        cachedModList = data;
+                    } else {
+                        const loaders = Object.keys(data);
+                        cachedModList = data[loaders[0]] || [];
+                    }
+                    renderModList(cachedModList);
+                    updateSelectedCount();
+                })
+                .catch(err => {
+                    listEl.innerHTML = `<div style="padding: 40px; text-align: center; color: #c00;">${err.message}</div>`;
+                });
+        }
+
+        function renderModList(mods) {
+            const listEl = document.getElementById('modal-mod-list');
+            if (!mods.length) {
+                listEl.innerHTML = '<div style="padding: 40px; text-align: center; color: #666;">No mods found</div>';
+                return;
+            }
+            let mrCount = 0, cfCount = 0, bothCount = 0, installedCount = 0;
+            let html = '';
+            mods.forEach((mod, i) => {
+                const downloads = mod.downloads ? (mod.downloads > 1000000
+                    ? (mod.downloads / 1000000).toFixed(1) + 'M'
+                    : mod.downloads > 1000
+                        ? (mod.downloads / 1000).toFixed(0) + 'K'
+                        : mod.downloads) : '';
+                const src = mod.source || 'modrinth';
+                const hasAlso = mod.also_on ? true : false;
+                const isInstalled = mod.installed === true;
+                let srcLabel, srcClass;
+                if (hasAlso) {
+                    srcLabel = 'M+C'; srcClass = 'both'; bothCount++;
+                } else if (src === 'curseforge') {
+                    srcLabel = 'CF'; srcClass = 'curseforge'; cfCount++;
+                } else {
+                    srcLabel = 'MR'; srcClass = 'modrinth'; mrCount++;
+                }
+                if (isInstalled) installedCount++;
+                const installedBadge = isInstalled ? '<span class="mod-installed-badge">INSTALLED</span>' : '';
+                const dimClass = isInstalled ? ' installed' : '';
+                html += `<label class="modal-mod-item${dimClass}" data-name="${(mod.name || '').toLowerCase()}" data-installed="${isInstalled}">
+                    <input type="checkbox" value="${mod.id}" onchange="updateSelectedCount()"${isInstalled ? ' disabled' : ''}>
+                    <span class="mod-source ${srcClass}">${srcLabel}</span>
+                    ${installedBadge}
+                    <span class="mod-title">${mod.name || mod.id}</span>
+                    <span class="mod-downloads">${downloads} downloads</span>
+                </label>`;
+            });
+            listEl.innerHTML = html;
+            document.getElementById('modal-footer-info').textContent =
+                `${mods.length} mods | MR: ${mrCount} | CF: ${cfCount} | Both: ${bothCount} | ${installedCount} installed`;
+        }
+
+        function filterModList() {
+            const query = document.getElementById('mod-search').value.toLowerCase();
+            document.querySelectorAll('#modal-mod-list .modal-mod-item').forEach(item => {
+                const name = item.getAttribute('data-name') || '';
+                item.style.display = name.includes(query) ? '' : 'none';
+            });
+        }
+
+        function selectAllMods() {
+            document.querySelectorAll('#modal-mod-list input[type="checkbox"]').forEach(cb => {
+                if (cb.closest('.modal-mod-item').style.display !== 'none' && !cb.disabled) cb.checked = true;
+            });
+            updateSelectedCount();
+        }
+
+        function deselectAllMods() {
+            document.querySelectorAll('#modal-mod-list input[type="checkbox"]').forEach(cb => cb.checked = false);
+            updateSelectedCount();
+        }
+
+        function updateSelectedCount() {
+            const count = document.querySelectorAll('#modal-mod-list input[type="checkbox"]:checked').length;
+            document.getElementById('selected-count').textContent = count + ' selected';
+            document.getElementById('install-btn').textContent = count > 0 ? `Install ${count} Mods` : 'Install Selected';
+        }
+
+        function installSelectedMods() {
+            const selected = [];
+            document.querySelectorAll('#modal-mod-list input[type="checkbox"]:checked').forEach(cb => {
+                selected.push(cb.value);
+            });
+            if (!selected.length) {
+                showAlert('No mods selected', 'error');
+                return;
+            }
+            if (!confirm(`Install ${selected.length} mods? Already-installed mods will be skipped.`)) return;
+
+            document.getElementById('install-btn').textContent = 'Installing...';
+            document.getElementById('install-btn').disabled = true;
+
+            fetch('/api/install-mods', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ selected: selected })
+            })
+            .then(r => r.json())
+            .then(result => {
+                document.getElementById('install-btn').disabled = false;
+                if (result.success !== false) {
+                    let msg = `Downloaded ${result.downloaded || 0} mods` +
+                        (result.skipped ? `, ${result.skipped} already installed` : '') +
+                        (result.failed && result.failed.length ? `, ${result.failed.length} failed` : '');
+                    if (result.broadcast) msg += ' | Players notified!';
+                    showAlert(msg, 'success');
+                    localStorage.setItem('neorunner-mods-loaded', 'true');
+                    closeModSelector();
+                    loadMods();
+                } else {
+                    showAlert(`Error: ${result.error}`, 'error');
+                }
+                updateSelectedCount();
+            })
+            .catch(err => {
+                document.getElementById('install-btn').disabled = false;
+                updateSelectedCount();
+                showAlert(`Error: ${err}`, 'error');
+            });
+        }
+        
+        function broadcastModUpdate() {
+            if (!confirm('Send mod update notification to all online players?')) return;
+            fetch('/api/broadcast', { method: 'POST' })
+                .then(r => r.json())
+                .then(result => {
+                    if (result.success) {
+                        showAlert(result.message, 'success');
+                    } else {
+                        showAlert('Broadcast failed: ' + (result.error || 'Unknown error'), 'error');
+                    }
+                })
+                .catch(err => showAlert('Broadcast error: ' + err, 'error'));
+        }
+
+        function switchTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.tab-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            // Show selected tab
+            document.getElementById(tabName).classList.add('active');
+            event.target.classList.add('active');
+        }
+        
+        function showAlert(message, type = 'info') {
+            const alertDiv = document.getElementById('alerts');
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+            alertDiv.appendChild(alert);
+            
+            setTimeout(() => alert.remove(), 5000);
+        }
+        
+        function copyToClipboard(element) {
+            navigator.clipboard.writeText(element.textContent).then(() => {
+                const orig = element.style.background;
+                element.style.background = '#4CAF50';
+                setTimeout(() => element.style.background = orig, 500);
+            });
+        }
+        
+        function refreshStatus() {
+            fetch('/api/status')
+                .then(r => r.json())
+                .then(data => {
+                    let badge = `<span class="status-badge ${data.running ? 'status-running' : 'status-stopped'}">
+                        ${data.running ? '✓ RUNNING' : '✗ STOPPED'}
+                    </span>`;
+                    
+                    document.getElementById('status-content').innerHTML = `
+                        <div class="stat">
+                            <span class="stat-label">Status:</span>
+                            <span class="stat-value">${badge}</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">Modloader:</span>
+                            <span class="stat-value">${data.loader}</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">MC Version:</span>
+                            <span class="stat-value">${data.mc_version}</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">Mods Installed:</span>
+                            <span class="stat-value">${data.mod_count}</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">Players Online:</span>
+                            <span class="stat-value">${data.player_count}</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">RCON:</span>
+                            <span class="stat-value">${data.rcon_enabled ? '✓ Enabled' : '✗ Disabled'}</span>
+                        </div>
+                    `;
+                    
+                    // Grey out start/stop buttons based on server state
+                    const btnStart = document.getElementById('btn-start');
+                    const btnStop = document.getElementById('btn-stop');
+                    if (btnStart) btnStart.disabled = !!data.running;
+                    if (btnStop) btnStop.disabled = !data.running;
+                })
+                .catch(err => console.error('Status error:', err));
+        }
+        
+        function loadMods() {
+            fetch('/api/mods')
+                .then(r => r.json())
+                .then(mods => {
+                    // Count by source
+                    const serverCount = mods.filter(m => m.source === 'server').length;
+                    const clientCount = mods.filter(m => m.source === 'clientonly').length;
+                    
+                    let html = `<div style="margin-bottom:12px;padding:8px;background:#2a2a2a;border-radius:4px;font-size:12px;">
+                        <span style="color:#4CAF50;">🟢 Server mods: ${serverCount}</span> &nbsp; 
+                        <span style="color:#2196F3;">🔵 Client-only: ${clientCount}</span>
+                    </div>`;
+                    html += `<div class="mod-list">`;
+                    mods.forEach(mod => {
+                        const badge = mod.source === 'clientonly' 
+                            ? '<span style="background:#2196F3;color:white;padding:1px 6px;border-radius:3px;font-size:10px;margin-right:6px;">CLIENT</span>'
+                            : '';
+                        html += `
+                            <div class="mod-item">
+                                <div class="mod-info">
+                                    <div class="mod-name">${badge}${mod.name}</div>
+                                    <div class="mod-size">${mod.size_mb} MB</div>
+                                 </div>
+                                 <div>
+                                     <button onclick="downloadMod('${mod.name}')" style="margin: 0; padding: 5px 10px; font-size: 12px;" title="Download">📥</button>
+                                     <button onclick="quarantineMod('${mod.name}')" style="margin: 0; padding: 5px 10px; font-size: 12px; background:#FF9800;" title="Quarantine">🔒</button>
+                                     <button onclick="removeMod('${mod.name}')" class="danger" style="margin: 0; padding: 5px 10px; font-size: 12px;" title="Delete">🗑️</button>
+                                 </div>
+                             </div>
+                        `;
+                    });
+                    html += `</div>`;
+                    
+                    document.getElementById('mods-content').innerHTML = html;
+                })
+                .catch(err => console.error('Mods error:', err));
+        }
+        
+        function refreshMods() {
+            loadMods();
+        }
+        
+        function removeMod(modName) {
+            if (!confirm(`Remove mod: ${modName}?`)) return;
+            
+            fetch(`/api/mods/${modName}`, { method: 'DELETE' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        showAlert(`Removed ${modName}`, 'success');
+                        loadMods();
+                    } else {
+                        showAlert(`Error: ${data.error}`, 'error');
+                    }
+                })
+                .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+        
+        function quarantineMod(modName) {
+            if (!confirm(`Quarantine mod: ${modName}?\n\nThis will move the mod to the quarantine folder. You can restore it later from the Quarantine tab.`)) return;
+            
+            fetch(`/api/mods/${encodeURIComponent(modName)}/quarantine`, { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        showAlert(`Quarantined ${modName}`, 'success');
+                        loadMods();
+                        loadQuarantine();
+                    } else {
+                        showAlert(`Error: ${data.error}`, 'error');
+                    }
+                })
+                .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+        
+        function quarantineAllClientMods() {
+            if (!confirm('Quarantine all mods with client-side functionality?\n\nThis will quarantine mods that contain render methods, client classes, or other client-side functionality.\n\nThese mods will be moved to quarantine/ and will not load on the server.')) return;
+            
+            const action = prompt('Select action:\n1 - Quarantine client-only mods (move to clientonly/)\n2 - Quarantine client-side mods (move to quarantine/)\n\nEnter 1 or 2:');
+            
+            if (action === '') return;
+            
+            const endpoint = action === ''1' ? '/api/quarantine/client-mods' : '/api/quarantine/client-side-mods';
+            const actionName = action === ''1' ? 'Sort Client Mods' : 'Quarantine Client Mods';
+            
+            fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            })
+            .then(r => r.json())
+            .then(result => {
+                if (result.success) {
+                    showAlert(`${actionName} completed: ${result.quarantined || result.moved} mods processed`, 'success');
+                    loadMods();
+                } else {
+                    showAlert(`Error: ${result.error}`, 'error');
+                }
+            })
+            .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+
+        function quarantineAllMods() {
+            if (!confirm('Quarantine all mods that cause crashes?\n\nThis will quarantine client-only mods, dependency conflicts, and other problematic mods.')) return;
+            fetch('/api/quarantine/all', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            })
+            .then(r => r.json())
+            .then(result => {
+                if (result.success) {
+                    showAlert(result.message, 'success');
+                    loadMods();
+                } else {
+                    showAlert(`Error: ${result.error}`, 'error');
+                }
+            })
+            .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+                })
+                .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+        
+        function downloadMod(modName) {
+            window.location.href = `/api/download/${modName}`;
+        }
+        
+         function loadConfig() {
+              fetch('/api/config')
+                  .then(r => r.json())
+                  .then(cfg => {
+                       // Ports (display in header - read from server.properties)
+                       document.getElementById('game-port').textContent = cfg.server_port || '25565';
+                       document.getElementById('query-port').textContent = cfg.query_port || '25565';
+                       document.getElementById('rcon-port').textContent = cfg.rcon_port || '25575';
+                       document.getElementById('http-port').textContent = cfg.http_port || '8000';
+                       // PowerShell one-liner
+                       const ip = cfg.hostname || window.location.hostname || 'localhost';
+                       const port = cfg.http_port || '8000';
+                       document.getElementById('powershell-oneliner').textContent = `iwr http://${ip}:${port}/download/install-mods.ps1 | iex`;
+                      // Network
+                       document.getElementById('cfg-hostname').value = cfg.hostname || '';
+                      document.getElementById('mc-version').value = cfg.mc_version || '1.21.11';
+                      // Curator
+                      document.getElementById('cfg-curator-sort').value = cfg.curator_sort || 'downloads';
+                      document.getElementById('cfg-curator-limit').value = cfg.curator_limit || 100;
+                      // Server Recovery
+                      document.getElementById('cfg-max-restarts').value = cfg.max_restart_attempts || 25;
+                      document.getElementById('cfg-max-crashes').value = cfg.max_crashes_before_quarantine || 3;
+                      // Broadcasts
+                     document.getElementById('cfg-broadcast-enabled').checked = cfg.broadcast_enabled !== false;
+                     document.getElementById('cfg-broadcast-auto').checked = cfg.broadcast_auto_on_install !== false;
+                     // Nag screens
+                     document.getElementById('cfg-nag-modlist').checked = cfg.nag_show_mod_list_on_join !== false;
+                     document.getElementById('cfg-nag-firstvisit').checked = cfg.nag_first_visit_modal !== false;
+                      // Scripts
+                      document.getElementById('cfg-script-types').value = cfg.install_script_types || 'all';
+                      // Java memory
+                      document.getElementById('cfg-xmx').value = cfg.xmx || '6G';
+                      document.getElementById('cfg-xms').value = cfg.xms || '4G';
+                      // Schedule
+                     document.getElementById('update-freq').value = cfg.ferium_update_interval_hours || 4;
+                     document.getElementById('weekly-day').value = cfg.ferium_weekly_update_day || 'mon';
+                     document.getElementById('weekly-hour').value = cfg.ferium_weekly_update_hour || 2;
+                 })
+                 .catch(err => console.error('Config error:', err));
+        }
+        
+        function saveConfig() {
+            const data = {
+                // Network
+                hostname: document.getElementById('cfg-hostname').value.trim(),
+                mc_version: document.getElementById('mc-version').value.trim(),
+                // Curator
+                curator_sort: document.getElementById('cfg-curator-sort').value,
+                curator_limit: parseInt(document.getElementById('cfg-curator-limit').value),
+                // Server Recovery
+                max_restart_attempts: parseInt(document.getElementById('cfg-max-restarts').value) || 25,
+                max_crashes_before_quarantine: parseInt(document.getElementById('cfg-max-crashes').value) || 3,
+                // Broadcasts
+                broadcast_enabled: document.getElementById('cfg-broadcast-enabled').checked,
+                broadcast_auto_on_install: document.getElementById('cfg-broadcast-auto').checked,
+                // Nag screens
+                nag_show_mod_list_on_join: document.getElementById('cfg-nag-modlist').checked,
+                nag_first_visit_modal: document.getElementById('cfg-nag-firstvisit').checked,
+                // Scripts
+                install_script_types: document.getElementById('cfg-script-types').value,
+                // Java memory
+                xmx: document.getElementById('cfg-xmx').value.trim() || '6G',
+                xms: document.getElementById('cfg-xms').value.trim() || '4G',
+                // Schedule
+                ferium_update_interval_hours: parseInt(document.getElementById('update-freq').value),
+                ferium_weekly_update_day: document.getElementById('weekly-day').value,
+                ferium_weekly_update_hour: parseInt(document.getElementById('weekly-hour').value),
+            };
+            
+            fetch('/api/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            })
+            .then(r => r.json())
+            .then(result => {
+                if (result.success) {
+                    showAlert('Configuration saved!', 'success');
+                } else {
+                    showAlert(`Error: ${result.error}`, 'error');
+                }
+            })
+            .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+        
+        // Java Management
+        function openJavaModal() {
+            document.getElementById('java-modal').classList.add('active');
+            loadJavaStatus();
+        }
+        
+        function closeJavaModal() {
+            document.getElementById('java-modal').classList.remove('active');
+        }
+        
+        function loadJavaStatus() {
+            fetch('/api/java')
+                .then(r => r.json())
+                .then(data => {
+                    // Current version
+                    document.getElementById('java-current').textContent = `Java ${data.current_version}`;
+                    
+                    // Quarantined mods
+                    const qSection = document.getElementById('java-quarantined-section');
+                    const qList = document.getElementById('java-quarantined-list');
+                    const unqBtn = document.getElementById('java-unquarantine-btn');
+                    
+                    if (data.quarantined_mods && data.quarantined_mods.length > 0) {
+                        qSection.style.display = 'block';
+                        unqBtn.style.display = 'inline-block';
+                        qList.innerHTML = data.quarantined_mods.map(m => `
+                            <div style="padding:8px; background:#333; margin-bottom:5px; border-radius:4px; display:flex; justify-content:space-between;">
+                                <span>${m.name}</span>
+                                <span style="color:#FF5722;">Needs Java ${m.required_java}</span>
+                            </div>
+                        `).join('');
+                    } else {
+                        qSection.style.display = 'none';
+                        unqBtn.style.display = 'none';
+                    }
+                    
+                    // Available upgrades
+                    const uList = document.getElementById('java-upgrades-list');
+                    if (data.available_upgrades && data.available_upgrades.length > 0) {
+                        uList.innerHTML = data.available_upgrades.map(u => `
+                            <div style="display:flex; justify-content:space-between; align-items:center; padding:10px; background:#2a2a2a; margin-bottom:8px; border-radius:6px;">
+                                <div>
+                                    <div style="font-weight:bold;">Java ${u.version}</div>
+                                    <div style="font-size:12px; color:#888;">${u.package}</div>
+                                </div>
+                                <button onclick="installJDK('${u.package}', ${u.version})" style="padding:6px 12px;">Install</button>
+                            </div>
+                        `).join('');
+                    } else {
+                        uList.innerHTML = '<div style="color:#888;">No additional JDK versions found in repos. Try: sudo apt update</div>';
+                    }
+                })
+                .catch(err => {
+                    document.getElementById('java-current').textContent = 'Error loading';
+                    document.getElementById('java-upgrades-list').innerHTML = `<div style="color:#f44336;">Error: ${err}</div>`;
+                });
+        }
+        
+        function installJDK(package, version) {
+            if (!confirm(`Install ${package} and set Java ${version} as default?\n\nThis will run: sudo apt-get install ${package}`)) return;
+            
+            showAlert(`Installing ${package}...`, 'info');
+            
+            fetch('/api/java/upgrade', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ package: package })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    showAlert(`${data.message}`, 'success');
+                    loadJavaStatus();
+                } else {
+                    showAlert(`Error: ${data.error}`, 'error');
+                }
+            })
+            .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+        
+        function unquarantineJavaMods() {
+            fetch('/api/java/unquarantine', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        showAlert(`Restored ${data.restored} mods!`, 'success');
+                        loadJavaStatus();
+                    } else {
+                        showAlert(`Error: ${data.error}`, 'error');
+                    }
+                })
+                .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+        
+        function startServer() {
+            if (confirm('Start the server?')) {
+                fetch('/api/server/start', { method: 'POST' })
+                    .then(r => r.json())
+                    .then(result => {
+                        showAlert(result.message || result.error || 'Unknown response', result.success ? 'success' : 'error');
+                        setTimeout(refreshStatus, 2000);
+                    })
+                    .catch(err => showAlert(`Error: ${err}`, 'error'));
+            }
+        }
+        
+        function stopServer() {
+            if (confirm('Stop the server?')) {
+                fetch('/api/server/stop', { method: 'POST' })
+                    .then(r => r.json())
+                    .then(result => {
+                        showAlert(result.message || result.error || 'Unknown response', result.success ? 'success' : 'error');
+                        setTimeout(refreshStatus, 2000);
+                    })
+                    .catch(err => showAlert(`Error: ${err}`, 'error'));
+            }
+        }
+        
+        function restartServer() {
+            if (!confirm('Restart the server? This will kick all players.')) return;
+            fetch('/api/server/restart', { method: 'POST' })
+                .then(r => r.json())
+                .then(result => {
+                    if (result.success) {
+                        showAlert('Restarting... page will reload in 10s', 'info');
+                        setTimeout(() => location.reload(), 10000);
+                    } else {
+                        showAlert(`Error: ${result.error}`, 'error');
+                    }
+                })
+                .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+        
+        function upgradeMods() {
+            if (confirm('Upgrade all mods via ferium?')) {
+                fetch('/api/mods/upgrade', { method: 'POST' })
+                    .then(r => r.json())
+                    .then(result => {
+                        showAlert(result.message, result.success ? 'success' : 'error');
+                        setTimeout(loadMods, 2000);
+                    })
+                    .catch(err => showAlert(`Error: ${err}`, 'error'));
+            }
+        }
+        
+        function refreshLogs() {
+            fetch('/api/logs?lines=100')
+                .then(r => r.json())
+                .then(data => {
+                    let html = '';
+                    data.logs.forEach(line => {
+                        html += `<div class="log-line">${line.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`;
+                    });
+                    document.getElementById('logs-content').innerHTML = html || '<div class="log-line">No logs available</div>';
+                    
+                    // Auto-scroll to bottom
+                    document.getElementById('logs-content').scrollTop = document.getElementById('logs-content').scrollHeight;
+                })
+                .catch(err => console.error('Logs error:', err));
+        }
+
+        // ---- Modpack Conversion ----
+        let convertResults = [];
+
+        function openConvertModal() {
+            document.getElementById('convert-modal').classList.add('active');
+            showConvertInput();
+        }
+
+        function closeConvertModal() {
+            document.getElementById('convert-modal').classList.remove('active');
+        }
+
+        function showConvertInput() {
+            document.getElementById('convert-input').style.display = 'block';
+            document.getElementById('convert-results').style.display = 'none';
+        }
+
+        // Dropzone interactions
+        (function() {
+            const dz = document.getElementById('convert-dropzone');
+            if (!dz) return;
+            dz.addEventListener('click', () => document.getElementById('convert-file-input').click());
+            dz.addEventListener('dragover', e => { e.preventDefault(); dz.style.borderColor = '#9C27B0'; dz.style.background = '#f3e5f5'; });
+            dz.addEventListener('dragleave', e => { e.preventDefault(); dz.style.borderColor = '#ccc'; dz.style.background = ''; });
+            dz.addEventListener('drop', e => {
+                e.preventDefault();
+                dz.style.borderColor = '#ccc';
+                dz.style.background = '';
+                handleConvertFiles(e.dataTransfer.files);
+            });
+        })();
+
+        function handleConvertFiles(files) {
+            const ta = document.getElementById('convert-filenames');
+            const existing = ta.value.trim();
+            const names = [];
+            for (const f of files) {
+                if (f.name.endsWith('.jar')) names.push(f.name);
+            }
+            if (names.length > 0) {
+                ta.value = (existing ? existing + '\n' : '') + names.join('\n');
+                document.getElementById('convert-dropzone').innerHTML = `<p style="color:#9C27B0; margin:0;">✓ ${names.length} file(s) added — ${ta.value.trim().split('\\n').length} total</p>`;
+            }
+        }
+
+        function runConversion() {
+            const raw = document.getElementById('convert-filenames').value.trim();
+            if (!raw) {
+                showAlert('Please enter mod filenames or drop .jar files', 'error');
+                return;
+            }
+            const filenames = raw.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+            const sourceLoader = document.getElementById('convert-source-loader').value;
+            const sourceVersion = document.getElementById('convert-source-version').value.trim() || 'unknown';
+
+            const btn = document.getElementById('convert-run-btn');
+            btn.disabled = true;
+            btn.textContent = `Analyzing ${filenames.length} mods...`;
+
+            fetch('/api/convert-modpack', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filenames, source_loader: sourceLoader, source_version: sourceVersion })
+            })
+            .then(r => r.json())
+            .then(data => {
+                btn.disabled = false;
+                btn.textContent = 'Analyze Modpack';
+                if (!data.success) {
+                    showAlert(`Error: ${data.error}`, 'error');
+                    return;
+                }
+                convertResults = data.results;
+                renderConvertResults(data);
+            })
+            .catch(err => {
+                btn.disabled = false;
+                btn.textContent = 'Analyze Modpack';
+                showAlert(`Error: ${err}`, 'error');
+            });
+        }
+
+        function renderConvertResults(data) {
+            document.getElementById('convert-input').style.display = 'none';
+            document.getElementById('convert-results').style.display = 'block';
+
+            const s = data.summary;
+            const src = data.source;
+            const tgt = data.target;
+            document.getElementById('convert-summary').innerHTML = `
+                <div style="background:#f3e5f5; padding:15px; border-radius:8px; margin-bottom:10px;">
+                    <strong style="color:#9C27B0;">Conversion: ${src.loader} ${src.version} → ${tgt.loader} ${tgt.version}</strong>
+                    <div style="display:flex; gap:20px; margin-top:8px; flex-wrap:wrap;">
+                        <span style="color:#4caf50; font-weight:600;">✓ ${s.found} found</span>
+                        <span style="color:#2196f3; font-weight:600;">● ${s.already_installed} already installed</span>
+                        <span style="color:#ff9800; font-weight:600;">⚠ ${s.not_available} not available</span>
+                        <span style="color:#f44336; font-weight:600;">✗ ${s.not_found} not found</span>
+                    </div>
+                </div>
+            `;
+
+            let html = '';
+            const statusOrder = { found: 0, already_installed: 1, not_available: 2, not_found: 3, unparseable: 4 };
+            const sorted = [...data.results].sort((a, b) => (statusOrder[a.status] || 9) - (statusOrder[b.status] || 9));
+            
+            for (const r of sorted) {
+                const colors = { found: '#4caf50', already_installed: '#2196f3', not_available: '#ff9800', not_found: '#f44336', unparseable: '#999' };
+                const icons = { found: '✓', already_installed: '●', not_available: '⚠', not_found: '✗', unparseable: '?' };
+                const color = colors[r.status] || '#999';
+                const icon = icons[r.status] || '?';
+                const canSelect = r.status === 'found';
+
+                html += `<div class="modal-mod-item" style="border-left: 3px solid ${color}; ${!canSelect ? 'opacity:0.7;' : ''}">`;
+                if (canSelect) {
+                    html += `<input type="checkbox" class="convert-cb" data-modid="${r.mod_id}" checked onchange="updateConvertCount()">`;
+                } else {
+                    html += `<span style="width:20px; display:inline-block;"></span>`;
+                }
+                html += `<div style="flex:1; margin-left:8px;">`;
+                html += `<div style="font-weight:600; color:#333;">${r.name || r.filename}</div>`;
+                html += `<div style="font-size:11px; color:#888;">`;
+                html += `${r.filename}`;
+                if (r.description) html += ` — ${r.description.substring(0, 80)}`;
+                html += `</div>`;
+                html += `</div>`;
+                html += `<span style="font-size:11px; font-weight:bold; color:${color}; white-space:nowrap;">${icon} ${r.status.replace('_', ' ')}</span>`;
+                if (r.match_score) html += `<span style="font-size:10px; color:#aaa; margin-left:6px;">${Math.round(r.match_score*100)}%</span>`;
+                html += `</div>`;
+            }
+            document.getElementById('convert-results-list').innerHTML = html;
+            updateConvertCount();
+        }
+
+        function updateConvertCount() {
+            const cbs = document.querySelectorAll('.convert-cb:checked');
+            document.getElementById('convert-select-count').textContent = `${cbs.length} selected`;
+        }
+
+        function installConvertedMods() {
+            const cbs = document.querySelectorAll('.convert-cb:checked');
+            const modIds = Array.from(cbs).map(cb => cb.dataset.modid);
+            if (modIds.length === 0) {
+                showAlert('No mods selected', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('convert-install-btn');
+            btn.disabled = true;
+            btn.textContent = `Installing ${modIds.length} mods...`;
+
+            // Build mod_data objects from convertResults for installation
+            const modDataList = modIds.map(id => {
+                const r = convertResults.find(x => x.mod_id === id);
+                return r ? { id: r.mod_id, name: r.name, slug: r.slug } : { id };
+            });
+
+            fetch('/api/install-mods', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ selected: modIds })
+            })
+            .then(r => r.json())
+            .then(result => {
+                btn.disabled = false;
+                btn.textContent = 'Install Selected';
+                if (result.success) {
+                    showAlert(`Installed ${result.downloaded} mods, ${result.skipped} skipped, ${result.failed.length} failed`, 'success');
+                    loadMods();
+                } else {
+                    showAlert(`Error: ${result.error}`, 'error');
+                }
+            })
+            .catch(err => {
+                btn.disabled = false;
+                btn.textContent = 'Install Selected';
+                showAlert(`Error: ${err}`, 'error');
+            });
+        }
+
+        // ---- Quarantine Management ----
+        function loadQuarantine() {
+            fetch('/api/quarantine')
+                .then(r => r.json())
+                .then(data => {
+                    const banner = document.getElementById('quarantine-banner');
+                    const list = document.getElementById('quarantine-list');
+                    const count = document.getElementById('quarantine-count');
+                    const tabContent = document.getElementById('quarantine-tab-content');
+                    
+                    const hasMods = data.mods && data.mods.length > 0;
+                    
+                    // Banner (hidden by default)
+                    if (hasMods) {
+                        banner.style.display = 'block';
+                        count.textContent = data.mods.length;
+                    } else {
+                        banner.style.display = 'none';
+                    }
+                    
+                    // Tab content (always visible)
+                    let html = '';
+                    if (!hasMods) {
+                        html = '<div style="color:#888; text-align:center; padding:40px;">No quarantined mods</div>';
+                    } else {
+                        data.mods.forEach(m => {
+                            const encFile = encodeURIComponent(m.filename);
+                            html += `<div class="quarantine-item">
+                                <div class="q-info">
+                                    <div class="q-name">${m.filename.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+                                    <div class="q-reason">${(m.reason || 'Unknown reason').replace(/</g,'&lt;').replace(/>/g,'&gt;')} &mdash; ${m.date || ''}</div>
+                                </div>
+                                <button class="q-restore" onclick="restoreQuarantined('${encFile}')">Restore</button>
+                                <button class="q-delete" onclick="deleteQuarantined('${encFile}')">Delete</button>
+                            </div>`;
+                        });
+                    }
+                    
+                    if (list) list.innerHTML = html;
+                    if (tabContent) tabContent.innerHTML = html;
+                })
+                .catch(() => {});
+        }
+
+        function restoreQuarantined(filename) {
+            if (!confirm(`Restore ${filename} back to the mods folder?`)) return;
+            fetch('/api/quarantine/restore', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filename: decodeURIComponent(filename) })
+            })
+            .then(r => r.json())
+            .then(result => {
+                if (result.success) {
+                    showAlert(`Restored ${filename}`, 'success');
+                    loadQuarantine();
+                    loadMods();
+                } else {
+                    showAlert(`Error: ${result.error}`, 'error');
+                }
+            })
+            .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+
+        function deleteQuarantined(filename) {
+            if (!confirm(`Permanently delete ${filename}? This cannot be undone.`)) return;
+            fetch('/api/quarantine/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filename: decodeURIComponent(filename) })
+            })
+            .then(r => r.json())
+            .then(result => {
+                if (result.success) {
+                    showAlert(`Deleted ${filename}`, 'success');
+                    loadQuarantine();
+                } else {
+                    showAlert(`Error: ${result.error}`, 'error');
+                }
+            })
+            .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+
+        function restoreAllQuarantined() {
+            if (!confirm('Restore ALL quarantined mods?\n\nThis will move all mods from quarantine back to their original folders. Server will restart in 30s.')) return;
+            fetch('/api/quarantine/restore-all', { method: 'POST' })
+                .then(r => r.json())
+                .then(result => {
+                    if (result.success) {
+                        showAlert(result.message, 'success');
+                        loadQuarantine();
+                    } else {
+                        showAlert(`Error: ${result.error}`, 'error');
+                    }
+                })
+                .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+
+        function rescanMods() {
+            if (!confirm('Rescan all mods for corrupt/incomplete files?\n\nCorrupt mods will be moved to quarantine.')) return;
+            fetch('/api/mods/rescan', { method: 'POST' })
+                .then(r => r.json())
+                .then(result => {
+                    if (result.success) {
+                        showAlert(result.message, 'success');
+                        loadQuarantine();
+                    } else {
+                        showAlert(`Error: ${result.error}`, 'error');
+                    }
+                })
+                .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+
+        // ---- Blacklist/Whitelist Management ----
+        function loadBlacklist() {
+            fetch('/api/blacklist')
+                .then(r => r.json())
+                .then(data => {
+                    // Blacklist
+                    const blacklistEl = document.getElementById('blacklist-content');
+                    if (data.blacklist && data.blacklist.length > 0) {
+                        let html = '<div style="display:flex; flex-wrap:wrap; gap:8px;">';
+                        data.blacklist.forEach(modId => {
+                            const isUser = (data.user_blacklist || []).includes(modId);
+                            html += `<div style="background:#3a2a2a; border:1px solid #e74c3c; border-radius:4px; padding:6px 10px; display:flex; align-items:center; gap:8px;">
+                                <span>${modId}</span>
+                                ${isUser ? `<button onclick="removeFromBlacklist('${modId}')" style="background:none; border:none; color:#e74c3c; cursor:pointer; font-size:14px;">&times;</button>` : '<span style="color:#888; font-size:10px;">(default)</span>'}
+                            </div>`;
+                        });
+                        html += '</div>';
+                        blacklistEl.innerHTML = html;
+                    } else {
+                        blacklistEl.innerHTML = '<div style="color:#888;">No mods blacklisted</div>';
+                    }
+                    
+                    // Whitelist
+                    const whitelistEl = document.getElementById('whitelist-content');
+                    if (data.whitelist && data.whitelist.length > 0) {
+                        let html = '<div style="display:flex; flex-wrap:wrap; gap:8px;">';
+                        data.whitelist.forEach(modId => {
+                            const isUser = (data.user_whitelist || []).includes(modId);
+                            html += `<div style="background:#2a3a2a; border:1px solid #27ae60; border-radius:4px; padding:6px 10px; display:flex; align-items:center; gap:8px;">
+                                <span>${modId}</span>
+                                ${isUser ? `<button onclick="removeFromWhitelist('${modId}')" style="background:none; border:none; color:#27ae60; cursor:pointer; font-size:14px;">&times;</button>` : '<span style="color:#888; font-size:10px;">(default)</span>'}
+                            </div>`;
+                        });
+                        html += '</div>';
+                        whitelistEl.innerHTML = html;
+                    } else {
+                        whitelistEl.innerHTML = '<div style="color:#888;">No mods whitelisted</div>';
+                    }
+                    
+                    // Blacklist Patterns
+                    const blacklistPatternsEl = document.getElementById('blacklist-patterns-content');
+                    if (data.blacklist && data.blacklist.length > 0) {
+                        let html = '<div style="display:flex; flex-wrap:wrap; gap:8px;">';
+                        data.blacklist.forEach(pattern => {
+                            html += `<div style="background:#2a1a1a; border:1px solid #ff9800; border-radius:4px; padding:6px 10px; display:flex; align-items:center; gap:8px;">
+                                <span>${pattern}</span>
+                                <button onclick="removeFromBlacklistPattern('${pattern}')" style="background:none; border:none; color:#ff9800; cursor:pointer; font-size:14px;">&times;</button>
+                            </div>`;
+                        });
+                        html += '</div>';
+                        blacklistPatternsEl.innerHTML = html;
+                    } else {
+                        blacklistPatternsEl.innerHTML = '<div style="color:#888;">No blacklist patterns</div>';
+                    }
+                })
+                .catch(err => console.error('Error loading blacklist:', err));
+        }
+
+        function addToBlacklistPattern() {
+            const input = document.getElementById('blacklist-pattern-add-input');
+            const pattern = input.value.trim();
+            if (!pattern) return;
+            
+            fetch('/api/blacklist/patterns/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pattern: pattern })
+            })
+            .then(r => r.json())
+            .then(result => {
+                if (result.success) {
+                    showAlert(result.message, 'success');
+                    input.value = '';
+                    loadBlacklist();
+                } else {
+                    showAlert(`Error: ${result.error}`, 'error');
+                }
+            })
+            .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+
+        function removeFromBlacklistPattern() {
+            const input = document.getElementById('blacklist-pattern-remove-input');
+            const pattern = input.value.trim();
+            if (!pattern) return;
+            
+            fetch('/api/blacklist/patterns/remove', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pattern: pattern })
+            })
+            .then(r => r.json())
+            .then(result => {
+                if (result.success) {
+                    showAlert(result.message, 'success');
+                    input.value = '';
+                    loadBlacklist();
+                } else {
+                    showAlert(`Error: ${result.error}`, 'error');
+                }
+            })
+            .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+
+        function checkBlacklistPattern() {
+            const input = document.getElementById('blacklist-add-input');
+            const modId = input.value.trim().toLowerCase();
+            if (!modId) return;
+            
+            fetch('/api/blacklist/check', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mod_id: modId })
+            })
+            .then(r => r.json())
+            .then(result => {
+                if (result.success) {
+                    if (result.blacklisted) {
+                        showAlert(`Mod is blacklisted: ${result.reason}`, 'error');
+                        if (result.required_version) {
+                            showAlert(`Required MC version: ${result.required_version}`, 'warning');
+                        }
+                    } else {
+                        showAlert(`Mod is not blacklisted`, 'success');
+                    }
+                } else {
+                    showAlert(`Error: ${result.error}`, 'error');
+                }
+            })
+            .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+            })
+            .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+
+        function removeFromBlacklist(modId) {
+            fetch('/api/blacklist/remove', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mod_id: modId })
+            })
+            .then(r => r.json())
+            .then(result => {
+                if (result.success) {
+                    showAlert(result.message, 'success');
+                    loadBlacklist();
+                } else {
+                    showAlert(`Error: ${result.error}`, 'error');
+                }
+            })
+            .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+
+        function addToWhitelist() {
+            const input = document.getElementById('whitelist-add-input');
+            const modId = input.value.trim().toLowerCase();
+            if (!modId) return;
+            fetch('/api/whitelist/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mod_id: modId })
+            })
+            .then(r => r.json())
+            .then(result => {
+                if (result.success) {
+                    showAlert(result.message, 'success');
+                    input.value = '';
+                    loadBlacklist();
+                } else {
+                    showAlert(`Error: ${result.error}`, 'error');
+                }
+            })
+            .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+
+        function removeFromWhitelist(modId) {
+            fetch('/api/whitelist/remove', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mod_id: modId })
+            })
+            .then(r => r.json())
+            .then(result => {
+                if (result.success) {
+                    showAlert(result.message, 'success');
+                    loadBlacklist();
+                } else {
+                    showAlert(`Error: ${result.error}`, 'error');
+                }
+            })
+            .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+
+        // ---- Server Events Timeline ----
+        function loadEvents() {
+            fetch('/api/server-events')
+                .then(r => r.json())
+                .then(data => {
+                    const el = document.getElementById('events-content');
+                    if (!data.events || data.events.length === 0) {
+                        el.innerHTML = '<div style="color:#999; padding:20px; text-align:center;">No server events yet. Events will appear here when the server detects crashes, quarantines mods, or performs self-healing.</div>';
+                        return;
+                    }
+                    let html = '';
+                    // Show newest first
+                    const events = [...data.events].reverse();
+                    events.forEach(ev => {
+                        const typeClass = {
+                            'CRASH_DETECT': 'event-type-crash',
+                            'SELF_HEAL': 'event-type-heal',
+                            'QUARANTINE': 'event-type-quarantine',
+                            'SERVER_RESTART': 'event-type-restart',
+                            'SERVER_STOPPED': 'event-type-restart',
+                            'SERVER_RUNNING': 'event-type-restart',
+                            'PREFLIGHT': 'event-type-heal',
+                        }[ev.type] || 'event-type-default';
+                        html += `<div class="event-item">
+                            <span class="event-time">${ev.time || ''}</span>
+                            <span class="event-type ${typeClass}">${ev.type}</span>
+                            <span class="event-msg">${(ev.message || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>
+                        </div>`;
+                    });
+                    el.innerHTML = html;
+                })
+                .catch(() => {});
+        }
+
+        function clearEvents() {
+            if (!confirm('Clear all server events?')) return;
+            fetch('/api/server-events/clear', { method: 'POST' })
+                .then(r => r.json())
+                .then(result => {
+                    if (result.success) {
+                        showAlert('Events cleared', 'success');
+                        loadEvents();
+                    }
+                })
+                .catch(err => showAlert(`Error: ${err}`, 'error'));
+        }
+    </script>
+</body>
+</html>

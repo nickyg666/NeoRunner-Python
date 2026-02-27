@@ -1,0 +1,62 @@
+[shield]
+	#Arc of available protection depending on what angle the attack is coming from and where the player is looking (means the lower this angle the closer you need to be facing your attacker).
+	#Vanilla protection arc is 90 degrees, which has been reduced to around 50 in combat tests.
+	#This does not change the protection arc for projectiles which remains at 90 degress.
+	#Default Value: 50.0
+	#Requires Restart: Game
+	# Default: 50.0
+	# Range: 0.0 ~ 180.0
+	horizontal_blocking_angle = 50.0
+	#Skip 5 tick warm-up delay when activating a shield, so they become effective instantly.
+	#Default Value: true
+	#Requires Restart: Game
+	remove_shield_delay = true
+
+[items]
+	#It only takes 20 ticks to drink liquid foods (such as potions, milk, and bottled liquids) instead of 32 or 40.
+	#Default Value: true
+	#Requires Restart: Game
+	fast_drinking = true
+	#Add a delay of 4 ticks between throwing snowballs or eggs, just like with ender pearls.
+	#Default Value: true
+	#Requires Restart: Game
+	throwables_delay = true
+	#Increase snowball and egg stack size from 16 to 64, and all potion stack sizes from 1 to 16 (only for potions of the same type of course).
+	#Default Value: true
+	#Requires Restart: Game
+	increase_stack_size = true
+	#Only damage tools by 1 durability instead of 2 when attacking. Apply the same logic to swords when harvesting blocks.
+	#Default Value: true
+	#Requires Restart: Game
+	no_item_durability_penalty = true
+
+[entity_attributes]
+	#Double the base player attack strength to 2.0.
+	#Default Value: false
+	#Requires Restart: Game
+	double_player_attack_strength = false
+
+[item_attributes]
+	#Makes it so that swords, hoes, and tridents have an increased reach when attacking.
+	#Default Value: true
+	#Requires Restart: Game
+	additional_entity_interaction_range = true
+	#Overrides for setting and balancing attack speed values of items.
+	#As with all items, this value is added on top of the default attack speed of the player (which is 4.0 by default).
+	#Format for every entry is "<namespace>:<path>,<amount>". Tags are supported, must be in the format of "#<namespace>:<path>". Namespace may be omitted to use "minecraft" by default. May use asterisk as wildcard parameter via pattern matching, e.g. "minecraft:*_shulker_box" to match all shulker boxes no matter of color.
+	#Default Value: []
+	#Requires Restart: Game
+	attack_speed_overrides = []
+	#Overrides for setting and balancing attack damage values of items.
+	#As with all items, this value is added on top of the default attack strength of the player (which is 1.0 by default).
+	#Format for every entry is "<namespace>:<path>,<amount>". Tags are supported, must be in the format of "#<namespace>:<path>". Namespace may be omitted to use "minecraft" by default. May use asterisk as wildcard parameter via pattern matching, e.g. "minecraft:*_shulker_box" to match all shulker boxes no matter of color.
+	#Default Value: []
+	#Requires Restart: Game
+	attack_damage_overrides = []
+	#Overrides for setting and balancing attack reach values of items.
+	#Takes precedence over any changes made by "additional_attack_reach" option.
+	#As with all items, this value is added on top of the default attack reach of the player (which is 3.0 by default, and has a hard cap at 6.0).
+	#Format for every entry is "<namespace>:<path>,<amount>". Tags are supported, must be in the format of "#<namespace>:<path>". Namespace may be omitted to use "minecraft" by default. May use asterisk as wildcard parameter via pattern matching, e.g. "minecraft:*_shulker_box" to match all shulker boxes no matter of color.
+	#Default Value: []
+	#Requires Restart: Game
+	entity_interaction_range_overrides = []

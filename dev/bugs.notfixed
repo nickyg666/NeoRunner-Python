@@ -1,0 +1,47 @@
+# Bugs Not Fixed - NeoRunner
+# Generated: 2026-02-27
+# Updated after bugfixes
+
+## FIXED BUGS:
+
+### Feature 10: "Sort Client Mods" button added to Quarantine tab
+- Fixed: Added sortClientMods() function and button indashboard.html
+- Status: FIXED
+
+### Feature 11: World Management JavaScript fixed
+- Fixed: Removed reference to non-existent 'world-switcher' element
+- Status: FIXED
+
+### Feature 15: Port numbers loading from server.properties
+- Fixed: Updated dashboard.py /api/config to include server.properties data
+- Status: FIXED
+
+---
+
+## REMAINING BUGS:
+
+## Feature 14: PowerShell one-liner - Incorrect hostname handling
+- Bug: One-liner may fail if hostname is empty in config
+- Location: /home/services/dev/dashboard.html lines 1561, 1569-1573
+- Problem: config.json has hostname="" (empty), no server_ip field
+- Fallback to window.location.hostname may be wrong for external access
+- Fix needed: Add server_ip to config or read from server.properties
+
+## Feature 16: Upgrade mods button should be removed
+- Status: Needs verification if button still exists in UI
+
+## Feature 17/18: Loader/MC version switching
+- Status: Needs verification for mod movement behavior
+
+---
+
+## TYPE CHECKER FALSE POSITIVES (not real bugs):
+
+The following LSP errors are false positives due to conditional imports:
+- run.py Stealth, sync_playwright "possibly unbound" errors
+  - These are imported conditionally inside try/except blocks
+  - They work correctly at runtime
+- mod_manager.py type inference issues
+  - Optional type handling differences between static analysis and runtime
+
+

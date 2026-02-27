@@ -228,8 +228,11 @@ def api_status():
 def api_config():
     """Get current config"""
     cfg = load_config()
-    # Don't expose passwords in API
+    props = parse_props()
     cfg["rcon_pass"] = "***"
+    cfg["server_port"] = props.get("server-port", cfg.get("server_port", "25565"))
+    cfg["query_port"] = props.get("query.port", "25565")
+    cfg["rcon_port"] = props.get("rcon.port", cfg.get("rcon_port", "25575"))
     return jsonify(cfg)
 
 @app.route("/api/config", methods=["POST"])

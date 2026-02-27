@@ -1146,6 +1146,7 @@
                 <div style="margin-bottom: 15px;">
                     <button onclick="restoreAllQuarantined()" style="background: #27ae60; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-right: 8px;" title="Restore all quarantined mods to their original folders">Restore All</button>
                     <button onclick="restoreFromQuarantine()" style="background: #FF9800; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;" title="Move all quarantined mods back to mods/clientonly folders">📤 Restore from Quarantine</button>
+                    <button onclick="sortClientMods()" style="background: #2196F3; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-left: 8px;" title="Sort mods between server/clientonly folders based on their manifest">📋 Sort Client Mods</button>
                     <button onclick="quarantineAllClientMods()" style="background: #e74c3c; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-left: 8px;" title="Quarantine all mods with client-side functionality (render methods, client classes, etc.)">🔒 Quarantine Client Mods</button>
                     <button onclick="quarantineAllMods()" style="background: #c82333; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-left: 8px;" title="Quarantine all mods that cause crashes (client-only mods, dependency conflicts, etc.)">Quarantine All</button>
                 </div>
@@ -1929,7 +1930,6 @@
             }
             
             function updateWorldSwitcher(worlds, current, serverMcVersion) {
-                const container = document.getElementById('world-switcher');
                 const dedicated = document.getElementById('world-management-dedicated');
                 const versionDisplay = document.getElementById('server-mc-version-display');
                 
@@ -1938,7 +1938,6 @@
                 }
                 
                 if (!worlds.length) {
-                    if (container) container.innerHTML = '<p style="color:#666;">No worlds found. Create a world in-game first.</p>';
                     if (dedicated) dedicated.innerHTML = '<p style="color:#666;">No worlds found. Create a world in-game first.</p>';
                     return;
                 }
@@ -1977,7 +1976,6 @@
                     <p style="color:#888;font-size:11px;margin-top:8px;">World changes take effect on next server restart. <strong style="color:#e74c3c;">Red worlds are incompatible</strong> - switching may cause chunk corruption or data loss.</p>
                 `;
                 
-                if (container) container.innerHTML = worldHtml;
                 if (dedicated) dedicated.innerHTML = worldHtml;
             }
             
@@ -2147,6 +2145,23 @@
                     .then(result => {
                         if (result.success) {
                             showAlert(`Quarantined ${result.quarantined} client mods`, 'success');
+                            loadClientMods();
+                        } else {
+                            showAlert(`Error: ${result.error}`, 'error');
+                        }
+                    })
+                    .catch(err => showAlert(`Error: ${err}`, 'error'));
+            }
+            
+            function sortClientMods() {
+                if (!confirm('Sort mods between server and clientonly folders? This analyzes mod manifests to determine correct placement.')) return;
+                
+                fetch('/api/sort-client-mods', { method: 'POST' })
+                    .then(r => r.json())
+                    .then(result => {
+                        if (result.success) {
+                            showAlert(`Sorted mods: ${result.moved || 0} moved to clientonly`, 'success');
+                            loadServerMods();
                             loadClientMods();
                         } else {
                             showAlert(`Error: ${result.error}`, 'error');

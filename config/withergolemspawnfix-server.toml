@@ -1,8 +1,0 @@
-#Does the Wither have his structure pattern fixed?
-witherPatternFix = true
-#Does the Golem have his structure pattern fixed?
-golemPatternFix = true
-#Does the Golem teleport to a safer location when spawned?
-golemSpawnTeleporter = true
-#Does the Golem break blocks that can suffocate him when spawned?
-golemSpawnBlockBreaker = true

@@ -33,7 +33,7 @@ class ModManager:
     
     def __init__(self, cfg, cwd=None):
         self.cfg = cfg
-        self.cwd = cwd or os.environ.get("NEORUNNER_HOME", os.path.dirname(os.path.abspath(__file__)))
+        self.cwd = cwd
         self.loader = cfg.get("loader", "neoforge")
         self.mc_version = cfg.get("mc_version", "1.21.11")
         self.mods_dir = os.path.join(self.cwd, cfg.get("mods_dir", "mods"))
@@ -50,7 +50,7 @@ class ModManager:
         # Categories to EXCLUDE
         EXCLUDE = {
             "library", "api", "utility", "tool", "debug", "developer",
-            "admin", "optimization", "performance", "quality"
+            "admin", "quality"
         }
         
         # Categories to INCLUDE
@@ -131,18 +131,7 @@ class ModManager:
         """Fetch 100+ NeoForge/Forge mods from CurseForge"""
         print(f"\n[MOD_MANAGER] Fetching 100 {self.loader} mods from CurseForge ({self.mc_version})...")
         
-        api_key = None
-        keyfile = os.path.join(self.cwd, "curseforgeAPIkey")
-        if os.path.exists(keyfile):
-            try:
-                api_key = open(keyfile).read().strip()
-            except:
-                pass
-        
-        if not api_key:
-            print("  CurseForge: No API key found, skipping")
-            return []
-        
+
         # Map loader names
         loader_map = {
             "neoforge": "NeoForge",
@@ -151,7 +140,7 @@ class ModManager:
         }
         cf_loader = loader_map.get(self.loader)
         
-        headers = {"X-API-Key": api_key}
+        headers = {}
         mods = {}
         page = 1
         
@@ -324,7 +313,7 @@ class ModManager:
         }
     
     def _ferium_loader_name(self) -> str:
-        """Convert loader name to ferium format"""
+        """Convert loader name to ferium format, why bother except for neo-forge?"""
         return {
             "neoforge": "neo-forge",
             "forge": "forge",

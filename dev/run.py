@@ -1369,6 +1369,13 @@ def classify_mod(jar_path):
     
     Returns: "client", "server", or "both"
     """
+    # Check forced server mods - these must stay on server regardless of classification
+    forced_server = {"entity_model_features", "entity_texture_features"}  # Add any that need to be on server
+    mod_name = os.path.basename(jar_path).lower()
+    for forced in forced_server:
+        if forced in mod_name:
+            return "both"  # Keep in root mods folder
+    
     manifest = _parse_mod_manifest(jar_path)
     
     # 1. Explicit side from manifest dependencies (most reliable)
@@ -1391,6 +1398,8 @@ def sort_mods_by_type(mods_dir):
     Scan mods directory and move client-only mods to clientonly folder.
     Also deduplicates: if a JAR exists in both mods/ and clientonly/, remove the
     root copy (clientonly is the correct home for client mods).
+    
+    Also restores forced server mods from clientonly back to mods (e.g., entity_model_features).
     Returns count of mods moved.
     """
     import shutil
@@ -1400,6 +1409,26 @@ def sort_mods_by_type(mods_dir):
     
     moved_count = 0
     dedup_count = 0
+    restored_count = 0
+    
+    # Phase 0: Restore forced server mods from clientonly back to mods
+    forced_server_mods = {"entity_model_features", "entity_texture_features"}
+    
+    if os.path.exists(clientonly_dir):
+        for filename in list(os.listdir(clientonly_dir)):
+            if not filename.endswith('.jar'):
+                continue
+            for forced in forced_server_mods:
+                if forced in filename.lower():
+                    src = os.path.join(clientonly_dir, filename)
+                    dest = os.path.join(mods_dir, filename)
+                    try:
+                        shutil.move(src, dest)
+                        log_event("MOD_SORT", f"Restored forced server mod: {filename}")
+                        restored_count += 1
+                    except Exception as e:
+                        log_event("MOD_SORT_ERROR", f"Failed to restore {filename}: {e}")
+                    break
     
     # Phase 1: Deduplicate — if same filename exists in both root and clientonly, remove from root
     clientonly_files = set()
@@ -2016,63 +2045,137 @@ def create_install_scripts(mods_dir, cfg=None):
     log_event("SCRIPTS", f"Script config saved (ip={server_ip}, port={http_port}) - scripts generated on-demand")
 
 def create_mod_zip(mods_dir):
-    """Create mods_latest.zip with all mods (root + clientonly) in flat structure.
-    Also creates mods_manifest.json with filenames and sizes for client-side diff sync."""
-    import shutil
+    """Create mods_latest.zip with all mods + deps. 
+    Also creates mods_manifest.json in CurseForge/modpack format."""
     import zipfile
-    import hashlib
     
     clientonly_dir = os.path.join(mods_dir, "clientonly")
     zip_path = os.path.join(mods_dir, "mods_latest.zip")
     manifest_path = os.path.join(mods_dir, "mods_manifest.json")
     
     try:
-        # Collect all jar files with root taking precedence
+        mods_to_zip = {}
+        all_mod_ids = set()
+        
+        def get_mod_id(filename):
+            """Extract mod ID from JAR filename."""
+            import re
+            # Pattern: modname-1.2.3-loader.jar -> modname
+            match = re.match(r'^([a-zA-Z0-9_-]+)', filename.replace('.jar', ''))
+            return match.group(1).lower() if match else filename.lower()
+        
+        def scan_deps(jar_path, found=None):
+            """Scan JAR for dependencies."""
+            if found is None:
+                found = set()
+            try:
+                with zipfile.ZipFile(jar_path) as zf:
+                    # Check mods.toml
+                    try:
+                        with zf.open('META-INF/mods.toml') as f:
+                            content = f.read().decode()
+                            for line in content.split('\n'):
+                                if 'modId' in line or 'mod-id' in line:
+                                    match = re.search(r'["\']?([a-zA-Z0-9_-]+)["\']?\s*=', line)
+                                    if match:
+                                        found.add(match.group(1).lower())
+                    except:
+                        pass
+                    # Check mod.json
+                    try:
+                        with zf.open('mod.json') as f:
+                            import json
+                            data = json.load(f)
+                            if 'dependencies' in data:
+                                for dep_type, deps in data['dependencies'].items():
+                                    if isinstance(deps, list):
+                                        for dep in deps:
+                                            if isinstance(dep, dict) and 'mod_id' in dep:
+                                                found.add(dep['mod_id'].lower())
+                                            elif isinstance(dep, str):
+                                                found.add(dep.lower())
+                    except:
+                        pass
+            except:
+                pass
+            return found
+        
+        # Collect all JARs from mods/ and clientonly/
+        all_jars = {}
+        for directory in [mods_dir, clientonly_dir]:
+            if os.path.exists(directory):
+                for f in os.listdir(directory):
+                    if f.endswith('.jar'):
+                        mod_id = get_mod_id(f)
+                        all_jars[mod_id] = os.path.join(directory, f)
+                        all_mod_ids.add(mod_id)
+        
+        # Start with server mods, add their deps
+        server_mods = set(os.listdir(mods_dir)) if os.path.exists(mods_dir) else set()
         mods_to_zip = {}
         
-        # First, add all jar files from clientonly directory
+        # Add server mods + any deps they need
+        for f in os.listdir(mods_dir):
+            if f.endswith('.jar'):
+                mod_id = get_mod_id(f)
+                mods_to_zip[f] = os.path.join(mods_dir, f)
+                # Scan for deps
+                deps = scan_deps(os.path.join(mods_dir, f))
+                for dep_id in deps:
+                    if dep_id in all_jars and dep_id not in mods_to_zip:
+                        dep_file = os.path.basename(all_jars[dep_id])
+                        mods_to_zip[dep_file] = all_jars[dep_id]
+        
+        # Add client-only mods (from clientonly dir)
         if os.path.exists(clientonly_dir):
-            for filename in os.listdir(clientonly_dir):
-                if filename.endswith('.jar'):
-                    file_path = os.path.join(clientonly_dir, filename)
-                    if os.path.isfile(file_path):
-                        mods_to_zip[filename] = file_path
+            for f in os.listdir(clientonly_dir):
+                if f.endswith('.jar'):
+                    if f not in mods_to_zip:
+                        mods_to_zip[f] = os.path.join(clientonly_dir, f)
+                        # Scan for deps
+                        deps = scan_deps(os.path.join(clientonly_dir, f))
+                        for dep_id in deps:
+                            if dep_id in all_jars and dep_id not in mods_to_zip:
+                                dep_file = os.path.basename(all_jars[dep_id])
+                                mods_to_zip[dep_file] = all_jars[dep_id]
         
-        # Then, add/override with jar files from root (root takes precedence)
-        for filename in os.listdir(mods_dir):
-            if filename.endswith('.jar'):
-                file_path = os.path.join(mods_dir, filename)
-                if os.path.isfile(file_path):
-                    mods_to_zip[filename] = file_path
-        
-        # Create zip with all collected mods (no duplicates)
+        # Create zip
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
             for filename, file_path in sorted(mods_to_zip.items()):
                 zf.write(file_path, arcname=filename)
         
-        # Create manifest JSON with sizes for diff sync
-        mods_list = []
-        total_size = 0
+        # Create manifest - CurseForge format
+        files = []
         for filename, file_path in sorted(mods_to_zip.items()):
             size = os.path.getsize(file_path)
-            total_size += size
-            mods_list.append({
-                "name": filename,
-                "size": size
+            mod_id = get_mod_id(filename)
+            files.append({
+                "projectID": 0,  # Unknown without CF lookup
+                "fileID": 0,
+                "path": filename,
+                "modId": mod_id,
+                "size": size,
+                "clientOnly": filename not in server_mods
             })
         
         manifest = {
-            "version": "2.0",
-            "created": datetime.now().isoformat(),
-            "mod_count": len(mods_to_zip),
-            "total_size": total_size,
-            "mods": mods_list
+            "manifestType": "modpack",
+            "manifestVersion": 1,
+            "name": "NeoRunner Server",
+            "version": datetime.now().strftime("%Y.%m.%d"),
+            "author": "NeoRunner",
+            "files": files,
+            "overrides": "overrides"
         }
+        
         with open(manifest_path, 'w') as f:
             json.dump(manifest, f, indent=2)
         
         size_mb = os.path.getsize(zip_path) / (1024 * 1024)
-        mod_count = len(mods_to_zip)
+        log_event("MOD_ZIP", f"Created mods_latest.zip ({len(mods_to_zip)} mods, {size_mb:.2f} MB)")
+        
+    except Exception as e:
+        log_event("MOD_ZIP_ERROR", f"Failed to create ZIP: {e}")
         log_event("MOD_ZIP", f"Created mods_latest.zip ({mod_count} mods, {size_mb:.2f} MB) + manifest v2")
         
     except Exception as e:
@@ -2084,6 +2187,14 @@ class SecureHTTPHandler(SimpleHTTPRequestHandler):
     
     def do_GET(self):
         cfg = json.load(open(CONFIG))
+        
+        # Track downloads - create lock file for zip downloads
+        download_lock = os.path.join(CWD, ".download_lock")
+        is_download = self.path.startswith("/download/mods") or self.path.endswith(".zip")
+        
+        if is_download:
+            with open(download_lock, "w") as f:
+                f.write(str(time.time()))
         
         # Rate limiting
         current_time = time.time()
@@ -2281,7 +2392,7 @@ def http_server(port, mods_dir):
                     tmux_socket = f"/tmp/tmux-{uid}/default"
                     running = run_cmd(f"tmux -S {tmux_socket} list-sessions 2>/dev/null | grep -c MC").get("stdout", "").strip() == "1"
                     if not running:
-                        java_check = run_cmd("ps aux | grep -v grep | grep -v pgrep | grep -c 'java.*nogui' || true")
+                        java_check = run_cmd("ps aux | grep -v grep | grep -v pgrep | grep -c 'java' || true")
                         running = java_check.get("stdout", "").strip() != "0"
                     c = load_cfg()
                     loader = c.get("loader", "unknown")
@@ -2290,6 +2401,27 @@ def http_server(port, mods_dir):
                     mod_count = len([f for f in os.listdir(mods_dir_path) if f.endswith(".jar")]) if os.path.exists(mods_dir_path) else 0
                     
                     props = parse_props()
+                    
+                    # Check preflight cache
+                    preflight_cache = os.path.join(CWD, ".preflight_cache")
+                    preflight_time = None
+                    if os.path.exists(preflight_cache):
+                        try:
+                            with open(preflight_cache) as f:
+                                preflight_time = f.read().strip()
+                        except:
+                            pass
+                    
+                    # Check for active downloads
+                    download_lock = os.path.join(CWD, ".download_lock")
+                    downloading = False
+                    if os.path.exists(download_lock):
+                        try:
+                            mtime = os.path.getmtime(download_lock)
+                            if time.time() - mtime < 300:  # 5 min
+                                downloading = True
+                        except:
+                            pass
                     
                     return {
                         "running": running,
@@ -2302,6 +2434,8 @@ def http_server(port, mods_dir):
                         "server_port": props.get("server-port", c.get("server_port", "25565")),
                         "query_port": props.get("query.port", "25565"),
                         "rcon_port": props.get("rcon.port", "25575"),
+                        "preflight_check": preflight_time,
+                        "downloading": downloading,
                     }
                 
                 def get_mod_list():
@@ -2748,20 +2882,29 @@ Write-Host "============================================"
 New-Item -ItemType Directory -Path $modsPath,$oldPath -Force | Out-Null
 
 Write-Host "Fetching mod list..."
-try {{ $man = Invoke-RestMethod "$baseUrl/download/manifest" -UseBasicParsing }}
+try {{ $man = Invoke-RestMethod "$baseUrl/download/mods_manifest.json" -UseBasicParsing }}
 catch {{ Write-Host "ERROR: Cannot connect to server" -Fore Red; Read-Host "Press Enter"; exit 1 }}
 
-$srv = @($man.mods.name)
+# Support both old and new manifest formats
+if ($man.files) {{
+    $srv = @($man.files | ForEach-Object {{ $_.path }})
+}} elseif ($man.mods) {{
+    $srv = @($man.mods.name)
+}} else {{
+    Write-Host "ERROR: Invalid manifest format" -Fore Red
+    exit 1
+}}
+
 $loc = @(Get-ChildItem $modsPath *.jar -ErrorAction SilentlyContinue).Name
-$dl = @($srv | ?{{$_ -notin $loc}})
-$ar = @($loc | ?{{$_ -notin $srv}})
+$dl = @($srv | Where-Object {{ $_ -notin $loc }})
+$ar = @($loc | Where-Object {{ $_ -notin $srv }})
 
 Write-Host "Server: $($srv.Count) Local: $($loc.Count)"
 Write-Host "Download: $($dl.Count) Archive: $($ar.Count)"
 
 foreach ($f in $ar) {{
     $p = Join-Path $modsPath $f
-    if (Test-Path $p) {{ Write-Host " Archiving $f"; mv $p $oldPath -Force }}
+    if (Test-Path $p) {{ Write-Host " Archiving $f"; Move-Item $p $oldPath -Force }}
 }}
 
 $n = 0
@@ -3190,6 +3333,16 @@ echo "============================================"
                 @app.route("/api/server/stop", methods=["POST"])
                 def api_server_stop():
                     """Stop the MC server (tmux session only, keep Flask running)."""
+                    # Check for active downloads
+                    download_lock = os.path.join(CWD, ".download_lock")
+                    if os.path.exists(download_lock):
+                        try:
+                            mtime = os.path.getmtime(download_lock)
+                            if time.time() - mtime < 300:  # 5 min
+                                return jsonify({"success": False, "error": "Client downloading mods. Please wait or cancel."}), 423
+                        except:
+                            pass
+                    
                     try:
                         uid = os.getuid()
                         tmux_socket = f"/tmp/tmux-{uid}/default"
@@ -3213,21 +3366,30 @@ echo "============================================"
                 @app.route("/api/server/restart", methods=["POST"])
                 def api_server_restart():
                     """Restart MC server: stop then start."""
+                    # Check for active downloads
+                    download_lock = os.path.join(CWD, ".download_lock")
+                    if os.path.exists(download_lock):
+                        try:
+                            mtime = os.path.getmtime(download_lock)
+                            if time.time() - mtime < 300:  # 5 min
+                                return jsonify({"success": False, "error": "Client downloading mods. Please wait or cancel."}), 423
+                        except:
+                            pass
+                    
                     try:
                         uid = os.getuid()
                         tmux_socket = f"/tmp/tmux-{uid}/default"
                         
-                        # Create flag first to prevent clean-shutdown exit
+                        # Don't remove flag - let it exist so loop knows to restart
                         stopped_flag = os.path.join(CWD, ".mc_stopped")
+                        
+                        # Touch the flag to signal restart mode (don't actually stop, just signal)
+                        # The loop will detect this and restart after shutdown
+                        with open(stopped_flag, "w") as f:
+                            f.write("restart")
                         
                         # Stop MC
                         run_cmd(f"tmux -S {tmux_socket} send-keys -t MC 'stop' Enter 2>/dev/null")
-                        time.sleep(3)
-                        run_cmd(f"tmux -S {tmux_socket} kill-session -t MC 2>/dev/null || true")
-                        
-                        # Remove flag to trigger restart in run loop
-                        if os.path.exists(stopped_flag):
-                            os.remove(stopped_flag)
                         
                         log_event("SERVER_RESTART", "MC server restart via dashboard")
                         return jsonify({"success": True, "message": "Restarting..."})
@@ -4199,22 +4361,30 @@ def _try_self_heal(loader_instance, crash_info, cfg, crash_history):
         # First check if dependency is already installed (jar filename contains dep_name)
         dep_norm = re.sub(r'[^a-z0-9]', '', dep_name.lower())
         already_installed = False
-        if os.path.isdir(mods_dir):
-            for fname in os.listdir(mods_dir):
-                if fname.endswith('.jar'):
-                    file_norm = re.sub(r'[^a-z0-9]', '', fname.lower())
-                    if dep_norm in file_norm or file_norm.startswith(dep_norm):
-                        already_installed = True
-                        log_event("SELF_HEAL", f"Dependency {dep_name} already installed as {fname} - version mismatch or mod ID issue")
-                        break
+        installed_file = None
+        
+        # Check both mods_dir AND clientonly
+        dirs_to_check = [mods_dir]
+        clientonly_dir = os.path.join(mods_dir, "clientonly")
+        if os.path.exists(clientonly_dir):
+            dirs_to_check.append(clientonly_dir)
+        
+        for check_dir in dirs_to_check:
+            if os.path.isdir(check_dir):
+                for fname in os.listdir(check_dir):
+                    if fname.endswith('.jar'):
+                        file_norm = re.sub(r'[^a-z0-9]', '', fname.lower())
+                        if dep_norm in file_norm or file_norm.startswith(dep_norm):
+                            already_installed = True
+                            installed_file = fname
+                            break
+            if already_installed:
+                break
         
         if already_installed:
-            if culprit:
-                log_event("SELF_HEAL", f"Quarantining {culprit} - dep {dep_name} present but incompatible")
-                quarantined = _quarantine_mod(mods_dir, culprit, f"Incompatible with installed {dep_name}")
-                if quarantined:
-                    return "quarantined"
-            return False
+            # Dep is installed - don't quarantine dependents, let server try to load
+            log_event("SELF_HEAL", f"Dependency {dep_name} found as {installed_file} - letting server attempt load")
+            return False  # Let server try to load, don't quarantine dependents
         
         # Check if we've already tried to fetch this dep before (dep loop)
         dep_key = f"dep_{dep_name}"
@@ -5022,6 +5192,12 @@ def run_server(cfg):
             create_install_scripts(mods_dir, cfg)
         if preflight_result["optional_interop"]:
             log_event("SERVER_START", f"OPTIONAL DEP INTEROP: {len(preflight_result['optional_interop'])} shared optional deps found (installing may improve compatibility)")
+        
+        # Write preflight cache for dashboard indicator
+        import datetime
+        cache_file = os.path.join(CWD, ".preflight_cache")
+        with open(cache_file, "w") as f:
+            f.write(datetime.datetime.now().isoformat())
             for interop in preflight_result["optional_interop"][:5]:
                 log_event("SERVER_START", f"  - {interop['dep_id']} (wanted by {interop['count']} mods)")
         if preflight_result.get("quarantined"):
@@ -5118,8 +5294,21 @@ def run_server(cfg):
         
         # Check for clean shutdown (not a crash)
         if "Stopping the server" in new_log or "Server stopped" in new_log:
-            # If stopped via dashboard, wait for start command instead of exiting
+            # If stopped via dashboard, check if it's a restart
             if os.path.exists(stopped_flag):
+                try:
+                    with open(stopped_flag) as f:
+                        flag_content = f.read().strip()
+                except Exception:
+                    flag_content = ""
+                
+                if flag_content == "restart":
+                    # Restart requested - remove flag and restart immediately
+                    os.remove(stopped_flag)
+                    log_event("SERVER_RESTART", "Restarting MC after dashboard restart command...")
+                    continue  # Restart MC
+                
+                # Regular stop - wait for start command
                 log_event("SERVER_STOPPED", "Clean shutdown via dashboard, waiting for start command...")
                 for _ in range(3600):
                     if not os.path.exists(stopped_flag):

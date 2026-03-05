@@ -1,210 +1,271 @@
 """
-NBT Parser for Minecraft level.dat files.
-
-Extracts version information from Minecraft world files.
+NBT Parser for reading Minecraft world data.
 """
 
-import gzip
+from __future__ import annotations
+
 import struct
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Dict, Any, Optional, Union
+from io import BytesIO
 
 
-TAG_END = 0
-TAG_BYTE = 1
-TAG_SHORT = 2
-TAG_INT = 3
-TAG_LONG = 4
-TAG_FLOAT = 5
-TAG_DOUBLE = 6
-TAG_BYTE_ARRAY = 7
-TAG_STRING = 8
-TAG_LIST = 9
-TAG_COMPOUND = 10
-TAG_INT_ARRAY = 11
+def read_nbt_string(data: BytesIO) -> str:
+    """Read a UTF-8 string from NBT data."""
+    length = struct.unpack(">H", data.read(2))[0]
+    if length == 0:
+        return ""
+    return data.read(length).decode('utf-8')
 
 
-class NBTReader:
-    def __init__(self, stream: BinaryIO):
-        self.stream = stream
+def read_nbt_int(data: BytesIO) -> int:
+    """Read a 32-bit signed integer."""
+    return struct.unpack(">i", data.read(4))[0]
 
-    def read_byte(self) -> int:
-        data = self.stream.read(1)
-        if not data:
-            raise EOFError("Unexpected end of stream")
-        return struct.unpack(">b", data)[0]
 
-    def read_ubyte(self) -> int:
-        data = self.stream.read(1)
-        if not data:
-            raise EOFError("Unexpected end of stream")
-        return struct.unpack(">B", data)[0]
+def read_nbt_byte(data: BytesIO) -> int:
+    """Read a single signed byte."""
+    return struct.unpack(">b", data.read(1))[0]
 
-    def read_short(self) -> int:
-        data = self.stream.read(2)
-        if len(data) < 2:
-            raise EOFError("Unexpected end of stream")
-        return struct.unpack(">h", data)[0]
 
-    def read_ushort(self) -> int:
-        data = self.stream.read(2)
-        if len(data) < 2:
-            raise EOFError("Unexpected end of stream")
-        return struct.unpack(">H", data)[0]
+def read_nbt_short(data: BytesIO) -> int:
+    """Read a 16-bit signed short."""
+    return struct.unpack(">h", data.read(2))[0]
 
-    def read_int(self) -> int:
-        data = self.stream.read(4)
-        if len(data) < 4:
-            raise EOFError("Unexpected end of stream")
-        return struct.unpack(">i", data)[0]
 
-    def read_long(self) -> int:
-        data = self.stream.read(8)
-        if len(data) < 8:
-            raise EOFError("Unexpected end of stream")
-        return struct.unpack(">q", data)[0]
+def read_nbt_long(data: BytesIO) -> int:
+    """Read a 64-bit signed long."""
+    return struct.unpack(">q", data.read(8))[0]
 
-    def read_float(self) -> float:
-        data = self.stream.read(4)
-        if len(data) < 4:
-            raise EOFError("Unexpected end of stream")
-        return struct.unpack(">f", data)[0]
 
-    def read_double(self) -> float:
-        data = self.stream.read(8)
-        if len(data) < 8:
-            raise EOFError("Unexpected end of stream")
-        return struct.unpack(">d", data)[0]
+def read_nbt_float(data: BytesIO) -> float:
+    """Read a 32-bit float."""
+    return struct.unpack(">f", data.read(4))[0]
 
-    def read_string(self) -> str:
-        length = self.read_ushort()
-        if length == 0:
-            return ""
-        data = self.stream.read(length)
-        if len(data) < length:
-            raise EOFError("Unexpected end of stream")
-        return data.decode("utf-8")
 
-    def read_tag(self, tag_type: int) -> Any:
-        if tag_type == TAG_END:
-            return None
-        elif tag_type == TAG_BYTE:
-            return self.read_byte()
-        elif tag_type == TAG_SHORT:
-            return self.read_short()
-        elif tag_type == TAG_INT:
-            return self.read_int()
-        elif tag_type == TAG_LONG:
-            return self.read_long()
-        elif tag_type == TAG_FLOAT:
-            return self.read_float()
-        elif tag_type == TAG_DOUBLE:
-            return self.read_double()
-        elif tag_type == TAG_BYTE_ARRAY:
-            length = self.read_int()
-            return [self.read_byte() for _ in range(length)]
-        elif tag_type == TAG_STRING:
-            return self.read_string()
-        elif tag_type == TAG_LIST:
-            list_type = self.read_ubyte()
-            length = self.read_int()
-            return [self.read_tag(list_type) for _ in range(length)]
-        elif tag_type == TAG_COMPOUND:
-            return self.read_compound()
-        elif tag_type == TAG_INT_ARRAY:
-            length = self.read_int()
-            return [self.read_int() for _ in range(length)]
+def read_nbt_double(data: BytesIO) -> float:
+    """Read a 64-bit double."""
+    return struct.unpack(">d", data.read(8))[0]
+
+
+def read_nbt_byte_array(data: BytesIO) -> bytes:
+    """Read a byte array."""
+    length = read_nbt_int(data)
+    return data.read(length)
+
+
+def read_nbt_int_array(data: BytesIO) -> list:
+    """Read an int array."""
+    length = read_nbt_int(data)
+    return [read_nbt_int(data) for _ in range(length)]
+
+
+def read_nbt_long_array(data: BytesIO) -> list:
+    """Read a long array."""
+    length = read_nbt_int(data)
+    return [read_nbt_long(data) for _ in range(length)]
+
+
+def read_nbt_list(data: BytesIO) -> list:
+    """Read a list tag."""
+    tag_type = read_nbt_byte(data)
+    length = read_nbt_int(data)
+    
+    items = []
+    for _ in range(length):
+        if tag_type == 1:  # Byte
+            items.append(read_nbt_byte(data))
+        elif tag_type == 2:  # Short
+            items.append(read_nbt_short(data))
+        elif tag_type == 3:  # Int
+            items.append(read_nbt_int(data))
+        elif tag_type == 4:  # Long
+            items.append(read_nbt_long(data))
+        elif tag_type == 5:  # Float
+            items.append(read_nbt_float(data))
+        elif tag_type == 6:  # Double
+            items.append(read_nbt_double(data))
+        elif tag_type == 8:  # String
+            items.append(read_nbt_string(data))
+        elif tag_type == 10:  # Compound
+            items.append(read_nbt_compound(data))
         else:
-            raise ValueError(f"Unknown tag type: {tag_type}")
+            # Skip unknown types
+            pass
+    
+    return items
 
-    def read_compound(self) -> dict:
-        result = {}
-        while True:
-            tag_type = self.read_ubyte()
-            if tag_type == TAG_END:
+
+def read_nbt_compound(data: BytesIO, depth: int = 0) -> Dict[str, Any]:
+    """Read a compound tag."""
+    if depth > 512:  # Prevent stack overflow
+        return {}
+    
+    result = {}
+    
+    while True:
+        try:
+            tag_type = read_nbt_byte(data)
+            
+            if tag_type == 0:  # End tag
                 break
-            name = self.read_string()
-            value = self.read_tag(tag_type)
-            result[name] = value
-        return result
+            
+            name = read_nbt_string(data)
+            
+            if tag_type == 1:  # Byte
+                result[name] = read_nbt_byte(data)
+            elif tag_type == 2:  # Short
+                result[name] = read_nbt_short(data)
+            elif tag_type == 3:  # Int
+                result[name] = read_nbt_int(data)
+            elif tag_type == 4:  # Long
+                result[name] = read_nbt_long(data)
+            elif tag_type == 5:  # Float
+                result[name] = read_nbt_float(data)
+            elif tag_type == 6:  # Double
+                result[name] = read_nbt_double(data)
+            elif tag_type == 7:  # Byte Array
+                result[name] = read_nbt_byte_array(data)
+            elif tag_type == 8:  # String
+                result[name] = read_nbt_string(data)
+            elif tag_type == 9:  # List
+                result[name] = read_nbt_list(data)
+            elif tag_type == 10:  # Compound
+                result[name] = read_nbt_compound(data, depth + 1)
+            elif tag_type == 11:  # Int Array
+                result[name] = read_nbt_int_array(data)
+            elif tag_type == 12:  # Long Array
+                result[name] = read_nbt_long_array(data)
+        except:
+            break
+    
+    return result
 
-    def read_root(self) -> dict:
-        tag_type = self.read_ubyte()
-        if tag_type != TAG_COMPOUND:
-            raise ValueError(f"Expected compound tag at root, got {tag_type}")
-        _ = self.read_string()
-        return self.read_compound()
+
+def decompress_nbt(data: bytes) -> BytesIO:
+    """Decompress NBT data if compressed."""
+    # Try gzip first
+    try:
+        import gzip
+        return BytesIO(gzip.decompress(data))
+    except:
+        pass
+    
+    # Try zlib
+    try:
+        import zlib
+        return BytesIO(zlib.decompress(data))
+    except:
+        pass
+    
+    # Assume uncompressed
+    return BytesIO(data)
 
 
-def get_world_version(level_dat_path: str) -> dict:
-    """
-    Extract MC version from level.dat.
-
-    Args:
-        level_dat_path: Path to the level.dat file
-
-    Returns:
-        {
-            "version": "1.21.11",  # or None if not found
-            "snapshot": False,
-            "raw_version": int or None  # internal version number if available
-        }
-    """
-    result = {
-        "version": None,
-        "snapshot": False,
-        "raw_version": None,
+def parse_nbt(data: bytes) -> Dict[str, Any]:
+    """Parse NBT data and return the root compound."""
+    stream = decompress_nbt(data)
+    
+    # Read root tag
+    root_type = read_nbt_byte(stream)
+    if root_type != 10:  # Must be compound
+        raise ValueError(f"Expected compound tag at root, got {root_type}")
+    
+    root_name = read_nbt_string(stream)
+    root_data = read_nbt_compound(stream)
+    
+    return {
+        "name": root_name,
+        "data": root_data
     }
 
-    path = Path(level_dat_path)
-    if not path.exists():
-        return result
 
+def get_world_version(level_dat_path: Union[str, Path]) -> Dict[str, Any]:
+    """
+    Extract world version information from level.dat file.
+    """
     try:
-        with gzip.open(path, "rb") as f:
-            reader = NBTReader(f)
-            nbt_data = reader.read_root()
-
-        data = nbt_data.get("Data", {})
-        if not isinstance(data, dict):
-            return result
-
-        version_data = data.get("Version", {})
-        if isinstance(version_data, dict):
-            name = version_data.get("Name")
-            if isinstance(name, str):
-                result["version"] = name
-
-            snapshot = version_data.get("Snapshot")
-            if isinstance(snapshot, bool):
-                result["snapshot"] = snapshot
-            elif isinstance(snapshot, int):
-                result["snapshot"] = snapshot != 0
-
-            raw_version = version_data.get("Id")
-            if isinstance(raw_version, int):
-                result["raw_version"] = raw_version
-
-        if result["version"] is None:
-            version = data.get("Version")
-            if isinstance(version, int):
-                result["raw_version"] = version
-            elif isinstance(version, str):
-                result["version"] = version
-
-        return result
-
-    except (gzip.BadGzipFile, struct.error, EOFError, ValueError, UnicodeDecodeError, OSError):
-        return result
-
-
-if __name__ == "__main__":
-    import sys
-
-    if len(sys.argv) > 1:
-        result = get_world_version(sys.argv[1])
-        print(f"Version: {result['version']}")
-        print(f"Snapshot: {result['snapshot']}")
-        print(f"Raw Version: {result['raw_version']}")
-    else:
-        print("Usage: python nbt_parser.py <path_to_level.dat>")
+        with open(level_dat_path, 'rb') as f:
+            data = f.read()
+        
+        nbt = parse_nbt(data)
+        
+        # Navigate to Data -> Version or Data -> DataVersion
+        root_data = nbt.get("data", {})
+        
+        # Check for nested Data structure (NEO format)
+        if isinstance(root_data, dict) and "Data" in root_data:
+            root_data = root_data["Data"]
+        
+        # Modern versions store version in Data.Version
+        if "Version" in root_data:
+            version_data = root_data["Version"]
+            if isinstance(version_data, dict):
+                return {
+                    "version": version_data.get("Name", "unknown"),
+                    "snapshot": version_data.get("Snapshot", False),
+                    "platform": version_data.get("Series", "main")
+                }
+        
+        # Also check if version is directly in Data
+        if "version" in root_data:
+            data_version = root_data["version"]
+            if isinstance(data_version, int):
+                version_map = {
+                    3953: "1.21",
+                    3955: "1.21.1",
+                    3959: "1.21.2",
+                    4082: "1.21.3",
+                    4101: "1.21.4",
+                    4324: "1.21.5",
+                    4325: "1.21.6",
+                    4326: "1.21.7",
+                    4327: "1.21.8",
+                    4328: "1.21.9",
+                    4329: "1.21.10",
+                    4330: "1.21.11",
+                }
+                mc_version = version_map.get(data_version, f"unknown ({data_version})")
+                return {
+                    "version": mc_version,
+                    "snapshot": False,
+                    "platform": "main"
+                }
+        
+        # Legacy versions use DataVersion number
+        if "DataVersion" in root_data:
+            data_version = root_data["DataVersion"]
+            version_map = {
+                3953: "1.21",
+                3955: "1.21.1",
+                3959: "1.21.2",
+                4082: "1.21.3",
+                4101: "1.21.4",
+                4324: "1.21.5",
+                4325: "1.21.6",
+                4326: "1.21.7",
+                4327: "1.21.8",
+                4328: "1.21.9",
+                4329: "1.21.10",
+                4330: "1.21.11",
+            }
+            mc_version = version_map.get(data_version, f"unknown ({data_version})")
+            return {
+                "version": mc_version,
+                "snapshot": False,
+                "platform": "main"
+            }
+        
+        return {
+            "version": "unknown",
+            "snapshot": False,
+            "platform": "main"
+        }
+        
+    except Exception as e:
+        return {
+            "version": None,
+            "error": str(e),
+            "snapshot": False,
+            "platform": "unknown"
+        }

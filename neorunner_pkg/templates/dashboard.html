@@ -1887,6 +1887,50 @@
                 document.body.removeChild(textarea);
             }
             
+            let logEventSource = null;
+            
+            function refreshLogs() {
+                // Try to use Server-Sent Events for live streaming
+                if (!logEventSource) {
+                    logEventSource = new EventSource('/api/logs/stream');
+                    logEventSource.onmessage = function(event) {
+                        const content = document.getElementById('logs-content');
+                        if (content) {
+                            content.innerHTML += event.data + '\n';
+                            content.scrollTop = content.scrollHeight;
+                        }
+                    };
+                    logEventSource.onerror = function() {
+                        // Fall back to polling if SSE fails
+                        if (logEventSource) {
+                            logEventSource.close();
+                            logEventSource = null;
+                        }
+                        pollLogs();
+                    };
+                }
+            }
+            
+            function pollLogs() {
+                fetch('/api/logs?lines=100')
+                    .then(r => r.json())
+                    .then(data => {
+                        const content = document.getElementById('logs-content');
+                        if (content && data.logs) {
+                            content.innerHTML = data.logs.join('\n');
+                            content.scrollTop = content.scrollHeight;
+                        }
+                    })
+                    .catch(() => {});
+            }
+            
+            function stopLogStream() {
+                if (logEventSource) {
+                    logEventSource.close();
+                    logEventSource = null;
+                }
+            }
+            
             // Tab switching
             function switchTab(tabId) {
                 document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));

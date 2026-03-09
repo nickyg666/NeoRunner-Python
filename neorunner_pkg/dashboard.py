@@ -675,10 +675,10 @@ def api_logs():
 
 @app.route("/api/logs/stream")
 def logs_stream():
-    """Raw log stream for real-time monitoring.
+    """Server-Sent Events stream for real-time log monitoring.
     
     Returns a continuous stream of new log lines as they are written.
-    Useful for external systems to react to server events.
+    Uses SSE format for browser EventSource compatibility.
     """
     import time
     
@@ -686,18 +686,36 @@ def logs_stream():
     
     def generate():
         if not log_file.exists():
+            yield "data: <no logs>\n\n"
             return
         
-        with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
-            f.seek(0, 2)
-            while True:
+        # Send initial connection message
+        yield "data: <connected>\n\n"
+        
+        # Track position for efficient reading
+        f = open(log_file, 'r', encoding='utf-8', errors='ignore')
+        f.seek(0, 2)  # Start at end
+        
+        while True:
+            try:
                 line = f.readline()
                 if not line:
                     time.sleep(0.5)
                     continue
-                yield line
+                # SSE format: "data: <content>\n\n"
+                yield f"data: {line}"
+            except GeneratorExit:
+                break
+            except Exception:
+                time.sleep(1)
+                continue
+        
+        try:
+            f.close()
+        except Exception:
+            pass
     
-    return Response(generate(), mimetype='text/plain')
+    return Response(generate(), mimetype='text/event-stream')
 
 
 @app.route("/api/download/<mod_name>")

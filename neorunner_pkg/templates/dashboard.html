@@ -1,0 +1,2278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NeoRunner - Server Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --neon-cyan: #00f0ff;
+            --neon-magenta: #ff00ff;
+            --neon-blue: #0066ff;
+            --neon-purple: #8800ff;
+            --neon-green: #00ff88;
+            --neon-orange: #ff8800;
+            --neon-red: #ff0055;
+            --bg-dark: #0a0a1a;
+            --glow-cyan: 0 0 20px rgba(0, 240, 255, 0.5), 0 0 40px rgba(0, 240, 255, 0.3);
+            --glow-magenta: 0 0 20px rgba(255, 0, 255, 0.5), 0 0 40px rgba(255, 0, 255, 0.3);
+            --glow-blue: 0 0 20px rgba(0, 102, 255, 0.5), 0 0 40px rgba(0, 102, 255, 0.3);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        @keyframes gradientBg {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        @keyframes borderGlow {
+            0%, 100% { border-color: var(--neon-cyan); box-shadow: 0 0 15px rgba(0, 240, 255, 0.3), inset 0 0 15px rgba(0, 240, 255, 0.1); }
+            33% { border-color: var(--neon-magenta); box-shadow: 0 0 15px rgba(255, 0, 255, 0.3), inset 0 0 15px rgba(255, 0, 255, 0.1); }
+            66% { border-color: var(--neon-blue); box-shadow: 0 0 15px rgba(0, 102, 255, 0.3), inset 0 0 15px rgba(0, 102, 255, 0.1); }
+        }
+
+        @keyframes scanline {
+            0% { transform: translateY(-100%); }
+            100% { transform: translateY(100vh); }
+        }
+
+        @keyframes pulseNeon {
+            0%, 100% { text-shadow: 0 0 10px currentColor, 0 0 20px currentColor, 0 0 30px currentColor; }
+            50% { text-shadow: 0 0 5px currentColor, 0 0 10px currentColor; }
+        }
+
+        body {
+            font-family: 'Rajdhani', 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a1a3a 25%, #0a0a2a 50%, #1a0a3a 75%, #0a0a1a 100%);
+            background-size: 400% 400%;
+            animation: gradientBg 15s ease infinite;
+            color: #e0e0f0;
+            min-height: 100vh;
+            padding: 20px;
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: 
+                radial-gradient(ellipse at 20% 20%, rgba(0, 240, 255, 0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 80%, rgba(255, 0, 255, 0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 50% 50%, rgba(0, 102, 255, 0.05) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        body::after {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--neon-cyan), transparent);
+            animation: scanline 8s linear infinite;
+            opacity: 0.3;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            position: relative;
+            z-index: 2;
+        }
+        
+        header {
+            background: rgba(10, 10, 30, 0.7);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            padding: 24px;
+            border-radius: 16px;
+            border: 1px solid rgba(0, 240, 255, 0.3);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 0 30px rgba(0, 240, 255, 0.05);
+            margin-bottom: 30px;
+            position: relative;
+            overflow: hidden;
+            animation: borderGlow 6s ease-in-out infinite;
+        }
+
+        header::before {
+            content: '';
+            position: absolute;
+            top: 0; left: -100%;
+            width: 100%; height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(0, 240, 255, 0.1), transparent);
+            animation: headerShine 4s ease-in-out infinite;
+        }
+
+        @keyframes headerShine {
+            0%, 100% { left: -100%; }
+            50% { left: 100%; }
+        }
+        
+        header h1 {
+            font-family: 'Orbitron', sans-serif;
+            color: var(--neon-cyan);
+            margin-bottom: 10px;
+            font-size: 28px;
+            font-weight: 700;
+            text-shadow: 0 0 10px rgba(0, 240, 255, 0.5), 0 0 20px rgba(0, 240, 255, 0.3);
+            letter-spacing: 2px;
+        }
+        
+        header p {
+            color: rgba(200, 200, 220, 0.8);
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        header p strong {
+            color: var(--neon-cyan);
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .grid-2col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            .grid-2col {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .card {
+            background: rgba(10, 10, 30, 0.6);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-radius: 16px;
+            border: 1px solid rgba(0, 240, 255, 0.2);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), inset 0 0 20px rgba(0, 240, 255, 0.03);
+            padding: 24px;
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            position: relative;
+        }
+
+        .card.tabs-card {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .tab-content {
+            display: none;
+            max-height: 75vh;
+            min-height: 50vh;
+            height: 65vh;
+            overflow-y: auto;
+            padding-right: 8px;
+        }
+        
+        .tab-content.active {
+            display: block;
+            animation: fadeIn 0.4s ease;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--neon-cyan), var(--neon-magenta), var(--neon-blue), var(--neon-cyan));
+            background-size: 300% 100%;
+            animation: gradientBg 4s linear infinite;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .card::after {
+            content: '';
+            position: absolute;
+            bottom: 0; right: 0;
+            width: 100px; height: 100px;
+            background: radial-gradient(circle at bottom right, rgba(255, 0, 255, 0.1), transparent 70%);
+            pointer-events: none;
+        }
+        
+        .card:hover {
+            border-color: rgba(0, 240, 255, 0.5);
+            box-shadow: 0 15px 50px rgba(0, 240, 255, 0.15), 0 0 30px rgba(0, 240, 255, 0.1), inset 0 0 30px rgba(0, 240, 255, 0.05);
+        }
+
+        .card:hover::before {
+            opacity: 1;
+        }
+        
+        .card h2 {
+            font-family: 'Orbitron', sans-serif;
+            color: var(--neon-cyan);
+            margin-bottom: 18px;
+            font-size: 18px;
+            font-weight: 600;
+            text-shadow: 0 0 8px rgba(0, 240, 255, 0.4);
+            letter-spacing: 1px;
+        }
+        
+        .stat {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(0, 240, 255, 0.15);
+            transition: all 0.3s ease;
+        }
+
+        .stat:hover {
+            background: rgba(0, 240, 255, 0.05);
+            padding-left: 8px;
+        }
+        
+        .stat:last-child {
+            border-bottom: none;
+        }
+        
+        .stat-label {
+            color: rgba(200, 200, 220, 0.7);
+            font-weight: 500;
+        }
+        
+        .stat-value {
+            color: var(--neon-cyan);
+            font-weight: 700;
+            text-shadow: 0 0 8px rgba(0, 240, 255, 0.3);
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 6px 16px;
+            border-radius: 25px;
+            font-size: 12px;
+            font-weight: 700;
+            margin-top: 10px;
+            font-family: 'Orbitron', sans-serif;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+        
+        .status-running {
+            background: linear-gradient(135deg, rgba(0, 255, 136, 0.2), rgba(0, 255, 136, 0.1));
+            color: var(--neon-green);
+            border: 1px solid var(--neon-green);
+            box-shadow: 0 0 15px rgba(0, 255, 136, 0.3);
+            animation: pulseNeon 2s ease-in-out infinite;
+        }
+        
+        .status-stopped {
+            background: linear-gradient(135deg, rgba(255, 0, 85, 0.2), rgba(255, 0, 85, 0.1));
+            color: var(--neon-red);
+            border: 1px solid var(--neon-red);
+            box-shadow: 0 0 15px rgba(255, 0, 85, 0.3);
+        }
+        
+        button {
+            background: linear-gradient(135deg, rgba(0, 102, 255, 0.3), rgba(136, 0, 255, 0.3));
+            color: var(--neon-cyan);
+            border: 1px solid var(--neon-cyan);
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            font-family: 'Rajdhani', sans-serif;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            margin-top: 10px;
+            margin-right: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        button::before {
+            content: '';
+            position: absolute;
+            top: 0; left: -100%;
+            width: 100%; height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(0, 240, 255, 0.3), transparent);
+            transition: left 0.5s ease;
+        }
+
+        button:hover::before {
+            left: 100%;
+        }
+        
+        button:hover:not(:disabled) {
+            background: linear-gradient(135deg, rgba(0, 102, 255, 0.5), rgba(136, 0, 255, 0.5));
+            color: #fff;
+            box-shadow: var(--glow-cyan);
+            transform: translateY(-2px);
+        }
+        
+        button:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+            filter: grayscale(60%);
+            border-color: rgba(100, 100, 100, 0.5);
+            color: rgba(150, 150, 150, 0.5);
+        }
+        
+        button.danger {
+            background: linear-gradient(135deg, rgba(255, 0, 85, 0.3), rgba(255, 0, 255, 0.2));
+            border-color: var(--neon-red);
+            color: var(--neon-red);
+        }
+        
+        button.danger:hover:not(:disabled) {
+            background: linear-gradient(135deg, rgba(255, 0, 85, 0.5), rgba(255, 0, 255, 0.3));
+            box-shadow: var(--glow-magenta);
+            color: #ff6699;
+        }
+        
+        button.success {
+            background: linear-gradient(135deg, rgba(0, 255, 136, 0.3), rgba(0, 240, 255, 0.2));
+            border-color: var(--neon-green);
+            color: var(--neon-green);
+        }
+        
+        button.success:hover:not(:disabled) {
+            background: linear-gradient(135deg, rgba(0, 255, 136, 0.5), rgba(0, 240, 255, 0.3));
+            box-shadow: 0 0 25px rgba(0, 255, 136, 0.5), 0 0 50px rgba(0, 255, 136, 0.3);
+            color: #66ffbb;
+        }
+        
+        input, select, textarea {
+            width: 100%;
+            padding: 12px 16px;
+            border: 1px solid rgba(0, 240, 255, 0.3);
+            border-radius: 8px;
+            margin: 8px 0;
+            font-family: 'Rajdhani', sans-serif;
+            background: rgba(10, 10, 30, 0.6);
+            color: #e0e0f0;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: var(--neon-cyan);
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.3), inset 0 0 10px rgba(0, 240, 255, 0.1);
+        }
+
+        input::placeholder, textarea::placeholder {
+            color: rgba(150, 150, 170, 0.6);
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 6px;
+            color: var(--neon-cyan);
+            font-weight: 600;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        small {
+            color: rgba(150, 150, 170, 0.7) !important;
+        }
+        
+        .tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid rgba(0, 240, 255, 0.2);
+            flex-wrap: wrap;
+            padding-bottom: 15px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: #0a0e17;
+        }
+        
+        .tab-button {
+            background: transparent;
+            border: 1px solid transparent;
+            color: rgba(200, 200, 220, 0.6);
+            padding: 12px 20px;
+            cursor: pointer;
+            border-radius: 8px 8px 0 0;
+            transition: all 0.3s ease;
+            margin: 0;
+            font-weight: 600;
+            position: relative;
+        }
+
+        .tab-button::after {
+            content: '';
+            position: absolute;
+            bottom: -2px; left: 0; right: 0;
+            height: 3px;
+            background: var(--neon-cyan);
+            transform: scaleX(0);
+            transition: transform 0.3s ease;
+        }
+        
+        .tab-button:hover {
+            color: var(--neon-cyan);
+            background: rgba(0, 240, 255, 0.1);
+        }
+
+        .tab-button:hover::after {
+            transform: scaleX(0.5);
+        }
+        
+        .tab-button.active {
+            color: var(--neon-cyan);
+            background: rgba(0, 240, 255, 0.15);
+            border: 1px solid var(--neon-cyan);
+            border-bottom-color: transparent;
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.2);
+        }
+
+        .tab-button.active::after {
+            transform: scaleX(1);
+        }
+        
+        .tab-content {
+            display: none;
+            max-height: 75vh;
+            min-height: 50vh;
+            height: 65vh;
+            overflow-y: auto;
+        }
+        
+        .tab-content.active {
+            display: block;
+            animation: fadeIn 0.4s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .mod-list {
+            max-height: 1000px;
+            overflow-y: auto;
+        }
+        
+        .mod-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 16px;
+            border: 1px solid rgba(0, 240, 255, 0.15);
+            margin-bottom: 8px;
+            border-radius: 10px;
+            background: rgba(10, 10, 30, 0.4);
+            transition: all 0.3s ease;
+        }
+
+        .mod-item:hover {
+            border-color: var(--neon-cyan);
+            background: rgba(0, 240, 255, 0.08);
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.1);
+        }
+        
+        .mod-info {
+            flex: 1;
+        }
+        
+        .mod-name {
+            font-weight: 700;
+            color: var(--neon-cyan);
+            text-shadow: 0 0 5px rgba(0, 240, 255, 0.3);
+        }
+        
+        .mod-size {
+            font-size: 12px;
+            color: rgba(150, 150, 170, 0.7);
+        }
+        
+        .logs {
+            background: rgba(0, 0, 0, 0.6);
+            color: var(--neon-green);
+            padding: 20px;
+            border-radius: 12px;
+            font-family: 'Courier New', 'Rajdhani', monospace;
+            font-size: 13px;
+            max-height: 300px;
+            overflow-y: auto;
+            line-height: 1.5;
+            margin-top: 10px;
+            border: 1px solid rgba(0, 255, 136, 0.2);
+            box-shadow: inset 0 0 30px rgba(0, 255, 136, 0.05);
+        }
+        
+        .log-line {
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--neon-cyan);
+            box-shadow: 0 0 10px var(--neon-cyan), 0 0 20px var(--neon-cyan), 0 0 30px var(--neon-cyan);
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { 
+                opacity: 1;
+                transform: scale(1);
+                box-shadow: 0 0 10px var(--neon-cyan), 0 0 20px var(--neon-cyan);
+            }
+            50% { 
+                opacity: 0.5;
+                transform: scale(0.8);
+                box-shadow: 0 0 5px var(--neon-cyan);
+            }
+        }
+        
+        .alert {
+            padding: 16px 20px;
+            border-radius: 12px;
+            margin-bottom: 10px;
+            font-weight: 500;
+            backdrop-filter: blur(10px);
+            position: sticky;
+            top: 10px;
+            z-index: 1000;
+            animation: slideDown 0.3s ease;
+        }
+        
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .alert-success {
+            background: rgba(0, 255, 136, 0.15);
+            color: var(--neon-green);
+            border: 1px solid var(--neon-green);
+            box-shadow: 0 0 15px rgba(0, 255, 136, 0.2);
+        }
+        
+        .alert-error {
+            background: rgba(255, 0, 85, 0.15);
+            color: var(--neon-red);
+            border: 1px solid var(--neon-red);
+            box-shadow: 0 0 15px rgba(255, 0, 85, 0.2);
+        }
+        
+        .alert-info {
+            background: rgba(0, 240, 255, 0.15);
+            color: var(--neon-cyan);
+            border: 1px solid var(--neon-cyan);
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.2);
+        }
+        
+        .alert-warning {
+            background: rgba(255, 136, 0, 0.15);
+            color: var(--neon-orange);
+            border: 1px solid var(--neon-orange);
+            box-shadow: 0 0 15px rgba(255, 136, 0, 0.2);
+        }
+        
+        .installer-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 18px 28px;
+            border-radius: 12px;
+            text-decoration: none;
+            color: white;
+            font-weight: 700;
+            transition: all 0.3s ease;
+            min-width: 130px;
+            cursor: pointer;
+            border: 1px solid transparent;
+            position: relative;
+            overflow: hidden;
+        }
+        .installer-btn::before {
+            content: '';
+            position: absolute;
+            top: 0; left: -100%;
+            width: 100%; height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transition: left 0.5s ease;
+        }
+        .installer-btn:hover::before {
+            left: 100%;
+        }
+        .installer-btn:hover {
+            box-shadow: 0 0 25px rgba(0, 240, 255, 0.3);
+        }
+        .installer-bat { 
+            background: linear-gradient(135deg, rgba(0, 240, 255, 0.3), rgba(0, 102, 255, 0.3));
+            border-color: var(--neon-cyan);
+            box-shadow: 0 0 20px rgba(0, 240, 255, 0.2);
+        }
+        .installer-bat:hover { box-shadow: var(--glow-cyan); }
+        .installer-icon { font-size: 24px; margin-bottom: 6px; }
+        .installer-label { font-size: 18px; font-weight: 800; font-family: 'Orbitron', sans-serif; }
+        .installer-desc { font-size: 12px; opacity: 0.85; margin-top: 4px; }
+        
+        .quarantine-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(255, 136, 0, 0.1);
+            border: 1px solid rgba(255, 136, 0, 0.3);
+            border-radius: 10px;
+            padding: 12px 16px;
+            margin-bottom: 8px;
+            font-size: 13px;
+            transition: all 0.3s ease;
+        }
+        .quarantine-item:hover {
+            background: rgba(255, 136, 0, 0.15);
+            border-color: var(--neon-orange);
+            box-shadow: 0 0 15px rgba(255, 136, 0, 0.2);
+        }
+        .quarantine-item .q-info { flex: 1; }
+        .quarantine-item .q-name { font-weight: 700; color: var(--neon-orange); text-shadow: 0 0 5px rgba(255, 136, 0, 0.3); }
+        .quarantine-item .q-reason { color: rgba(200, 200, 220, 0.6); font-size: 12px; }
+        .quarantine-item .q-restore {
+            background: linear-gradient(135deg, rgba(0, 255, 136, 0.3), rgba(0, 255, 136, 0.2));
+            border: 1px solid var(--neon-green);
+            color: var(--neon-green);
+            padding: 6px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            margin-left: 10px;
+            font-family: 'Rajdhani', sans-serif;
+            transition: all 0.3s ease;
+        }
+        .quarantine-item .q-restore:hover { 
+            background: linear-gradient(135deg, rgba(0, 255, 136, 0.5), rgba(0, 255, 136, 0.3));
+            box-shadow: 0 0 15px rgba(0, 255, 136, 0.4);
+        }
+        .quarantine-item .q-delete {
+            background: linear-gradient(135deg, rgba(255, 0, 85, 0.3), rgba(255, 0, 85, 0.2));
+            border: 1px solid var(--neon-red);
+            color: var(--neon-red);
+            padding: 6px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            margin-left: 6px;
+            font-family: 'Rajdhani', sans-serif;
+            transition: all 0.3s ease;
+        }
+        .quarantine-item .q-delete:hover { 
+            background: linear-gradient(135deg, rgba(255, 0, 85, 0.5), rgba(255, 0, 85, 0.3));
+            box-shadow: 0 0 15px rgba(255, 0, 85, 0.4);
+        }
+        
+        .event-timeline { 
+            max-height: 300px; 
+            overflow-y: auto; 
+            padding-right: 10px;
+        }
+        .event-timeline::-webkit-scrollbar {
+            width: 6px;
+        }
+        .event-timeline::-webkit-scrollbar-track {
+            background: rgba(0, 240, 255, 0.1);
+            border-radius: 3px;
+        }
+        .event-timeline::-webkit-scrollbar-thumb {
+            background: var(--neon-cyan);
+            border-radius: 3px;
+        }
+        .event-item {
+            display: flex;
+            gap: 10px;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(0, 240, 255, 0.1);
+            font-size: 13px;
+            transition: all 0.3s ease;
+        }
+        .event-item:hover {
+            background: rgba(0, 240, 255, 0.05);
+            padding-left: 8px;
+        }
+        .event-item:last-child { border-bottom: none; }
+        .event-time { color: rgba(150, 150, 170, 0.6); font-size: 11px; white-space: nowrap; }
+        .event-type {
+            font-weight: 700;
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 4px;
+            white-space: nowrap;
+            font-family: 'Orbitron', sans-serif;
+        }
+        .event-type-crash { 
+            background: rgba(255, 0, 85, 0.2); 
+            color: var(--neon-red); 
+            border: 1px solid var(--neon-red);
+        }
+        .event-type-heal { 
+            background: rgba(0, 255, 136, 0.2); 
+            color: var(--neon-green); 
+            border: 1px solid var(--neon-green);
+        }
+        .event-type-quarantine { 
+            background: rgba(255, 136, 0, 0.2); 
+            color: var(--neon-orange); 
+            border: 1px solid var(--neon-orange);
+        }
+        .event-type-restart { 
+            background: rgba(0, 240, 255, 0.2); 
+            color: var(--neon-cyan); 
+            border: 1px solid var(--neon-cyan);
+        }
+        .event-type-default { 
+            background: rgba(150, 150, 170, 0.2); 
+            color: rgba(200, 200, 220, 0.8); 
+            border: 1px solid rgba(150, 150, 170, 0.3);
+        }
+        .event-msg { color: rgba(200, 200, 220, 0.8); flex: 1; }
+        
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .tabs {
+                flex-wrap: wrap;
+            }
+            
+            button {
+                width: 100%;
+                margin-right: 0;
+                margin-bottom: 10px;
+            }
+        }
+
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 20, 0.9);
+            backdrop-filter: blur(10px);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .modal-overlay.active {
+            display: flex;
+        }
+        .modal {
+            background: linear-gradient(135deg, rgba(10, 10, 30, 0.95), rgba(20, 20, 50, 0.95));
+            border-radius: 20px;
+            max-width: 800px;
+            width: 100%;
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+            border: 1px solid rgba(0, 240, 255, 0.3);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 40px rgba(0, 240, 255, 0.2);
+            animation: modalFadeIn 0.3s ease;
+        }
+
+        @keyframes modalFadeIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .modal-header {
+            padding: 24px;
+            border-bottom: 1px solid rgba(0, 240, 255, 0.2);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(0, 240, 255, 0.05);
+        }
+        .modal-header h2 {
+            color: var(--neon-cyan);
+            margin: 0;
+            font-family: 'Orbitron', sans-serif;
+            text-shadow: 0 0 10px rgba(0, 240, 255, 0.5);
+        }
+        .modal-header .close-btn {
+            background: transparent;
+            border: 1px solid var(--neon-red);
+            color: var(--neon-red);
+            font-size: 20px;
+            cursor: pointer;
+            padding: 4px 12px;
+            margin: 0;
+            line-height: 1;
+            border-radius: 6px;
+            transition: all 0.3s ease;
+        }
+        .modal-header .close-btn:hover {
+            background: rgba(255, 0, 85, 0.2);
+            box-shadow: 0 0 15px rgba(255, 0, 85, 0.3);
+        }
+        .modal-toolbar {
+            padding: 16px 24px;
+            border-bottom: 1px solid rgba(0, 240, 255, 0.2);
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+            background: rgba(0, 240, 255, 0.03);
+        }
+        .modal-toolbar button {
+            margin: 0;
+            padding: 8px 18px;
+            font-size: 13px;
+        }
+        .modal-toolbar .search-box {
+            flex: 1;
+            min-width: 200px;
+            margin: 0;
+        }
+        .modal-toolbar .selected-count {
+            color: var(--neon-cyan);
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .modal-body {
+            overflow-y: auto;
+            padding: 0;
+            flex: 1;
+        }
+        .modal-body::-webkit-scrollbar {
+            width: 8px;
+        }
+        .modal-body::-webkit-scrollbar-track {
+            background: rgba(0, 240, 255, 0.05);
+        }
+        .modal-body::-webkit-scrollbar-thumb {
+            background: var(--neon-cyan);
+            border-radius: 4px;
+        }
+        .modal-mod-item {
+            display: flex;
+            align-items: center;
+            padding: 14px 24px;
+            border-bottom: 1px solid rgba(0, 240, 255, 0.1);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .modal-mod-item:hover {
+            background: rgba(0, 240, 255, 0.08);
+        }
+        .modal-mod-item input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            margin: 0 14px 0 0;
+            cursor: pointer;
+            accent-color: var(--neon-cyan);
+        }
+        .modal-mod-item .mod-title {
+            font-weight: 600;
+            color: #e0e0f0;
+            flex: 1;
+        }
+        .modal-mod-item .mod-source {
+            font-size: 10px;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: 4px;
+            color: white;
+            margin-right: 8px;
+            flex-shrink: 0;
+            font-family: 'Orbitron', sans-serif;
+        }
+        .mod-source.modrinth { background: var(--neon-green); text-shadow: 0 0 5px rgba(0, 255, 136, 0.5); }
+        .mod-source.curseforge { background: var(--neon-orange); text-shadow: 0 0 5px rgba(255, 136, 0, 0.5); }
+        .mod-source.both { background: var(--neon-purple); text-shadow: 0 0 5px rgba(136, 0, 255, 0.5); }
+        .mod-installed-badge {
+            font-size: 9px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: rgba(0, 240, 255, 0.2);
+            border: 1px solid var(--neon-cyan);
+            color: var(--neon-cyan);
+            margin-right: 8px;
+            flex-shrink: 0;
+            font-family: 'Orbitron', sans-serif;
+        }
+        .modal-mod-item.installed {
+            opacity: 0.5;
+        }
+        .modal-mod-item.installed input[type="checkbox"] {
+            cursor: not-allowed;
+        }
+        .modal-mod-item .mod-downloads {
+            color: rgba(150, 150, 170, 0.7);
+            font-size: 12px;
+        }
+        .modal-footer {
+            padding: 20px 24px;
+            border-top: 1px solid rgba(0, 240, 255, 0.2);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(0, 240, 255, 0.05);
+        }
+        .modal-footer .footer-info {
+            color: rgba(200, 200, 220, 0.7);
+            font-size: 13px;
+        }
+
+        ::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 5px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: linear-gradient(135deg, var(--neon-cyan), var(--neon-purple));
+            border-radius: 5px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(135deg, var(--neon-magenta), var(--neon-cyan));
+        }
+
+        h2, h3 {
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        strong {
+            color: var(--neon-cyan);
+        }
+
+        code {
+            background: rgba(0, 240, 255, 0.1);
+            border: 1px solid rgba(0, 240, 255, 0.2);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            color: var(--neon-cyan);
+        }
+
+        .btn-small {
+            font-size: 11px !important;
+            padding: 4px 10px !important;
+        }
+        
+        .mc-version-badge {
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-left: 8px;
+            font-family: 'Orbitron', sans-serif;
+        }
+        .mc-version-badge.compatible {
+            background: rgba(0, 255, 136, 0.2);
+            color: var(--neon-green);
+            border: 1px solid var(--neon-green);
+        }
+        .mc-version-badge.warning {
+            background: rgba(255, 136, 0, 0.2);
+            color: var(--neon-orange);
+            border: 1px solid var(--neon-orange);
+        }
+        .mc-version-badge.incompatible {
+            background: rgba(255, 0, 85, 0.2);
+            color: var(--neon-red);
+            border: 1px solid var(--neon-red);
+        }
+        .compat-status {
+            font-size: 10px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 3px;
+            margin-left: 6px;
+        }
+        .compat-status.green {
+            background: var(--neon-green);
+            color: #0a0a1a;
+        }
+        .compat-status.yellow {
+            background: var(--neon-orange);
+            color: #0a0a1a;
+        }
+        .compat-status.red {
+            background: var(--neon-red);
+            color: #fff;
+        }
+        .world-item.incompatible {
+            opacity: 0.5;
+        }
+        .world-item.incompatible .world-name {
+            text-decoration: line-through;
+        }
+        .loader-worlds-list {
+            background: rgba(0, 240, 255, 0.05);
+            padding: 12px;
+            border-radius: 8px;
+            margin-top: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .loader-worlds-list .world-row {
+            display: flex;
+            align-items: center;
+            padding: 6px 0;
+            border-bottom: 1px solid rgba(0, 240, 255, 0.1);
+        }
+        .loader-worlds-list .world-row:last-child {
+            border-bottom: none;
+        }
+        .loader-worlds-list .world-row.disabled {
+            opacity: 0.4;
+        }
+
+        /* Theme: Chrome - Silver/Metallic look */
+        body.theme-chrome {
+            background: linear-gradient(180deg, #3a3a3a 0%, #1a1a1a 50%, #2a2a2a 100%) !important;
+            min-height: 100vh;
+        }
+        body.theme-chrome .container {
+            background: transparent !important;
+        }
+        body.theme-chrome header {
+            background: linear-gradient(180deg, #5a5a5a, #3a3a3a) !important;
+            border-bottom: 3px solid #c0c0c0 !important;
+            box-shadow: 0 4px 20px rgba(192,192,192,0.3) !important;
+        }
+        body.theme-chrome header h1 {
+            color: #f5f5f5 !important;
+            text-shadow: 0 0 15px rgba(255,255,255,0.6), 0 2px 4px #000 !important;
+            letter-spacing: 2px !important;
+        }
+        body.theme-chrome header p {
+            color: #b0b0b0 !important;
+        }
+        body.theme-chrome .card {
+            background: linear-gradient(145deg, rgba(70,70,70,0.95), rgba(45,45,45,0.95)) !important;
+            border: 2px solid #909090 !important;
+            box-shadow: 8px 8px 16px rgba(0,0,0,0.5), -4px -4px 12px rgba(150,150,150,0.1), inset 0 0 20px rgba(200,200,200,0.05) !important;
+            border-radius: 12px !important;
+        }
+        body.theme-chrome h2, body.theme-chrome .stat-value, body.theme-chrome label {
+            color: #e8e8e8 !important;
+        }
+        body.theme-chrome .stat-label {
+            color: #909090 !important;
+        }
+        body.theme-chrome button {
+            background: linear-gradient(145deg, #606060, #454545) !important;
+            border: 2px solid #808080 !important;
+            color: #f0f0f0 !important;
+            box-shadow: 4px 4px 8px rgba(0,0,0,0.4), -2px -2px 6px rgba(120,120,120,0.2) !important;
+        }
+        body.theme-chrome button:hover:not(:disabled) {
+            background: linear-gradient(145deg, #757575, #555555) !important;
+            box-shadow: 0 0 20px rgba(200,200,200,0.5), inset 0 0 10px rgba(255,255,255,0.1) !important;
+        }
+        body.theme-chrome button.success {
+            background: linear-gradient(145deg, #2e7d32, #1b5e20) !important;
+            border-color: #4caf50 !important;
+        }
+        body.theme-chrome button.danger {
+            background: linear-gradient(145deg, #c62828, #b71c1c) !important;
+            border-color: #ef5350 !important;
+        }
+        body.theme-chrome input, body.theme-chrome select, body.theme-chrome textarea {
+            background: linear-gradient(145deg, #2a2a2a, #1a1a1a) !important;
+            border: 2px solid #606060 !important;
+            color: #f0f0f0 !important;
+            box-shadow: inset 3px 3px 6px rgba(0,0,0,0.4) !important;
+        }
+        body.theme-chrome .tab-button {
+            background: #3a3a3a !important;
+            border-color: #606060 !important;
+            color: #b0b0b0 !important;
+        }
+        body.theme-chrome .tab-button.active {
+            background: linear-gradient(145deg, #505050, #404040) !important;
+            border-color: #c0c0c0 !important;
+            color: #fff !important;
+        }
+        body.theme-chrome .modal-overlay {
+            background: rgba(0,0,0,0.85) !important;
+        }
+        body.theme-chrome .modal {
+            background: linear-gradient(145deg, #404040, #2a2a2a) !important;
+            border: 2px solid #909090 !important;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.8) !important;
+        }
+        body.theme-chrome .alert-success { background: #1b5e20 !important; border-color: #4caf50 !important; }
+        body.theme-chrome .alert-error { background: #b71c1c !important; border-color: #ef5350 !important; }
+
+        /* Theme: Minecraft - Earthy brown/stone look */
+        body.theme-minecraft {
+            background: linear-gradient(180deg, #4a3020 0%, #2a1810 50%, #3a2515 100%) !important;
+            min-height: 100vh;
+        }
+        body.theme-minecraft .container { background: transparent !important; }
+        body.theme-minecraft header {
+            background: linear-gradient(180deg, #6d4c41, #4e342e) !important;
+            border-bottom: 5px solid #8d6e63 !important;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.6) !important;
+        }
+        body.theme-minecraft header h1 {
+            color: #d7ccc8 !important;
+            text-shadow: 3px 3px 0 #3e2723, 0 0 10px rgba(141,110,99,0.5) !important;
+        }
+        body.theme-minecraft header p { color: #a1887f !important; }
+        body.theme-minecraft .card {
+            background: linear-gradient(145deg, rgba(62,39,35,0.98), rgba(46,30,27,0.98)) !important;
+            border: 4px solid #5d4037 !important;
+            box-shadow: 6px 6px 12px rgba(0,0,0,0.6), inset 0 0 25px rgba(141,110,99,0.2) !important;
+            border-radius: 8px !important;
+        }
+        body.theme-minecraft h2 { color: #bcaaa4 !important; text-shadow: 1px 1px 0 #1a0f0a !important; }
+        body.theme-minecraft .stat-value, body.theme-minecraft label { color: #d7ccc8 !important; }
+        body.theme-minecraft .stat-label { color: #8d6e63 !important; }
+        body.theme-minecraft button {
+            background: linear-gradient(180deg, #6d4c41, #4e342e) !important;
+            border: 3px solid #8d6e63 !important;
+            color: #efebe9 !important;
+            box-shadow: 4px 4px 0 #3e2723 !important;
+            font-family: 'Minecraft', 'Segoe UI', sans-serif !important;
+        }
+        body.theme-minecraft button:hover:not(:disabled) {
+            background: linear-gradient(180deg, #8d6e63, #6d4c41) !important;
+            transform: translate(1px, 1px);
+            box-shadow: 3px 3px 0 #3e2723 !important;
+        }
+        body.theme-minecraft button.success { border-color: #66bb6a !important; }
+        body.theme-minecraft button.danger { border-color: #ef5350 !important; }
+        body.theme-minecraft input, body.theme-minecraft select {
+            background: #2d1a0f !important;
+            border: 3px solid #5d4037 !important;
+            color: #d7ccc8 !important;
+            font-family: 'Minecraft', 'Segoe UI', sans-serif !important;
+        }
+        body.theme-minecraft .tab-button {
+            background: #3e2723 !important;
+            border: 3px solid #5d4037 !important;
+            color: #a1887f !important;
+        }
+        body.theme-minecraft .tab-button.active {
+            background: #4e342e !important;
+            border-color: #8d6e63 !important;
+            color: #fff !important;
+        }
+        body.theme-minecraft .modal-overlay { background: rgba(0,0,0,0.9) !important; }
+        body.theme-minecraft .modal {
+            background: linear-gradient(145deg, #4e342e, #3e2723) !important;
+            border: 4px solid #8d6e63 !important;
+        }
+
+        /* Theme: Cyberpunk - Neon pink/cyan */
+        body.theme-cyberpunk {
+            background: linear-gradient(180deg, #0a0015 0%, #150030 50%, #0d0020 100%) !important;
+            min-height: 100vh;
+        }
+        body.theme-cyberpunk .container { background: transparent !important; }
+        body.theme-cyberpunk header {
+            background: linear-gradient(180deg, #2d0040, #1a0025) !important;
+            border-bottom: 3px solid #ff00ff !important;
+            box-shadow: 0 0 30px rgba(255,0,255,0.4), 0 4px 20px rgba(0,0,0,0.5) !important;
+        }
+        body.theme-cyberpunk header h1 {
+            color: #ff00ff !important;
+            text-shadow: 0 0 20px #ff00ff, 0 0 40px #ff00ff, 0 2px 4px #000 !important;
+            animation: cyberGlow 2s ease-in-out infinite alternate !important;
+        }
+        @keyframes cyberGlow { from { text-shadow: 0 0 20px #ff00ff, 0 0 40px #ff00ff; } to { text-shadow: 0 0 30px #ff00ff, 0 0 60px #ff00ff, 0 0 80px #00ffff; } }
+        body.theme-cyberpunk header p { color: #00ffff !important; text-shadow: 0 0 10px #00ffff !important; }
+        body.theme-cyberpunk .card {
+            background: linear-gradient(145deg, rgba(25,0,45,0.95), rgba(15,0,30,0.95)) !important;
+            border: 2px solid #ff00ff !important;
+            box-shadow: 0 0 35px rgba(255,0,255,0.35), inset 0 0 50px rgba(255,0,255,0.08) !important;
+            border-radius: 4px !important;
+        }
+        body.theme-cyberpunk h2 {
+            color: #ff00ff !important;
+            text-shadow: 0 0 15px #ff00ff !important;
+        }
+        body.theme-cyberpunk .stat-value, body.theme-cyberpunk label {
+            color: #00ffff !important;
+            text-shadow: 0 0 12px #00ffff !important;
+        }
+        body.theme-cyberpunk .stat-label { color: #ff00ff !important; }
+        body.theme-cyberpunk button {
+            background: linear-gradient(135deg, rgba(255,0,255,0.25), rgba(0,255,255,0.15)) !important;
+            border: 2px solid #ff00ff !important;
+            color: #00ffff !important;
+            text-shadow: 0 0 8px #00ffff !important;
+            box-shadow: 0 0 15px rgba(255,0,255,0.3), inset 0 0 20px rgba(0,255,255,0.05) !important;
+        }
+        body.theme-cyberpunk button:hover:not(:disabled) {
+            background: linear-gradient(135deg, rgba(255,0,255,0.5), rgba(0,255,255,0.35)) !important;
+            box-shadow: 0 0 35px rgba(255,0,255,0.6), 0 0 50px rgba(0,255,255,0.3) !important;
+            animation: cyberPulse 0.5s ease-in-out infinite !important;
+        }
+        @keyframes cyberPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.02); } }
+        body.theme-cyberpunk button.success { border-color: #00ff88 !important; color: #00ff88 !important; }
+        body.theme-cyberpunk button.danger { border-color: #ff0044 !important; color: #ff0044 !important; }
+        body.theme-cyberpunk input, body.theme-cyberpunk select, body.theme-cyberpunk textarea {
+            background: rgba(5,0,15,0.9) !important;
+            border: 2px solid #ff00ff !important;
+            color: #00ffff !important;
+            box-shadow: inset 0 0 15px rgba(255,0,255,0.2), 0 0 10px rgba(0,255,255,0.2) !important;
+        }
+        body.theme-cyberpunk .tab-button {
+            background: rgba(20,0,40,0.8) !important;
+            border: 2px solid #ff00ff !important;
+            color: #ff00ff !important;
+        }
+        body.theme-cyberpunk .tab-button.active {
+            background: linear-gradient(135deg, rgba(255,0,255,0.4), rgba(0,255,255,0.2)) !important;
+            border-color: #00ffff !important;
+            color: #00ffff !important;
+            box-shadow: 0 0 20px rgba(0,255,255,0.5) !important;
+        }
+        body.theme-cyberpunk .modal-overlay { background: rgba(0,0,0,0.92) !important; }
+        body.theme-cyberpunk .modal {
+            background: linear-gradient(145deg, rgba(20,0,45,0.98), rgba(10,0,25,0.98)) !important;
+            border: 3px solid #ff00ff !important;
+            box-shadow: 0 0 50px rgba(255,0,255,0.5), 0 25px 80px rgba(0,0,0,0.8) !important;
+        }
+
+        /* Theme: Mario Style - Blue sky/green ground */
+        body.theme-mario {
+            background: linear-gradient(180deg, #5c94fc 0%, #4a7adb 25%, #3d5afe 40%, #4caf50 60%, #388e3c 80%, #2e7d32 100%) !important;
+            background-attachment: fixed !important;
+            min-height: 100vh;
+        }
+        body.theme-mario .container { background: transparent !important; }
+        body.theme-mario header {
+            background: linear-gradient(180deg, #e70012, #b5000a) !important;
+            border-bottom: 5px solid #ffcc00 !important;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.5) !important;
+        }
+        body.theme-mario header h1 {
+            color: #ffcc00 !important;
+            text-shadow: 3px 3px 0 #000, -2px -2px 0 #0033cc, 0 0 20px rgba(255,204,0,0.5) !important;
+            font-weight: 900 !important;
+            letter-spacing: 1px !important;
+        }
+        body.theme-mario header p { color: #fff !important; text-shadow: 1px 1px 0 #000 !important; }
+        body.theme-mario .card {
+            background: linear-gradient(180deg, rgba(30,80,150,0.95), rgba(20,60,130,0.95)) !important;
+            border: 5px solid #ffcc00 !important;
+            box-shadow: 8px 8px 0 rgba(0,0,0,0.4), inset 0 0 30px rgba(255,204,0,0.15) !important;
+            border-radius: 12px !important;
+        }
+        body.theme-mario h2 { color: #fff !important; text-shadow: 2px 2px 0 #000 !important; }
+        body.theme-mario .stat-value { color: #7fff00 !important; text-shadow: 1px 1px 0 #000 !important; }
+        body.theme-mario .stat-label { color: #ffcc00 !important; text-shadow: 1px 1px 0 #000 !important; }
+        body.theme-mario label { color: #fff !important; text-shadow: 1px 1px 0 #000 !important; }
+        body.theme-mario button {
+            background: linear-gradient(180deg, #e70012, #b5000a) !important;
+            border: 4px solid #fff !important;
+            color: #fff !important;
+            font-weight: 900 !important;
+            text-shadow: 1px 1px 0 #000 !important;
+            box-shadow: 4px 4px 0 #000 !important;
+            font-size: 14px !important;
+        }
+        body.theme-mario button:hover:not(:disabled) {
+            background: linear-gradient(180deg, #ff3333, #e70012) !important;
+            transform: translate(2px, 2px);
+            box-shadow: 2px 2px 0 #000 !important;
+        }
+        body.theme-mario button.success { background: linear-gradient(180deg, #4caf50, #2e7d32) !important; }
+        body.theme-mario button.danger { background: linear-gradient(180deg, #ff5722, #e64a19) !important; }
+        body.theme-mario input, body.theme-mario select, body.theme-mario textarea {
+            background: #1a3a6e !important;
+            border: 3px solid #ffcc00 !important;
+            color: #fff !important;
+            box-shadow: 3px 3px 0 #000 !important;
+        }
+        body.theme-mario .tab-button {
+            background: #1565c0 !important;
+            border: 3px solid #fff !important;
+            color: #fff !important;
+            font-weight: bold !important;
+        }
+        body.theme-mario .tab-button.active {
+            background: #e70012 !important;
+            border-color: #ffcc00 !important;
+        }
+        body.theme-mario .modal-overlay { background: rgba(0,0,0,0.85) !important; }
+        body.theme-mario .modal {
+            background: linear-gradient(180deg, #1976d2, #1565c0) !important;
+            border: 5px solid #ffcc00 !important;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.6) !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎮 NeoRunner - Minecraft Server Dashboard</h1>
+            <p>Manage your modded server with ease | <strong>Ports:</strong> Game: <span id="game-port">-</span> | Query: <span id="query-port">-</span> | RCON: <span id="rcon-port">-</span> | HTTP: <span id="http-port">-</span></p>
+        </header>
+        
+        <div id="alerts"></div>
+        
+        <!-- Row 1: Status + Quick Actions -->
+        <div class="grid-2col">
+            <!-- Server Status Card -->
+            <div class="card">
+                <h2>Server Status</h2>
+                <div id="status-content">
+                    <div class="loading"></div> Loading...
+                </div>
+            </div>
+            
+            <!-- Quick Actions Card -->
+            <div class="card">
+                <h2>Quick Actions</h2>
+                <button id="btn-start" class="success" onclick="startServer()">▶ Start</button>
+                <button id="btn-stop" class="danger" onclick="stopServer()" disabled>⏹ Stop</button>
+                <button id="btn-restart" onclick="restartServer()" style="background:#FF9800;">🔄 Restart</button>
+                <br><br>
+                <button onclick="openModSelector()">📋 Browse CF/MR Mods</button>
+                <button onclick="openConvertModal()" style="background:#9C27B0;">🔄 Convert Modpack</button>
+                <button onclick="openCrashAnalyzer()" style="background:#E91E63;">💥 Crash Analyzer</button>
+                <button onclick="runPreflight()" style="background:#4CAF50;">🛡️ Preflight Check</button>
+                <br><br>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+                    <input type="text" id="broadcast-msg" placeholder="Broadcast message to players..." style="flex:1;min-width:150px;padding:8px 12px;border-radius:6px;border:1px solid #444;background:#1a1a2a;color:#fff;font-size:13px;">
+                    <button onclick="sendBroadcast()" style="background:#673AB7;color:white;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px;">📢</button>
+                </div>
+                <br>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                    <input type="text" id="quick-search" placeholder="Search mod name..." style="flex:1;min-width:150px;padding:8px 12px;border-radius:6px;border:1px solid #444;background:#1a1a2a;color:#fff;font-size:13px;">
+                    <button onclick="quickSearchMod()" style="background:#00BCD4;color:white;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px;">🔍 Fetch</button>
+                </div>
+                <p style="color:#666;font-size:11px;margin-top:6px;">Enter mod name to auto-fetch</p>
+                <hr style="border:none;border-top:1px solid rgba(0,240,255,0.2);margin:12px 0;">
+                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                    <label style="margin:0;font-size:13px;color:var(--neon-cyan);">Theme:</label>
+                    <select id="theme-selector" onchange="applyTheme(this.value)" style="padding:6px 10px;border-radius:4px;background:#1a1a2a;color:#fff;border:1px solid #444;font-size:12px;width:auto;">
+                        <option value="futuristic">Futuristic (Default)</option>
+                        <option value="chrome">Chrome</option>
+                        <option value="minecraft">Minecraft</option>
+                        <option value="cyberpunk">Cyberpunk</option>
+                        <option value="mario">Mario Style</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Row 2: World Management + Mod Sync -->
+        <div class="grid-2col">
+            <!-- World Management Card -->
+            <div class="card">
+                <h2>🌍 World Management</h2>
+                <p style="color:#888; font-size:13px; margin-bottom:12px;">Manage multiple worlds.</p>
+                <button onclick="scanWorlds()" style="background: #2196F3; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">🌐 Scan Worlds</button>
+                <button onclick="backupCurrentWorld()" style="background: #FF9800; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-left: 8px;">💾 Backup</button>
+                <div id="world-management-dedicated" style="margin-top:12px;">
+                    <p style="color:#888;">Click "Scan Worlds"</p>
+                </div>
+            </div>
+            
+            <!-- Client Mod Sync Card -->
+            <div class="card">
+                <h2>Client Mod Sync</h2>
+                <p style="color:#666; font-size:13px; margin-bottom:12px;">Download script to sync mods.</p>
+                <a href="/download/install-mods.bat" class="installer-btn installer-bat" download>
+                    <span class="installer-icon">📦</span>
+                    <span class="installer-label">.bat</span>
+                    <span class="installer-desc">Windows</span>
+                </a>
+                <p style="color:#888; font-size:11px; margin-top:10px;">
+                    <strong>PowerShell:</strong> 
+                    <code id="cmd-oneliner" style="background:#2a2a2a;padding:2px 6px;border-radius:3px;cursor:pointer;font-family:monospace;" title="Click to copy" onclick="copyToClipboard(this.textContent)">Loading...</code>
+                </p>
+                <div style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(0,240,255,0.2);">
+                    <p style="color:#888; font-size:11px;margin-bottom:8px;"><strong>Direct Downloads:</strong></p>
+                    <a href="/download/manifest" target="_blank" style="color:#2196F3;font-size:12px;margin-right:12px;">📋 Manifest</a>
+                    <a href="/download/mods_latest.zip" target="_blank" style="color:#4CAF50;font-size:12px;margin-right:12px;">📦 All Mods (.zip)</a>
+                    <a href="/download/all" target="_blank" style="color:#FF9800;font-size:12px;">📁 All Mods</a>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Row 3: Tabbed Section -->
+        <div class="card tabs-card">
+            <div class="tabs">
+                <button class="tab-button active" onclick="switchTab('server-mods')">Server</button>
+                <button class="tab-button" onclick="switchTab('client-mods')">Client</button>
+                <button class="tab-button" onclick="switchTab('quarantine')">Quarantine</button>
+                <button class="tab-button" onclick="switchTab('blacklist')">Blacklist</button>
+                <button class="tab-button" onclick="switchTab('loader')">Loader</button>
+                <button class="tab-button" onclick="switchTab('config')">Config</button>
+                <button class="tab-button" onclick="switchTab('events')">Events</button>
+                <button class="tab-button" onclick="switchTab('server-events')">Server</button>
+                <button class="tab-button" onclick="switchTab('logs')">Logs</button>
+            </div>
+            
+            <!-- Server Mods Tab -->
+            <div id="server-mods" class="tab-content active">
+                <div style="margin-bottom:10px;">
+                    <button class="success" onclick="openModSelector()" style="margin-right:8px;">+ Add</button>
+                    <button onclick="rescanMods()" style="background:#9b59b6;color:white;padding:8px 16px;border-radius:4px;cursor:pointer;">🔍 Rescan</button>
+                    <button onclick="analyzeMods()" style="background:#673AB7;color:white;padding:8px 16px;border-radius:4px;cursor:pointer;margin-left:8px;">🔬 Analyze</button>
+                    <button onclick="optimizeLoadOrder()" style="background:#009688;color:white;padding:8px 16px;border-radius:4px;cursor:pointer;margin-left:8px;">⚡ Optimize</button>
+                    <button onclick="patchMods()" style="background:#FF5722;color:white;padding:8px 16px;border-radius:4px;cursor:pointer;margin-left:8px;">🔧 Patch</button>
+                    <button onclick="serverSelectAll()" style="background:#607d8b;color:white;padding:8px 16px;border-radius:4px;cursor:pointer;margin-left:8px;">Select All</button>
+                    <button onclick="serverQuarantineSelected()" style="background:#e74c3c;color:white;padding:8px 16px;border-radius:4px;cursor:pointer;margin-left:8px;">Quarantine</button>
+                    <button onclick="serverDeleteSelected()" style="background:#c82333;color:white;padding:8px 16px;border-radius:4px;cursor:pointer;margin-left:8px;">Delete</button>
+                </div>
+                <div id="server-mods-list" style="max-height:60vh; overflow-y:auto;">
+                    <div class="loading"></div> Loading server mods...
+                </div>
+            </div>
+            
+            <!-- Client Mods Tab -->
+            <div id="client-mods" class="tab-content">
+                <div style="margin-bottom:10px;">
+                    <button class="success" onclick="openModSelector()" style="margin-right:8px;">+ Add</button>
+                    <button onclick="broadcastModUpdate()" style="background:#e67e22;color:white;padding:8px 16px;border-radius:4px;cursor:pointer;">Notify</button>
+                    <button onclick="quarantineSelected()" style="background:#e74c3c;color:white;padding:8px 16px;border-radius:4px;cursor:pointer;margin-left:8px;">Quarantine Selected</button>
+                    <button onclick="deleteSelected()" style="background:#c82333;color:white;padding:8px 16px;border-radius:4px;cursor:pointer;margin-left:8px;">Delete Selected</button>
+                    <button onclick="selectAll()" style="background:#607d8b;color:white;padding:8px 16px;border-radius:4px;cursor:pointer;margin-left:8px;">Select All</button>
+                </div>
+                <div id="client-mods-list" style="max-height:60vh; overflow-y:auto;">
+                    <div class="loading"></div> Loading client mods...
+                </div>
+            </div>
+            
+            <!-- Quarantine Tab -->
+            <div id="quarantine" class="tab-content">
+                <h2>🔒 Quarantined Mods</h2>
+                <p style="color:#888; font-size:13px; margin-bottom:15px;">Mods that were automatically removed due to crashes or compatibility issues. Restore them if the issue has been resolved.</p>
+                <div style="margin-bottom: 15px;">
+                    <button onclick="restoreAllQuarantined()" style="background: #27ae60; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-right: 8px;" title="Restore all quarantined mods to their original folders">Restore All</button>
+                    <button onclick="restoreFromQuarantine()" style="background: #FF9800; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;" title="Move all quarantined mods back to mods/clientonly folders">📤 Restore from Quarantine</button>
+                    <button onclick="sortClientMods()" style="background: #2196F3; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-left: 8px;" title="Sort mods between server/clientonly folders based on their manifest">📋 Sort Client Mods</button>
+                    <button onclick="quarantineAllClientMods()" style="background: #e74c3c; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-left: 8px;" title="Quarantine all mods with client-side functionality (render methods, client classes, etc.)">🔒 Quarantine Client Mods</button>
+                    <button onclick="quarantineAllMods()" style="background: #c82333; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-left: 8px;" title="Quarantine all mods that cause crashes (client-only mods, dependency conflicts, etc.)">Quarantine All</button>
+                </div>
+                <div id="quarantine-tab-content">
+                    <div class="loading"></div> Loading...
+                </div>
+            </div>
+            
+            <!-- Blacklist Tab -->
+            <div id="blacklist" class="tab-content">
+                <h2>🚫 Blacklist & Whitelist</h2>
+                <p style="color:#888; font-size:13px; margin-bottom:15px;">Manage mods that are automatically quarantined. Blacklisted mods are always blocked, whitelisted mods are never auto-quarantined.</p>
+                
+                <h3 style="color:#e74c3c; border-bottom:1px solid #333; padding-bottom:8px;">Blacklist</h3>
+                <p style="color:#888; font-size:12px;">Mods in this list will be automatically quarantined on startup or when detected.</p>
+                <div style="display:flex; gap:8px; margin-bottom:10px;">
+                    <input type="text" id="blacklist-add-input" placeholder="mod_id (e.g. emf) or regex pattern (e.g. 'decocraft.*1\.21\.1$')" style="flex:1; padding:8px; border-radius:4px; border:1px solid #555; background:#2a2a2a; color:#fff;">
+                    <button onclick="addToBlacklist()" style="background: #e74c3c; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Add</button>
+                </div>
+                <div style="display:flex; gap:8px; margin-bottom:10px;">
+                    <input type="text" id="blacklist-pattern-add-input" placeholder="regex pattern (e.g. '.*1\.21\.1$')" style="flex:1; padding:8px; border-radius:4px; border:1px solid #555; background:#2a2a2a; color:#fff;">
+                    <button onclick="addToBlacklistPattern()" style="background: #e74c3c; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Add Pattern</button>
+                </div>
+                <div id="blacklist-content" style="margin-bottom:20px;"></div>
+                
+                <h3 style="color:#ff9800; border-bottom:1px solid #333; padding-bottom:8px;">Blacklist Patterns</h3>
+                <p style="color:#888; font-size:12px;">Regex patterns to automatically blacklist mods matching version patterns. Use with caution!</p>
+                <div style="display:flex; gap:8px; margin-bottom:10px;">
+                    <input type="text" id="blacklist-pattern-remove-input" placeholder="pattern to remove" style="flex:1; padding:8px; border-radius:4px; border:1px solid #555; background:#2a2a2a; color:#fff;">
+                    <button onclick="removeFromBlacklistPattern()" style="background: #ff9800; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Remove Pattern</button>
+                </div>
+                <div id="blacklist-patterns-content" style="margin-bottom:20px;"></div>
+                
+                <h3 style="color:#27ae60; border-bottom:1px solid #333; padding-bottom:8px;">Whitelist</h3>
+                <p style="color:#888; font-size:12px;">Mods in this list will never be auto-quarantined (overrides blacklist).</p>
+                <div style="display:flex; gap:8px; margin-bottom:10px;">
+                    <input type="text" id="whitelist-add-input" placeholder="mod_id (e.g. sodium)" style="flex:1; padding:8px; border-radius:4px; border:1px solid #555; background:#2a2a2a; color:#fff;">
+                    <button onclick="addToWhitelist()" style="background: #27ae60; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Add</button>
+                </div>
+                <div id="whitelist-content"></div>
+            </div>
+            
+            <!-- Loader Tab -->
+            <div id="loader" class="tab-content">
+                <h2>🎮 Loader Management</h2>
+                <p style="color:#666; font-size:13px; margin-bottom:12px;">Manage mod loaders. Only one loader can be active at a time. Switching loaders will create a backup snapshot and archive current mods.</p>
+                
+                <div id="loader-status">
+                    <div class="loading"></div> Loading loader information...
+                </div>
+                
+                <h3 style="margin-top:20px; color:#FF9800; border-bottom:1px solid rgba(0,240,255,0.2); padding-bottom:8px;">📦 Available Loaders</h3>
+                <div id="loader-list">
+                    <p style="color:#666;">Loading...</p>
+                </div>
+                
+                <h3 style="margin-top:20px; color:#00BCD4; border-bottom:1px solid rgba(0,240,255,0.2); padding-bottom:8px;">📸 Loader Snapshots</h3>
+                <p style="color:#888; font-size:12px; margin-bottom:10px;">Full backups created when switching loaders. Contains mods and world data.</p>
+                <div id="loader-snapshots">
+                    <p style="color:#666;">No snapshots found.</p>
+                </div>
+                
+                <h3 style="margin-top:20px; color:#673AB7; border-bottom:1px solid rgba(0,240,255,0.2); padding-bottom:8px;">📂 Archived Mods</h3>
+                <div id="loader-archives">
+                    <p style="color:#666;">No archived mods found.</p>
+                </div>
+                
+                <h3 style="margin-top:20px; color:#2196F3; border-bottom:1px solid rgba(0,240,255,0.2); padding-bottom:8px;">⚙️ Switch Loader & MC Version</h3>
+                <div style="margin-bottom: 15px; padding: 15px; background: rgba(26, 26, 46, 0.6); border-radius: 8px; border: 1px solid rgba(0, 240, 255, 0.15);">
+                    <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+                        <label style="font-weight: 500;">Target Loader:</label>
+                        <select id="target-loader" style="padding: 10px 15px; border-radius: 6px; border: 2px solid #2196F3; font-size: 14px;" onchange="updateLoaderWorldsPreview()">
+                            <option value="neoforge">NeoForge</option>
+                            <option value="forge">Forge</option>
+                            <option value="fabric">Fabric</option>
+                        </select>
+                        <label style="font-weight: 500; margin-left: 10px;">MC Version:</label>
+                        <input type="text" id="target-mc-version" placeholder="e.g. 1.21.11" value="" style="padding: 10px 15px; border-radius: 6px; border: 2px solid #4CAF50; width: 120px; font-size: 14px;" oninput="updateLoaderWorldsPreview()">
+                    </div>
+                    <div id="loader-worlds-preview" style="display:none;">
+                        <h4 style="margin-top:12px;margin-bottom:6px;color:#666;font-size:12px;">🌍 Compatible Worlds:</h4>
+                        <div id="loader-worlds-list" class="loader-worlds-list"></div>
+                    </div>
+                    <div style="margin-top: 12px;">
+                        <button onclick="installLoader()" style="background: #9b59b6; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px;">📥 Install Loader</button>
+                        <button onclick="switchLoader()" style="background: #e74c3c; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; margin-left: 10px; font-size: 14px;">🔄 Switch to {loader}{mcver}</button>
+                    </div>
+                </div>
+
+            </div>
+            
+            <!-- Configuration Tab -->
+            <div id="config" class="tab-content">
+                <h2>Server Configuration</h2>
+                
+                <h3 style="margin-top:0;color:#4CAF50;border-bottom:1px solid #333;padding-bottom:8px;">Network</h3>
+                <div class="form-group">
+                    <label>Hostname / Public IP</label>
+                    <input type="text" id="cfg-hostname" placeholder="e.g. play.myserver.com or 192.168.0.19">
+                    <small>Public-facing address for install scripts and broadcasts. Leave blank to auto-detect from server.properties.</small>
+                </div>
+                <div class="form-group">
+                    <label>Minecraft Version</label>
+                    <input type="text" id="mc-version" value="1.21.11">
+                </div>
+                
+                <h3 style="color:#2196F3;border-bottom:1px solid #333;padding-bottom:8px;">Mod Curator</h3>
+                <div class="form-group">
+                    <label>Curator Sort Order</label>
+                    <select id="cfg-curator-sort">
+                        <option value="downloads">Downloads (most popular)</option>
+                        <option value="relevance">Relevance</option>
+                        <option value="follows">Follows</option>
+                        <option value="newest">Newest</option>
+                        <option value="updated">Recently Updated</option>
+                    </select>
+                    <small>Default sort for Modrinth/CurseForge mod searches</small>
+                </div>
+                <div class="form-group">
+                    <label>Curator Limit (per source)</label>
+                    <input type="number" id="cfg-curator-limit" min="10" max="200" value="100" step="10">
+                    <small>Max mods to fetch from each source (10-200)</small>
+                </div>
+                
+                <h3 style="color:#e74c3c;border-bottom:1px solid #333;padding-bottom:8px;">Server Recovery</h3>
+                <div class="form-group">
+                    <label>Max Restart Attempts</label>
+                    <input type="number" id="cfg-max-restarts" min="1" max="100" value="25">
+                    <small>How many times to auto-restart after crashes before giving up (1-100)</small>
+                </div>
+                <div class="form-group">
+                    <label>Max Crashes Before Quarantine</label>
+                    <input type="number" id="cfg-max-crashes" min="1" max="10" value="3">
+                    <small>How many times a mod can crash before being auto-quarantined (1-10)</small>
+                </div>
+                
+                <h3 style="color:#FF9800;border-bottom:1px solid #333;padding-bottom:8px;">Broadcasts &amp; Notifications</h3>
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                        <input type="checkbox" id="cfg-broadcast-enabled" style="width:auto;margin:0;">
+                        Enable In-Game Broadcasts
+                    </label>
+                    <small>Master toggle for all tellraw broadcasts to players</small>
+                </div>
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                        <input type="checkbox" id="cfg-broadcast-auto" style="width:auto;margin:0;">
+                        Auto-Broadcast After Mod Install
+                    </label>
+                    <small>Automatically notify players when new mods are installed via dashboard</small>
+                </div>
+                
+                <h3 style="color:#9C27B0;border-bottom:1px solid #333;padding-bottom:8px;">Nag Screens</h3>
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                        <input type="checkbox" id="cfg-nag-modlist" style="width:auto;margin:0;">
+                        Show Mod List on Player Join
+                    </label>
+                    <small>Send mod list via tellraw when a player joins the server</small>
+                </div>
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                        <input type="checkbox" id="cfg-nag-firstvisit" style="width:auto;margin:0;">
+                        First-Visit Mod Selector
+                    </label>
+                    <small>Auto-open mod selector on first dashboard visit</small>
+                </div>
+                
+                <h3 style="color:#E91E63;border-bottom:1px solid #333;padding-bottom:8px;">
+                    Java Memory
+                    <button onclick="openJavaModal()" style="float:right; padding:4px 10px; font-size:12px; background:#607D8B;">☕ Version Manager</button>
+                </h3>
+                <div class="form-group">
+                    <label>Max Heap Size (-Xmx)</label>
+                    <input type="text" id="cfg-xmx" value="6G" placeholder="e.g. 6G, 4096M, 8G">
+                    <small>Maximum memory for server JVM (e.g. 6G, 8G, 16384M). Requires server restart.</small>
+                </div>
+                <div class="form-group">
+                    <label>Initial Heap Size (-Xms)</label>
+                    <input type="text" id="cfg-xms" value="4G" placeholder="e.g. 4G, 2048M, 6G">
+                    <small>Starting memory allocation (e.g. 4G, 6G). Should be less than or equal to max. Requires server restart.</small>
+                </div>
+                
+                <h3 style="color:#607D8B;border-bottom:1px solid #333;padding-bottom:8px;">Update Schedule</h3>
+                <div class="form-group">
+                    <label>Mod Update Frequency (hours)</label>
+                    <input type="number" id="update-freq" min="1" max="24" value="4" step="1">
+                    <small>How often to check for mod updates (1-24 hours)</small>
+                </div>
+                <div class="form-group">
+                    <label>Weekly Update Day</label>
+                    <select id="weekly-day">
+                        <option value="mon">Monday</option>
+                        <option value="tue">Tuesday</option>
+                        <option value="wed">Wednesday</option>
+                        <option value="thu">Thursday</option>
+                        <option value="fri">Friday</option>
+                        <option value="sat">Saturday</option>
+                        <option value="sun">Sunday</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Weekly Update Time (hour)</label>
+                    <input type="number" id="weekly-hour" min="0" max="23" value="2" step="1">
+                    <small>Time of day for weekly strict version check (0-23)</small>
+                </div>
+                
+                <div style="margin-top:20px;display:flex;gap:10px;">
+                    <button class="success" onclick="saveConfig()">Save Configuration</button>
+                    <button onclick="loadConfig()">Reload</button>
+                </div>
+            </div>
+            
+            <!-- Events Tab -->
+            <div id="events" class="tab-content">
+                <h2>Server Events</h2>
+                <p style="color:#666; font-size:13px; margin-bottom:12px;">Crash detection, self-healing actions, and quarantine events. Auto-refreshes every 10 seconds.</p>
+                <button onclick="loadEvents()">🔄 Refresh</button>
+                <button onclick="clearEvents()" class="danger" style="margin-left:8px;">Clear Events</button>
+                <div id="events-content" class="event-timeline" style="margin-top:12px;">
+                    <div class="loading"></div> Loading events...
+                </div>
+            </div>
+            
+            <!-- Logs Tab -->
+            <div id="logs" class="tab-content">
+                <h2>Live Logs</h2>
+                <button onclick="refreshLogs()">🔄 Refresh Logs</button>
+                <div id="logs-content" class="logs">
+                    <div class="loading"></div> Loading logs...
+                </div>
+            </div>
+            
+            <!-- Server Events Tab -->
+            <div id="server-events" class="tab-content">
+                <h2>Server Connection Events</h2>
+                <p style="color:#666; font-size:13px; margin-bottom:12px;">Real-time channel mismatch detection and client connection events.</p>
+                <button onclick="loadServerEvents()">🔄 Refresh</button>
+                <button onclick="clearServerEvents()" class="danger" style="margin-left:8px;">Clear</button>
+                <div id="server-events-content" class="event-timeline" style="margin-top:12px;">
+                    <div class="loading"></div> Loading server events...
+                </div>
+            </div>
+        </div>
+
+        <!-- Mod Selection Modal -->
+        <div id="mod-selector-modal" class="modal-overlay">
+            <div class="modal">
+                <div class="modal-header">
+                    <h2>Add Mods to Server</h2>
+                    <button class="close-btn" onclick="closeModSelector()">&times;</button>
+                </div>
+                <div class="modal-toolbar">
+                    <button class="success" onclick="selectAllMods()">Select All</button>
+                    <button onclick="deselectAllMods()">Deselect All</button>
+                    <input type="text" class="search-box" id="mod-search" placeholder="Search mods..." oninput="filterModList()">
+                    <span class="selected-count" id="selected-count">0 selected</span>
+                </div>
+                <div class="modal-body" id="modal-mod-list">
+                    <div style="padding: 40px; text-align: center; color: #666;">Loading mod list...</div>
+                </div>
+                <div class="modal-footer">
+                    <span class="footer-info" id="modal-footer-info">Top mods from Modrinth</span>
+                    <div>
+                        <button onclick="closeModSelector()">Cancel</button>
+                        <button class="success" onclick="installSelectedMods()" id="install-btn">Install Selected</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modpack Conversion Modal -->
+        <div id="convert-modal" class="modal-overlay">
+            <div class="modal" style="max-width: 900px;">
+                <div class="modal-header">
+                    <h2 style="color: #9C27B0;">🔄 Convert Modpack</h2>
+                    <button class="close-btn" onclick="closeConvertModal()">&times;</button>
+                </div>
+                <div class="modal-body" style="padding: 24px;">
+                    <!-- Step 1: Input -->
+                    <div id="convert-input">
+                        <p style="color:#666; margin-bottom:15px;">
+                            Paste your mod folder's filenames below (one per line), or drag & drop .jar files. 
+                            The server will search Modrinth for each mod and check if a compatible version exists 
+                            for your server's MC version and loader.
+                        </p>
+                        <div style="display:flex; gap:15px; margin-bottom:15px;">
+                            <div style="flex:1;">
+                                <label>Source Loader <small style="color:#999;">(optional)</small></label>
+                                <select id="convert-source-loader" style="margin-top:4px;">
+                                    <option value="fabric">Fabric</option>
+                                    <option value="forge">Forge</option>
+                                    <option value="neoforge">NeoForge</option>
+                                    <option value="quilt">Quilt</option>
+                                    <option value="unknown">Unknown</option>
+                                </select>
+                            </div>
+                            <div style="flex:1;">
+                                <label>Source MC Version <small style="color:#999;">(optional)</small></label>
+                                <input type="text" id="convert-source-version" placeholder="e.g. 1.21.4" style="margin-top:4px;">
+                            </div>
+                        </div>
+                        <div id="convert-dropzone" style="border: 2px dashed rgba(0,240,255,0.4); border-radius:8px; padding:30px; text-align:center; cursor:pointer; margin-bottom:15px; transition: border-color 0.2s, background 0.2s;">
+                            <p style="color:#888; margin:0;">📂 Drag & drop .jar files here, or click to browse</p>
+                            <input type="file" id="convert-file-input" multiple accept=".jar" style="display:none;" onchange="handleConvertFiles(this.files)">
+                        </div>
+                        <label>Or paste filenames (one per line):</label>
+                        <textarea id="convert-filenames" rows="8" placeholder="sodium-fabric-0.6.5+mc1.21.4.jar&#10;iris-fabric-1.8.8+mc1.21.4.jar&#10;modmenu-13.0.3.jar&#10;..." style="font-family: monospace; font-size:12px;"></textarea>
+                        <div style="margin-top:10px; display:flex; justify-content:flex-end;">
+                            <button onclick="closeConvertModal()">Cancel</button>
+                            <button class="success" onclick="runConversion()" id="convert-run-btn" style="background:#9C27B0;">Analyze Modpack</button>
+                        </div>
+                    </div>
+                    <!-- Step 2: Results (hidden until analysis completes) -->
+                    <div id="convert-results" style="display:none;">
+                        <div id="convert-summary" style="margin-bottom:15px;"></div>
+                        <div id="convert-results-list" style="max-height:400px; overflow-y:auto;"></div>
+                        <div style="margin-top:15px; display:flex; justify-content:space-between; align-items:center;">
+                            <button onclick="showConvertInput()">← Back</button>
+                            <div>
+                                <span id="convert-select-count" style="color:#666; font-size:13px; margin-right:10px;">0 selected</span>
+                                <button class="success" onclick="installConvertedMods()" id="convert-install-btn" style="background:#9C27B0;">Install Selected</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Crash Analyzer Modal -->
+        <div id="crash-analyzer-modal" class="modal-overlay">
+            <div class="modal" style="max-width: 800px;">
+                <div class="modal-header">
+                    <h2 style="color: #E91E63;">💥 Crash Log Analyzer</h2>
+                    <button class="close-btn" onclick="closeCrashAnalyzer()">×</button>
+                </div>
+                <div class="modal-body" style="padding: 24px;">
+                    <p style="color:#888; margin-bottom:15px;">
+                        Paste your client crash log below. The server will analyze it and recommend which mods to add or remove for compatibility.
+                    </p>
+                    <textarea id="crash-log-input" rows="12" placeholder="Paste crash log here...&#10;Example:&#10;---- Minecraft Crash Report ----&#10;java.lang.NoClassDefFoundError: sodium&#10;..." style="font-family:monospace;font-size:12px;width:100%;background:#1a1a2a;color:#ccc;border:1px solid #444;padding:12px;border-radius:8px;"></textarea>
+                    <div style="margin-top:15px; display:flex; justify-content:space-between; align-items:center;">
+                        <button onclick="closeCrashAnalyzer()">Cancel</button>
+                        <button class="success" onclick="analyzeCrashLog()" id="analyze-crash-btn" style="background:#E91E63;">Analyze Crash Log</button>
+                    </div>
+                    <div id="crash-analysis-results" style="margin-top:20px;"></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Java Upgrade Modal -->
+        <div id="java-modal" class="modal-overlay">
+            <div class="modal" style="max-width: 600px;">
+                <div class="modal-header">
+                    <h2>☕ Java Version Manager</h2>
+                    <button class="close-btn" onclick="closeJavaModal()">×</button>
+                </div>
+                <div class="modal-body" style="padding: 24px;">
+                    <div style="background:#2a2a2a; padding:15px; border-radius:8px; margin-bottom:20px;">
+                        <div style="font-size:12px; color:#888;">Current Java Version</div>
+                        <div id="java-current" style="font-size:24px; font-weight:bold; color:#4CAF50;">Loading...</div>
+                    </div>
+                    
+                    <div id="java-quarantined-section" style="display:none; margin-bottom:20px;">
+                        <h3 style="color:#FF5722; margin-bottom:10px;">⚠️ Quarantined Mods</h3>
+                        <p style="color:#888; font-size:13px; margin-bottom:10px;">These mods need a newer Java version:</p>
+                        <div id="java-quarantined-list" style="max-height:150px; overflow-y:auto;"></div>
+                    </div>
+                    
+                    <div id="java-upgrade-section">
+                        <h3 style="margin-bottom:10px;">Available JDK Upgrades</h3>
+                        <div id="java-upgrades-list">Loading available packages...</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button onclick="closeJavaModal()">Close</button>
+                    <button id="java-unquarantine-btn" class="success" onclick="unquarantineJavaMods()" style="display:none;">Restore Quarantined Mods</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+        <script>
+            // Copy to clipboard with fallback
+            function copyToClipboard(text) {
+                if (navigator.clipboard) {
+                    navigator.clipboard.writeText(text).then(() => {
+                        showAlert('Copied to clipboard!', 'success');
+                    }).catch(() => {
+                        fallbackCopy(text);
+                    });
+                } else {
+                    fallbackCopy(text);
+                }
+            }
+            
+            function fallbackCopy(text) {
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                textarea.style.position = 'fixed';
+                textarea.style.opacity = '0';
+                document.body.appendChild(textarea);
+                textarea.select();
+                try {
+                    document.execCommand('copy');
+                    showAlert('Copied to clipboard!', 'success');
+                } catch (e) {
+                    showAlert('Failed to copy - please copy manually', 'error');
+                }
+                document.body.removeChild(textarea);
+            }
+            
+            // Tab switching
+            function switchTab(tabId) {
+                document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+                document.querySelectorAll('.tab-button').forEach(el => el.classList.remove('active'));
+                document.getElementById(tabId).classList.add('active');
+                event.target.classList.add('active');
+            }
+            
+            function showAlert(msg, type) {
+                const alertsDiv = document.getElementById('alerts');
+                const className = type === 'success' ? 'alert-success' : type === 'error' ? 'alert-error' : type === 'warning' ? 'alert-warning' : 'alert-info';
+                alertsDiv.innerHTML = `<div class="alert ${className}">${msg}</div>`;
+                setTimeout(() => alertsDiv.innerHTML = '', 3000);
+            }
+            
+            // Theme management
+            function applyTheme(theme) {
+                document.body.classList.remove('theme-chrome', 'theme-minecraft', 'theme-cyberpunk', 'theme-mario');
+                if (theme !== 'futuristic') {
+                    document.body.classList.add('theme-' + theme);
+                }
+                localStorage.setItem('neorunner-theme', theme);
+                showAlert('Theme: ' + theme, 'success');
+            }
+            
+            function loadTheme() {
+                const saved = localStorage.getItem('neorunner-theme') || 'futuristic';
+                const selector = document.getElementById('theme-selector');
+                if (selector) selector.value = saved;
+                if (saved !== 'futuristic') {
+                    document.body.classList.add('theme-' + saved);
+                }
+            }
+            
+            // Crash Analyzer
+            function openCrashAnalyzer() {
+                document.getElementById('crash-analyzer-modal').classList.add('active');
+            }
+            
+            function closeCrashAnalyzer() {
+                document.getElementById('crash-analyzer-modal').classList.remove('active');
+            }
+            
+            function analyzeCrashLog() {
+                const textarea = document.getElementById('crash-log-input');
+                const logContent = textarea.value.trim();
+                
+                if (!logContent) {
+                    showAlert('Please paste a crash log first', 'warning');
+                    return;
+                }
+                
+                const btn = document.getElementById('analyze-crash-btn');
+                btn.disabled = true;
+                btn.textContent = 'Analyzing...';
+                
+                fetch('/api/analyze-crash-log', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({crash_log: logContent})
+                })
+                .then(r => r.json())
+                .then(data => {
+                    btn.disabled = false;
+                    btn.textContent = 'Analyze Crash Log';
+                    
+                    if (data.error) {
+                        showAlert(data.error, 'error');
+                        return;
+                    }
+                    
+                    const resultsDiv = document.getElementById('crash-analysis-results');
+                    let html = '<h4 style="color:var(--neon-cyan);margin-bottom:12px;">Analysis Results</h4>';
+                    
+                    if (data.issues && data.issues.length > 0) {
+                        html += '<div style="margin-bottom:15px;">';
+                        data.issues.forEach(issue => {
+                            const color = issue.severity === 'error' ? 'var(--neon-red)' : 'var(--neon-orange)';
+                            html += `<div style="padding:8px 12px;margin-bottom:8px;background:rgba(255,0,0,0.1);border-left:3px solid ${color};border-radius:4px;">
+                                <strong style="color:${color};">${issue.type}</strong>: ${issue.message}
+                            </div>`;
+                        });
+                        html += '</div>';
+                    } else {
+                        html += '<p style="color:var(--neon-green);">No issues detected in crash log.</p>';
+                    }
+                    
+                    if (data.actions && data.actions.length > 0) {
+                        html += '<h5 style="color:var(--neon-cyan);margin:12px 0 8px;">Recommended Actions:</h5><ul style="color:#ccc;margin-left:20px;">';
+                        data.actions.forEach(action => {
+                            html += `<li style="margin-bottom:4px;">${action}</li>`;
+                        });
+                        html += '</ul>';
+                    }
+                    
+                    resultsDiv.innerHTML = html;
+                })
+                .catch(err => {
+                    btn.disabled = false;
+                    btn.textContent = 'Analyze Crash Log';
+                    showAlert('Analysis failed: ' + err, 'error');
+                });
+            }
+
+            function sendBroadcast() {
+                const msg = document.getElementById('broadcast-msg').value.trim();
+                if (!msg) { showAlert('Enter a message to broadcast', 'warning'); return; }
+                fetch('/api/broadcast', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({message: msg})
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.error) {
+                        showAlert('Broadcast failed: ' + data.error, 'error');
+                    } else {
+                        showAlert('Broadcast sent!', 'success');
+                        document.getElementById('broadcast-msg').value = '';
+                    }
+                })
+                .catch(err => showAlert('Broadcast failed: ' + err, 'error'));
+            }
+
+            function quickSearchMod() {
+                const query = document.getElementById('quick-search').value.trim();
+                if (!query) { showAlert('Enter a mod name to search', 'warning'); return; }
+                showAlert(`Searching for "${query}"...`, 'info');
+                fetch(`/api/mods/search?q=${encodeURIComponent(query)}&limit=10`)
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.results && data.results.length) {
+                            const top = data.results[0];
+                            if (confirm(`Install "${top.name}"?\n\nSource: ${top.source}\nVersion: ${top.version || 'latest'}`)) {
+                                showAlert('Installing...', 'info');
+                                fetch('/api/mods/install', {
+                                    method: 'POST',
+                                    headers: {'Content-Type': 'application/json'},
+                                    body: JSON.stringify({
+                                        mods: [{
+                                            mod_id: top.mod_id || top.id,
+                                            source: top.source,
+                                            version: top.version
+                                        }]
+                                    })
+                                }).then(r => r.json()).then(result => {
+                                    if (result.success || result.installed) {
+                                        showAlert(`Installed ${top.name}`, 'success');
+                                        loadServerMods();
+                                    } else {
+                                        showAlert(result.error || 'Install failed', 'error');
+                                    }
+                                }).catch(err => showAlert('Error: ' + err, 'error'));
+                            }
+                        } else {
+                            showAlert('No mods found', 'error');
+                        }
+                    }).catch(err => showAlert('Search error: ' + err, 'error'));
+            }
+
+            function openQuickSearch() {
+                document.getElementById('quick-search').focus();
+            }
+            
+            function loadClientMods() {
+                fetch('/api/client-mods')
+                    .then(r => r.json())
+                    .then(data => {
+                        const content = document.getElementById('client-mods-list');
+                        if (data.mods && data.mods.length) {
+                            content.innerHTML = data.mods.map(mod => `
+                                <div class="mod-item">
+                                    <input type="checkbox" class="client-mod-checkbox" value="${mod.id}" style="width:18px;height:18px;margin-right:12px;accent-color:var(--neon-cyan);">
+                                    <div class="mod-info">
+                                        <span class="mod-name">${mod.name || mod.id}</span>
+                                        <span class="mod-size">${mod.size || ''}</span>
+                                    </div>
+                                    <div class="mod-actions">
+                                        <button onclick="quarantineMod('${mod.id}')" class="btn-small">Quarantine</button>
+                                    </div>
+                                </div>
+                            `).join('');
+                        } else {
+                            content.innerHTML = '<p style="color:#666;">No client mods installed</p>';
+                        }
+                    })
+                    .catch(() => {
+                        document.getElementById('client-mods-list').innerHTML = '<p style="color:#c00;">Error loading client mods</p>';
+                    });
+            }
+
+            function selectAll() {
+                const checkboxes = document.querySelectorAll('.client-mod-checkbox');
+                const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+                checkboxes.forEach(cb => cb.checked = !allChecked);
+            }
+
+            function getSelectedModIds() {
+                const checkboxes = document.querySelectorAll('.client-mod-checkbox:checked');
+                return Array.from(checkboxes).map(cb => cb.value);
+            }
+
+            function quarantineSelected() {
+                const selected = getSelectedModIds();
+                if (!selected.length) { showAlert('No mods selected', 'warning'); return; }
+                if (!confirm(`Quarantine ${selected.length} selected mod(s)?`)) return;
+                fetch('/api/quarantine-mods', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({mod_ids: selected})
+                }).then(r => r.json()).then(data => {
+                    showAlert(data.message || `Quarantined ${selected.length} mods`, 'success');
+                    loadClientMods();
+                }).catch(err => showAlert('Error: ' + err, 'error'));
+            }
+
+            function deleteSelected() {
+                const selected = getSelectedModIds();
+                if (!selected.length) { showAlert('No mods selected', 'warning'); return; }
+                if (!confirm(`DELETE ${selected.length} selected mod(s)? This cannot be undone!`)) return;
+                fetch('/api/delete-mods', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({mod_ids: selected})
+                }).then(r => r.json()).then(data => {
+                    showAlert(data.message || `Deleted ${selected.length} mods`, 'success');
+                    loadClientMods();
+                }).catch(err => showAlert('Error: ' + err, 'error'));
+            }
+            
+            function quarantineAllClientMods() {
+                if (!confirm('Quarantine ALL client-side mods? This will move all client mods to the quarantine folder.')) return;
+                
+                fetch('/api/quarantine-all-client-mods', { method: 'POST' })
+                    .then(r => r.json())
+                    .then(result => {
+                        if (result.success) {
+                            showAlert(`Quarantined ${result.quarantined} client mods`, 'success');
+                            loadClientMods();
+                        } else {
+                            showAlert(`Error: ${result.error}`, 'error');
+                        }
+                    })
+                    .catch(err => showAlert(`Error: ${err}`, 'error'));
+            }
+            
+            function sortClientMods() {
+                if (!confirm('Sort mods between server and clientonly folders? This analyzes mod manifests to determine correct placement.')) return;
+                
+                fetch('/api/sort-client-mods', { method: 'POST' })
+                    .then(r => r.json())
+                    .then(result => {
+                        if (result.success) {
+                            showAlert(`Sorted mods: ${result.moved || 0} moved to clientonly`, 'success');
+                            loadServerMods();
+                            loadClientMods();
+                        } else {
+                            showAlert(`Error: ${result.error}`, 'error');
+                        }
+                    })
+                    .catch(err => showAlert(`Error: ${err}`, 'error'));
+            }
+            
+            function restoreFromQuarantine() {
+                if (!confirm('Restore ALL quarantined mods back to mods/clientonly folders?')) return;
+                
+                fetch('/api/restore-from-quarantine', { method: 'POST' })
+                    .then(r => r.json())
+                    .then(result => {
+                        if (result.success) {
+                            showAlert(`Restored ${result.restored} mods from quarantine`, 'success');
+                            loadClientMods();
+                            loadQuarantine();
+                        } else {
+                            showAlert(`Error: ${result.error}`, 'error');
+                        }
+                    })
+                    .catch(err => showAlert(`Error: ${err}`, 'error'));
+            }
+            
+            function quarantineMod(modId) {
+                if (!confirm('Are you sure you want to quarantine this client mod?')) return;
+                
+                fetch('/api/quarantine-mod', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ modId })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        showAlert('Mod quarantined successfully', 'success');
+                        loadClientMods();
+                    } else {
+                        showAlert('Error quarantining mod: ' + data.error, 'error');
+                    }
+                })
+                .catch(err => {
+                    showAlert('Error quarantining mod: ' + err, 'error');
+                });
+            }
+            
+            // Server control functions
+            function startServer() {
+                fetch('/api/server/start', {method: 'POST'})
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.success) {
+                            showAlert(data.message || 'Server starting...', 'success');
+                            setTimeout(refreshStatus, 3000);
+                        } else {
+                            showAlert(data.error || 'Failed to start server', 'error');
+                        }
+                    })
+                    .catch(err => showAlert('Error: ' + err, 'error'));
+            }
+            
+            function stopServer() {
+                if (!confirm('Stop the Minecraft server?')) return;
+                fetch('/api/server/stop', {method: 'POST'})
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.success) {
+                            showAlert('Server stopped', 'success');
+                            setTimeout(refreshStatus, 3000);
+                        } else {
+                            showAlert(data.error || 'Failed to stop server', 'error');
+                        }
+                    })
+                    .catch(err => showAlert('Error: ' + err, 'error'));
+            }
+            
+            function restartServer() {
+                fetch('/api/server/restart', {method: 'POST'})
+                    .then(r => {
+                        if (r.status === 423) {
+                            return r.json().then(data => Promise.reject(data.error || 'Download in progress'));
+                        }
+                        return r.json();
+                    })
+                    .then(data => {
+                        if (data.success) {
+                            showAlert('Server restarting...', 'success');
+                            setTimeout(refreshStatus, 5000);
+                        } else {
+                            showAlert(data.error || 'Failed to restart server', 'error');
+                        }
+                    })
+                    .catch(err => {
+                        if (err.includes && err.includes('Download')) {
+                            showAlert(err, 'error');
+                        } else {
+                            showAlert('Error: ' + err, 'error');
+                        }
+                    });
+            }
+            
+            // Initial load
+            document.addEventListener('DOMContentLoaded', function() {
+                refreshStatus();
+                loadServerMods();
+                loadClientMods();
+                loadConfig();
+                refreshLogs();
+                loadQuarantine();
+                loadBlacklist();
+                loadEvents();
+                loadWorlds();
+                loadLoaders();
+                loadTheme();
+                
+                // First-visit check: show mod selector if never loaded AND config allows it
+                if (!localStorage.getItem('neorunner-mods-loaded')) {
+                    fetch('/api/config').then(r => r.json()).then(cfg => {
+                        if (cfg.nag_first_visit_modal !== false) {
+                            setTimeout(openModSelector, 1500);
+                        }
+                        localStorage.setItem('neorunner-mods-loaded', 'true');
+                    }).catch(() => {
+                        setTimeout(openModSelector, 1500);
+                        localStorage.setItem('neorunner-mods-loaded', 'true');
+                    });
+                }
+            });
+        </script>
+</body>
+</html>

@@ -79,17 +79,17 @@ class TestModHosting:
     
     def test_generate_bat_script(self):
         """Batch script generation works."""
-        from neorunner.mod_hosting import generate_bat_script
-        from neorunner.config import ServerConfig
+        from neorunner_pkg.mod_hosting import generate_bat_script
+        from neorunner_pkg.config import ServerConfig
         
         cfg = ServerConfig(mc_version="1.21.11", loader="neoforge", http_port=8000)
         script = generate_bat_script(cfg)
         
-        assert "install-mods.bat" in script or "powershell" in script
+        assert "curl" in script or "powershell" in script
     
     def test_get_server_ip(self):
         """Server IP detection works."""
-        from neorunner.mod_hosting import get_server_ip
+        from neorunner_pkg.mod_hosting import get_server_ip
         
         ip = get_server_ip()
         

@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NeoRunner - First Start Setup</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --neon-cyan: #00f0ff;
+            --neon-magenta: #ff00ff;
+            --neon-blue: #0066ff;
+            --neon-green: #00ff88;
+            --neon-red: #ff0055;
+            --bg-dark: #0a0a1a;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Rajdhani', 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a1a3a 100%);
+            color: #e0e0f0;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            padding: 40px 20px;
+            margin-bottom: 30px;
+        }
+
+        header h1 {
+            font-family: 'Orbitron', sans-serif;
+            color: var(--neon-cyan);
+            font-size: 36px;
+            text-shadow: 0 0 20px rgba(0, 240, 255, 0.5);
+            margin-bottom: 10px;
+        }
+
+        header p {
+            color: rgba(200, 200, 220, 0.7);
+            font-size: 16px;
+        }
+
+        .setup-card {
+            background: rgba(10, 10, 30, 0.7);
+            backdrop-filter: blur(20px);
+            border-radius: 16px;
+            border: 1px solid rgba(0, 240, 255, 0.3);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            padding: 40px;
+            margin-bottom: 20px;
+        }
+
+        .setup-card h2 {
+            font-family: 'Orbitron', sans-serif;
+            color: var(--neon-cyan);
+            margin-bottom: 20px;
+            font-size: 24px;
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--neon-cyan);
+            font-weight: 600;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 12px 16px;
+            border: 1px solid rgba(0, 240, 255, 0.3);
+            border-radius: 8px;
+            background: rgba(10, 10, 30, 0.6);
+            color: #e0e0f0;
+            font-size: 14px;
+            font-family: 'Rajdhani', sans-serif;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: var(--neon-cyan);
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.3);
+        }
+
+        .step-indicator {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 30px;
+            gap: 10px;
+        }
+
+        .step {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: rgba(0, 240, 255, 0.1);
+            border: 2px solid rgba(0, 240, 255, 0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: rgba(200, 200, 220, 0.5);
+        }
+
+        .step.active {
+            background: rgba(0, 240, 255, 0.2);
+            border-color: var(--neon-cyan);
+            color: var(--neon-cyan);
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.3);
+        }
+
+        .step.completed {
+            background: var(--neon-green);
+            border-color: var(--neon-green);
+            color: #0a0a1a;
+        }
+
+        button {
+            background: linear-gradient(135deg, rgba(0, 102, 255, 0.3), rgba(136, 0, 255, 0.3));
+            color: var(--neon-cyan);
+            border: 1px solid var(--neon-cyan);
+            padding: 14px 32px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            font-family: 'Rajdhani', sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: all 0.3s ease;
+            margin-top: 10px;
+        }
+
+        button:hover {
+            background: linear-gradient(135deg, rgba(0, 102, 255, 0.5), rgba(136, 0, 255, 0.5));
+            box-shadow: 0 0 20px rgba(0, 240, 255, 0.3);
+            transform: translateY(-2px);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 15px;
+            justify-content: flex-end;
+            margin-top: 30px;
+        }
+
+        .alert {
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-weight: 500;
+        }
+
+        .alert-info {
+            background: rgba(0, 240, 255, 0.1);
+            border: 1px solid var(--neon-cyan);
+            color: var(--neon-cyan);
+        }
+
+        .alert-warning {
+            background: rgba(255, 136, 0, 0.1);
+            border: 1px solid #ff8800;
+            color: #ff8800;
+        }
+
+        .loader {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(0, 240, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: var(--neon-cyan);
+            animation: spin 1s ease-in-out infinite;
+            margin-left: 10px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .prereq-check {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+
+        .prereq-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .prereq-item:last-child {
+            border-bottom: none;
+        }
+
+        .status-ok {
+            color: var(--neon-green);
+        }
+
+        .status-missing {
+            color: var(--neon-red);
+        }
+
+        .status-warning {
+            color: #ff8800;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>⚡ NeoRunner Setup</h1>
+            <p>Welcome! Let's get your Minecraft server up and running.</p>
+        </header>
+
+        <!-- Step 1: Prerequisites -->
+        <div id="step-1" class="setup-card">
+            <h2>Step 1: System Requirements</h2>
+            <div class="alert alert-info">
+                Checking system prerequisites...
+            </div>
+            <div id="prereq-list" class="prereq-check">
+                <div class="prereq-item">
+                    <span>Checking...</span>
+                    <span class="loader"></span>
+                </div>
+            </div>
+            <div id="prereq-actions" class="hidden">
+                <button onclick="installPrerequisites()">Install Missing Requirements</button>
+            </div>
+            <div class="button-group">
+                <button id="btn-step-1" onclick="goToStep(2)" disabled>Next →</button>
+            </div>
+        </div>
+
+        <!-- Step 2: Server Configuration -->
+        <div id="step-2" class="setup-card hidden">
+            <h2>Step 2: Server Configuration</h2>
+            
+            <div class="form-group">
+                <label>Minecraft Version</label>
+                <select id="mc-version">
+                    <option value="1.21.11">1.21.11 (Latest)</option>
+                    <option value="1.21.4">1.21.4</option>
+                    <option value="1.21.3">1.21.3</option>
+                    <option value="1.21.1">1.21.1</option>
+                    <option value="1.20.1">1.20.1</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>Mod Loader</label>
+                <select id="loader">
+                    <option value="neoforge">NeoForge (Recommended)</option>
+                    <option value="forge">Forge</option>
+                    <option value="fabric">Fabric</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>Server Name</label>
+                <input type="text" id="server-name" placeholder="My Minecraft Server" value="NeoRunner Server">
+            </div>
+
+            <div class="button-group">
+                <button onclick="goToStep(1)">← Back</button>
+                <button onclick="goToStep(3)">Next →</button>
+            </div>
+        </div>
+
+        <!-- Step 3: Port Configuration -->
+        <div id="step-3" class="setup-card hidden">
+            <h2>Step 3: Network Configuration</h2>
+            
+            <div class="form-group">
+                <label>Minecraft Server Port</label>
+                <input type="number" id="mc-port" value="25565">
+            </div>
+
+            <div class="form-group">
+                <label>Dashboard/Web Port</label>
+                <input type="number" id="http-port" value="8000">
+            </div>
+
+            <div class="form-group">
+                <label>RCON Port (Remote Console)</label>
+                <input type="number" id="rcon-port" value="25575">
+            </div>
+
+            <div class="form-group">
+                <label>RCON Password</label>
+                <input type="password" id="rcon-pass" value="changeme123">
+            </div>
+
+            <div class="button-group">
+                <button onclick="goToStep(2)">← Back</button>
+                <button onclick="goToStep(4)">Next →</button>
+            </div>
+        </div>
+
+        <!-- Step 4: EULA -->
+        <div id="step-4" class="setup-card hidden">
+            <h2>Step 4: Minecraft EULA</h2>
+            
+            <div class="alert alert-warning">
+                You must accept the Minecraft End User License Agreement (EULA) to run a Minecraft server.
+            </div>
+
+            <p style="margin: 20px 0; line-height: 1.6;">
+                By clicking "I Accept", you agree to the Minecraft EULA available at:<br>
+                <a href="https://account.mojang.com/documents/minecraft_eula" target="_blank" style="color: var(--neon-cyan);">
+                    https://account.mojang.com/documents/minecraft_eula
+                </a>
+            </p>
+
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" id="eula-accept" style="width: auto; margin-right: 10px;">
+                    I accept the Minecraft EULA
+                </label>
+            </div>
+
+            <div class="button-group">
+                <button onclick="goToStep(3)">← Back</button>
+                <button id="btn-install" onclick="startInstallation()" disabled>Install Server →</button>
+            </div>
+        </div>
+
+        <!-- Step 5: Installation Progress -->
+        <div id="step-5" class="setup-card hidden">
+            <h2>Installing Server...</h2>
+            <div id="install-progress" style="margin: 20px 0;">
+                <p>Initializing...</p>
+                <div class="loader"></div>
+            </div>
+            <div id="install-log" style="background: rgba(0,0,0,0.5); padding: 15px; border-radius: 8px; font-family: monospace; font-size: 12px; max-height: 300px; overflow-y: auto;">
+            </div>
+        </div>
+
+        <!-- Step 6: Complete -->
+        <div id="step-6" class="setup-card hidden">
+            <h2 style="color: var(--neon-green);">✓ Setup Complete!</h2>
+            <p style="margin: 20px 0; font-size: 16px;">
+                Your Minecraft server has been configured and is ready to start.
+            </p>
+            <div class="alert alert-info">
+                <strong>Dashboard:</strong> <span id="wizard-server-url">http://<server-ip>:8000</span><br>
+                <strong>Minecraft:</strong> <span id="wizard-mc-url"><server-ip>:25565</span><br>
+                <small style="color: #888;">(Use your server's IP address or hostname)</small>
+            </div>
+            <script>
+                // Update URLs with actual server IP
+                fetch('/api/config').then(r => r.json()).then(cfg => {
+                    const serverIp = cfg.server_ip || window.location.hostname || '0.0.0.0';
+                    document.getElementById('wizard-server-url').textContent = `http://${serverIp}:8000`;
+                    document.getElementById('wizard-mc-url').textContent = `${serverIp}:${cfg.mc_port || 25565}`;
+                });
+            </script>
+            <div class="button-group">
+                <button onclick="startServer()">Start Server →</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentStep = 1;
+        let prereqsMet = false;
+
+        function goToStep(step) {
+            // Hide all steps
+            for (let i = 1; i <= 6; i++) {
+                document.getElementById(`step-${i}`).classList.add('hidden');
+            }
+            // Show target step
+            document.getElementById(`step-${step}`).classList.remove('hidden');
+            currentStep = step;
+
+            // Update step indicators if they exist
+            updateStepIndicators();
+        }
+
+        function updateStepIndicators() {
+            // Step indicator logic would go here
+        }
+
+        async function checkPrerequisites() {
+            try {
+                const response = await fetch('/api/health');
+                const data = await response.json();
+                
+                const prereqList = document.getElementById('prereq-list');
+                prereqList.innerHTML = '';
+                
+                const items = [
+                    { name: 'Java 21+', status: data.java ? 'ok' : 'missing' },
+                    { name: 'Python 3.9+', status: data.python ? 'ok' : 'missing' },
+                    { name: 'tmux', status: data.tmux ? 'ok' : 'missing' },
+                    { name: 'curl', status: data.curl ? 'ok' : 'missing' },
+                ];
+
+                let allOk = true;
+                items.forEach(item => {
+                    const div = document.createElement('div');
+                    div.className = 'prereq-item';
+                    div.innerHTML = `
+                        <span>${item.name}</span>
+                        <span class="status-${item.status}">
+                            ${item.status === 'ok' ? '✓ Installed' : '✗ Missing'}
+                        </span>
+                    `;
+                    prereqList.appendChild(div);
+                    if (item.status !== 'ok') allOk = false;
+                });
+
+                prereqsMet = allOk;
+                document.getElementById('btn-step-1').disabled = !allOk;
+                
+                if (!allOk) {
+                    document.getElementById('prereq-actions').classList.remove('hidden');
+                }
+            } catch (e) {
+                console.error('Failed to check prerequisites:', e);
+            }
+        }
+
+        async function installPrerequisites() {
+            const btn = document.querySelector('#prereq-actions button');
+            btn.disabled = true;
+            btn.innerHTML = 'Installing... <span class="loader"></span>';
+            
+            try {
+                const response = await fetch('/api/setup/install-prereqs', { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.success) {
+                    checkPrerequisites();
+                } else {
+                    alert('Failed to install prerequisites: ' + data.error);
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = 'Install Missing Requirements';
+            }
+        }
+
+        async function startInstallation() {
+            goToStep(5);
+            
+            const config = {
+                mc_version: document.getElementById('mc-version').value,
+                loader: document.getElementById('loader').value,
+                server_name: document.getElementById('server-name').value,
+                mc_port: parseInt(document.getElementById('mc-port').value),
+                http_port: parseInt(document.getElementById('http-port').value),
+                rcon_port: parseInt(document.getElementById('rcon-port').value),
+                rcon_pass: document.getElementById('rcon-pass').value,
+                eula: document.getElementById('eula-accept').checked
+            };
+
+            const logDiv = document.getElementById('install-log');
+            
+            try {
+                const response = await fetch('/api/setup/install', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    logDiv.innerHTML += '<p style="color: #00ff88;">✓ Installation complete!</p>';
+                    setTimeout(() => goToStep(6), 1000);
+                } else {
+                    logDiv.innerHTML += `<p style="color: #ff0055;">✗ Error: ${data.error}</p>`;
+                }
+            } catch (e) {
+                logDiv.innerHTML += `<p style="color: #ff0055;">✗ Error: ${e.message}</p>`;
+            }
+        }
+
+        function startServer() {
+            window.location.href = '/';
+        }
+
+        // EULA checkbox handler
+        document.getElementById('eula-accept').addEventListener('change', function() {
+            document.getElementById('btn-install').disabled = !this.checked;
+        });
+
+        // Check prerequisites on load
+        checkPrerequisites();
+    </script>
+</body>
+</html>

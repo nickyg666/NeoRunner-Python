@@ -10,7 +10,7 @@ from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from neorunner.self_heal import (
+from neorunner_pkg.self_heal import (
     preflight_dep_check,
     quarantine_mod,
     load_crash_history,
@@ -29,9 +29,9 @@ class TestSelfHeal:
             "mods_dir": "mods",
         }
         
-        with patch('neorunner.self_heal._run_cmd') as mock_cmd:
+        with patch('neorunner_pkg.self_heal._run_cmd') as mock_cmd:
             mock_cmd.return_value = MagicMock(returncode=0, stdout="", stderr="")
-            with patch('neorunner.self_heal.CWD', new=tempfile.gettempdir()):
+            with patch('neorunner_pkg.self_heal.CWD', new=Path(tempfile.gettempdir())):
                 result = preflight_dep_check(cfg)
         
         assert isinstance(result, dict)
@@ -48,7 +48,7 @@ class TestSelfHeal:
             mod_file = mods_dir / "testmod-1.0.0.jar"
             mod_file.write_text("test content")
             
-            with patch('neorunner.self_heal.CWD', Path(tmpdir)):
+            with patch('neorunner_pkg.self_heal.CWD', Path(tmpdir)):
                 result = quarantine_mod(mods_dir, "testmod-1.0.0.jar", "Test quarantine")
             
             assert result is None or isinstance(result, Path)
@@ -61,7 +61,7 @@ class TestSelfHeal:
             mods_dir.mkdir()
             quarantine_dir.mkdir()
             
-            with patch('neorunner.self_heal.CWD', Path(tmpdir)):
+            with patch('neorunner_pkg.self_heal.CWD', Path(tmpdir)):
                 result = quarantine_mod(mods_dir, "nonexistent.jar", "Test")
             
             assert result is None
@@ -69,7 +69,7 @@ class TestSelfHeal:
     def test_load_crash_history_missing_file(self):
         """Load crash history returns empty dict if file missing."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('neorunner.self_heal.CWD', Path(tmpdir)):
+            with patch('neorunner_pkg.self_heal.CWD', Path(tmpdir)):
                 history = load_crash_history()
             
             assert history == {}
@@ -77,7 +77,7 @@ class TestSelfHeal:
     def test_save_crash_history(self):
         """Save crash history to file."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('neorunner.self_heal.CWD', Path(tmpdir)):
+            with patch('neorunner_pkg.self_heal.CWD', Path(tmpdir)):
                 save_crash_history({"mod1": 5, "mod2": 2})
                 history = load_crash_history()
             

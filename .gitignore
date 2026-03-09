@@ -1,0 +1,45 @@
+# NeoRunner Runtime Files
+
+# Logs
+*.log
+logs/
+live.log*
+
+# Backups
+backups/
+
+# Virtual environment
+neorunner_venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.pyc
+__pycache__/
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+*.egg-info/
+dist/
+build/
+
+# Runtime data
+*.pid
+*.seed
+*.pid.lock
+
+# NeoRunner specific runtime
+config/
+mods/
+clientonly/
+quarantine/
+world/
+libraries/
+crash-reports/
+neorunner.service

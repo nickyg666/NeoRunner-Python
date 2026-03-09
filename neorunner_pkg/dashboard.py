@@ -718,6 +718,35 @@ def logs_stream():
     return Response(generate(), mimetype='text/event-stream')
 
 
+@app.route("/stream/logs")
+def raw_log_stream():
+    """Raw text log stream for external monitoring.
+    
+    Returns plain text, one log line per line - no HTML, no JSON, no SSE.
+    Perfect for curl/wget scripts or monitoring systems.
+    
+    Usage: curl -N http://IP:PORT/stream/logs
+    """
+    import time
+    
+    log_file = CWD / "live.log"
+    
+    def generate():
+        if not log_file.exists():
+            return
+        
+        with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+            f.seek(0, 2)  # Start at end - only new lines
+            while True:
+                line = f.readline()
+                if not line:
+                    time.sleep(0.5)
+                    continue
+                yield line
+    
+    return Response(generate(), mimetype='text/plain')
+
+
 @app.route("/api/download/<mod_name>")
 def api_download_mod(mod_name):
     """Download a mod."""

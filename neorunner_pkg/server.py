@@ -89,18 +89,34 @@ class TmuxServer:
         except Exception as e:
             log_event("LOG_MANAGE", f"Cleanup failed (non-fatal): {e}")
         
+        # Check if preflight was recently run (within last 10 minutes) - skip to prevent bootloop
+        preflight_cache = CWD / ".preflight_cache"
+        skip_preflight = False
         try:
-            log_event("DEBUG", "Starting preflight_dep_check...")
-            preflight_result = preflight_dep_check({
-                "mc_version": self.cfg.mc_version,
-                "loader": self.cfg.loader,
-                "mods_dir": self.cfg.mods_dir,
-            })
-            log_event("DEBUG", f"Preflight returned fetched={preflight_result.get('fetched')}")
-            if preflight_result.get("fetched", 0) > 0:
-                log_event("SERVER_START", f"Pre-flight fetched {preflight_result['fetched']} missing deps")
-        except Exception as e:
-            log_event("SERVER_START", f"Pre-flight check failed (non-fatal): {e}")
+            if preflight_cache.exists():
+                import datetime
+                cache_time = float(preflight_cache.read_text().strip())
+                cache_dt = datetime.datetime.fromtimestamp(cache_time)
+                now = datetime.datetime.now()
+                if (now - cache_dt).total_seconds() < 600:  # 10 min cooldown
+                    skip_preflight = True
+                    log_event("DEBUG", "Skipping preflight - recently ran")
+        except Exception:
+            pass
+        
+        if not skip_preflight:
+            try:
+                log_event("DEBUG", "Starting preflight_dep_check...")
+                preflight_result = preflight_dep_check({
+                    "mc_version": self.cfg.mc_version,
+                    "loader": self.cfg.loader,
+                    "mods_dir": self.cfg.mods_dir,
+                })
+                log_event("DEBUG", f"Preflight returned fetched={preflight_result.get('fetched')}")
+                if preflight_result.get("fetched", 0) > 0:
+                    log_event("SERVER_START", f"Pre-flight fetched {preflight_result['fetched']} missing deps")
+            except Exception as e:
+                log_event("SERVER_START", f"Pre-flight check failed (non-fatal): {e}")
         
         if self.is_running():
             log_event("SERVER_START", "Killing existing tmux session first")
@@ -180,13 +196,12 @@ class TmuxServer:
         log_event("MONITOR", "Server monitor stopped")
     
     def _analyze_crash(self) -> None:
-        """Analyze crash log and attempt self-healing."""
+        """Analyze crash log and attempt self-healing - with timestamp verification."""
         crash_history = load_crash_history()
         
         new_log = self._get_recent_log(500)
         
-        # Check for crash indicators FIRST - these override any "Stopping server" messages
-        # because old crash logs may contain "Stopping server" from previous runs
+        # Check for crash indicators - but ONLY if they're RECENT (last 5 min)
         crash_indicators = [
             "fatal",
             "crash",
@@ -199,27 +214,24 @@ class TmuxServer:
             "loading errors encountered",
         ]
         
-        has_crash = any(indicator in new_log.lower() for indicator in crash_indicators)
+        # Check if any crash indicators are actually recent
+        has_recent_crash = False
+        for indicator in crash_indicators:
+            if self._is_recent_crash(indicator):
+                has_recent_crash = True
+                break
         
-        if has_crash:
-            # Crash indicators found - this is a crash, not a clean shutdown
-            # Continue with crash analysis below
+        if has_recent_crash:
+            # Recent crash found - continue with analysis
             pass
         elif "Stopping server" in new_log or "Stopping the server" in new_log:
-            # No crash indicators AND "Stopping server" found - likely a clean shutdown
+            # No recent crash AND "Stopping server" found - likely a clean shutdown
             log_event("SERVER_STOPPED", "Clean shutdown detected")
             return
-        
-        if not has_crash:
-            # No crash indicators found - might be a clean stop
-            # But also check if there were any errors during startup
-            log_lower = new_log.lower()
-            if ("currently" in log_lower and "not installed" in log_lower) or \
-               ("requires" in log_lower and "not installed" in log_lower) or \
-               ("mod" in log_lower and "not installed" in log_lower and "requires" in log_lower):
-                # This is a startup failure, not a clean shutdown
-                has_crash = True
-                log_event("CRASH_DETECT", "Startup failure detected (missing mods)")
+        else:
+            # No recent crash indicators - this might be stale log data
+            log_event("SERVER_STOPPED", "No recent crash detected - possible stale log")
+            return
         
         crash_info = self.loader.detect_crash_reason(new_log)
         crash_type = crash_info.get("type", "unknown")
@@ -401,16 +413,45 @@ class TmuxServer:
                 quarantine_mod(mods_dir, culprit, "Version mismatch with server")
     
     def _get_recent_log(self, lines: int = 100) -> str:
-        """Get recent log output."""
+        """Get recent log output - only from live.log, verify timestamps are recent."""
         if not self.log_file.exists():
             return ""
         
         try:
             with open(self.log_file, "r") as f:
                 all_lines = f.readlines()
+                # Only look at the last N lines from live.log (not rotated logs)
                 return "".join(all_lines[-lines:])
         except Exception:
             return ""
+    
+    def _is_recent_crash(self, crash_indicator: str) -> bool:
+        """Check if a crash indicator is from a recent run (last 5 minutes)."""
+        import datetime
+        try:
+            with open(self.log_file, "r") as f:
+                lines = f.readlines()
+                recent_lines = lines[-500:]  # Last 500 lines
+                
+            # Find the crash indicator
+            for line in reversed(recent_lines):
+                if crash_indicator.lower() in line.lower():
+                    # Try to extract timestamp from line
+                    # Format: 2026-03-09 20:11:39 |
+                    import re
+                    ts_match = re.match(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})', line)
+                    if ts_match:
+                        ts_str = ts_match.group(1)
+                        ts = datetime.datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+                        now = datetime.datetime.now()
+                        # Only consider crashes within last 5 minutes
+                        if (now - ts).total_seconds() < 300:
+                            return True
+                    # If no timestamp found but crash indicator exists, be conservative
+                    return True
+            return False
+        except Exception:
+            return False
     
     def is_running(self) -> bool:
         """Check if tmux session exists."""

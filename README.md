@@ -1,51 +1,101 @@
-# NeoRunner
+As always, big shout-out to 
+
+# My wife Sage, who understands that after I get home from work all I really want to do is more work. I love her more than trees love carbon dioxide.
+
+# To my son, Lorenzo, who is the whole reason I would ever touch minecraft in the first place, let alone get this involved with it.
+
+## NeoRunner-Python
+Built for a linux host, this (AI assist developed) program will download/run the latest neoforged server (others supported/untested/experimental) and try to sync mods it finds to the client side to sidestep modloader swaps and client/server upgrades. This has really evolved way past the need into a want. 
+[![v2.3.0-clean Preview](https://raw.githubusercontent.com/nickyg666/NeoRunner-Python/master/neorunner.jpg)](https://x0.at/RSqi.mp4)
+I am a huge fan of the automodpack mod for what it's worth;
+
+### shout-out to skidam for making that mod and giving me the idea. 
+
+This is nowhere near complete. It is a labor of love. I typically focus on good docs after everything works and I'm in a feature freeze, but I keep spiraling past any stopping point. the project is now fully working for a self-healing neoforge/mc 1.21.11 server.
+<#!---- AI GENERATED CHANGELOG BELOW - MAY BE ERRONEOUS I DO NOT HAVE ENOUGH TIME TO MANAGE THIS PROJECT AS MUCH AS I WOULD LIKE ----!#>
 
 A comprehensive Python platform for managing self-hosted Minecraft modded servers with automated mod management, web dashboard, crash recovery, and client synchronization.
 
 ## Features
 
+
 ### Server Management
+
 - **Multi-Loader Support**: NeoForge, Forge, and Fabric
+
 - **Tmux-Based Process Management**: Server runs in tmux session with full output capture
+
 - **Crash Recovery**: Automatic restart with configurable limits (5 attempts per crash loop, 15 total)
+
 - **Preflight Dependency Checks**: Auto-fetch missing mod dependencies on startup
+
 - **Java Version Detection**: Automatic Java version management per loader
 
+
 ### Web Dashboard
+
 - **Real-Time Server Status**: Running state, player count, uptime
+
 - **Mod Management**: Upload, delete, organize mods
+
 - **World Management**: Scan, switch, backup worlds
+
 - **Configuration UI**: Update ports, memory, mod settings
+
 - **Live Log Streaming**: Real-time server log viewer
+
 - **Network Channel Analysis**: Detect client/server mod mismatches
 
+
 ### Mod Management
+
 - **Modrinth Integration**: Search and download mods via Modrinth API
+
 - **CurseForge Integration**: Search via API or Selenium scraping
+
 - **Ferium Integration**: Profile-based mod management with auto-updates
+
 - **Mixin Conflict Resolution**: Detect and resolve mod mixin conflicts
+
 - **Auto-Patching**: Patch mods for compatibility
+
 - **Client/Server Classification**: Sort mods into `clientonly/` or `mods/` folders
+
 - **Dependency Resolution**: Auto-fetch required dependencies
 
 ### Client Synchronization
+
 - **HTTP Mod Hosting**: Serve mods to clients via built-in HTTP server
+
 - **Manifest Generation**: JSON manifest of all server mods
+
 - **Install Scripts**: Batch/PowerShell scripts for one-click client install
+
 - **Client-Only Mod Handling**: Automatic client-side mod detection
 
+
 ### Logging & Diagnostics
+
 - **Log Rotation**: Automatic rotation at configurable size
+
 - **Retention Policies**: Configurable crash report and log retention (default 30 days)
+
 - **Crash Log Analysis**: Parse client crash logs to identify issues
+
 - **Network Channel Monitoring**: Real-time detection of mod mismatch at connection
 
+
 ### Backup & Restore
+
 - **World Backups**: Compressed world backups with timestamp naming
+
 - **Backup Rotation**: Configurable backup retention
+
 - **Restore Functionality**: One-click world restore
 
+
 ## Architecture
+
 
 ```
 neorunner/

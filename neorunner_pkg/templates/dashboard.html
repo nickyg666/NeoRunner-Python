@@ -1860,10 +1860,16 @@
         <script>
             // Copy to clipboard with fallback
             function copyToClipboard(text) {
-                if (navigator.clipboard) {
+                if (!text || text === 'Loading...') {
+                    showAlert('Command not loaded yet', 'error');
+                    return;
+                }
+                // Try clipboard API first
+                if (navigator.clipboard && navigator.clipboard.writeText) {
                     navigator.clipboard.writeText(text).then(() => {
                         showAlert('Copied to clipboard!', 'success');
-                    }).catch(() => {
+                    }).catch(function(err) {
+                        console.error('Clipboard API failed:', err);
                         fallbackCopy(text);
                     });
                 } else {

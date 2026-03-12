@@ -842,6 +842,8 @@ def generate_bat_script(cfg: ServerConfig) -> str:
     
     return '''@echo off
 REM install-mods.bat - NeoRunner Client Mod Sync Script
+REM Unblock this file to remove Mark of the Web
+powershell -Command "Unblock-File -Path '%~f0' -ErrorAction SilentlyContinue"
 setlocal enabledelayedexpansion
 
 set "SERVER_HOST=''' + hostname + '''"

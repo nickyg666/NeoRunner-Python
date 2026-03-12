@@ -5,24 +5,38 @@ As always, big shout-out to
 # To my son, Lorenzo, who is the whole reason I would ever touch minecraft in the first place, let alone get this involved with it.
 
 ## NeoRunner-Python
-Built for a linux host, this (vibe-coded) program will download/run the latest neoforged server (others supported/untested/experimental) and try to sync mods it finds into client side to sidestep modloader swaps and client/server upgrades. I am a huge fan of the automodpack mod for what it's worth, and this is nowhere near complete. it does kind of work but some deps may be missing. some documentation may be erroneous, it is mostly ai driven, and I did not check it extremely thoroughly for accuracy. I typically focus on good docs after everything works and I'm in a feature freeze, but I keep spiraling past any stopping point. the project is now fully working for neoforge/mc 1.21.11.
-- Added EC2/amazonlinux compatibility
-- fixed required dependency fetching for mods
-- remove dead things that don't make sense anymore / from other projects
-- manually fix not downloading ANY launchers from fresh install (claude ruined in refactor)
+Built for a linux host, this (AI assist developed) program will download/run the latest neoforged server (others supported/untested/experimental) and try to sync mods it finds to the client side to sidestep modloader swaps and client/server upgrades. This has really evolved way past the need into a want. 
 
-  
-- ## Quickstart
-- ```curl -fsSL https://raw.githubusercontent.com/nickyg666/NeoRunner-Python/master/install.sh | sudo bash```
+I am a huge fan of the automodpack mod for what it's worth;
 
 ### shout-out to skidam for making that mod and giving me the idea. 
 
+This is nowhere near complete. It is a labor of love. I typically focus on good docs after everything works and I'm in a feature freeze, but I keep spiraling past any stopping point. the project is now fully working for a self-healing neoforge/mc 1.21.11 server.
+- Added EC2/amazonlinux compatibility
+- created python package so neorunner is pip installable
+- check v2.3.0debug branch for latest!
+- fixed required dependency fetching for mods
+- manually fix not downloading ANY launchers from fresh install (claude ruined in refactor)
+- fixed a ton of things, sorry for not having more comprehensive documentation at this point - I have a lot going on but if you have interest in the project; star my repo or reach out and that will increase my drive to properly document for anyone but me
+- mod sync script to push mods to client
+- world management / switching with world version checking / verification
+- auto-quarantine troublesome mods or move to clientonly folder if they have client side classes that could/did cause a server crash
+- auto-healing to keep the server running, even after you add 200 or 400 random mods.
+- interop flag: if two or more mods want another (they share optional dependencies) you will get an event notification
+- so many other cool features aimed at full automation!
+- flask + waitress for web dashboard: pretty fully featured at this point!
+- themes, just for fun!
+- client crash log parser/problem solver
+- individual mod install
+- see the preview video!
+  
+- ## Quickstart
+-#cannot confirm working right now ```curl -fsSL https://raw.githubusercontent.com/nickyg666/NeoRunner-Python/master/install.sh | sudo bash```
+
 This has spiraled into a whole expansive hosting and mod management console, dependent on Ferium to manage downloads, uses a stealth browser to check curseforge, and modrinths super cool API that's free to use for the modrinth side. Should give you top 100 non-lib/api downloads from either suppier by default, but you can sort but other criteria in the settings.
-there are many more features I didn't mention, check it out!
+I also have integrated mod fetching with a custom curseforge scraper
 
-### I burned up all my copilot tokens on this in a day, may slowly edit until they replenish next month. You can sponsor the repo if you like what I'm doing and are feeling generous. $10 gets me a month of anthropic's claude + GitHub copilot in my favorite program: opencode.ai editor! I'm still using it, just with an arguably less skilled agent (GLM-5) with free tier.
-
-Here is the idea behind the project:
+# Here is the idea behind the project:
 
 run script, it handles a lot of stuff so you don't have to. goal: move from minecraft version to version, modloader agnostic and able to grab whatever mods you had before that got updated. Offer install scripts to pull latest mods from server to client. Web UI just for fun, helps reach more users that way, and helps me be lazier with my leisure activities/ server administration at home.
 

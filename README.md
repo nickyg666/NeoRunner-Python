@@ -6,7 +6,8 @@ As always, big shout-out to
 
 ## NeoRunner-Python
 Built for a linux host, this (AI assist developed) program will download/run the latest neoforged server (others supported/untested/experimental) and try to sync mods it finds to the client side to sidestep modloader swaps and client/server upgrades. This has really evolved way past the need into a want. 
-[![Watch the video](https://raw.githubusercontent.com/nickyg666/NeoRunner-Python/master/neorunner.mp4)]
+[![Watch the video](https://raw.githubusercontent.com/nickyg666/NeoRunner-Python/master/neorunner.jpg)]
+(https://raw.githubusercontent.com/nickyg666/NeoRunner-Python/master/neorunner.mp4)
 I am a huge fan of the automodpack mod for what it's worth;
 
 ### shout-out to skidam for making that mod and giving me the idea. 

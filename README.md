@@ -53,14 +53,11 @@ visit server portal, manage mods and get client script to download latest mods -
 
 
 
-## I vibe coded this for max time efficiency in getting started, then manually tweaked it to actually work. Used ChatGPT, Claude haiku and Claude opus 4.6, it did not enjoy this task as much as I did not enjoy pointing out all of their errors.
 
-## I then had to totally rewrite it due to adding too many features, changing too much four haiku to deal with. then I had to move to opus which is credit intensive!
 workflow is generally -> workshop ideas on chatGPT/any free LLM -> turn into starter script -> manually improve -> development enters support mode (we are here right now - 02.16.2026) || feed to more advanced coding AI like claude haiku 4.5 + github copilot + opencode.ai ide (here right now! 2/18/2026) -> finished product (hopefully 2/18?) I've graduated off to anthropic's Opus 4.6, because my tasking need is outgrowing AI pretty quickly; I'll have to get better at coding fast - but I can't type 400WPM like an LLM can!
 
 This workflow maximizes the bang for my buck (or so I hope) on the copilot token usage - I don't waste any precious paid tokens on prototyping!
 
-<!--- CLAUDE, YOU CAN DO YOUR INFO STUFF DOWN HERE, DON'T REMIX MINE -----!>
 Begin AI summary
 # NeoRunner
 

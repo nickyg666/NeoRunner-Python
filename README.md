@@ -15,7 +15,13 @@ This is nowhere near complete. It is a labor of love. I typically focus on good 
 <#!---- AI GENERATED CHANGELOG BELOW - MAY BE ERRONEOUS I DO NOT HAVE ENOUGH TIME TO MANAGE THIS PROJECT AS MUCH AS I WOULD LIKE ----!#>
 
 A comprehensive Python platform for managing self-hosted Minecraft modded servers with automated mod management, web dashboard, crash recovery, and client synchronization.
+## Quick fixes I need to do when I have time:
+ * various CSS things like the tabbed view's scrollbox size
 
+## ROADMAP
+ * test/implement fabric/forge loaders
+ * full features test (please help!) + fix
+   
 ## Features
 
 

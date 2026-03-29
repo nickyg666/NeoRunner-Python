@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # NeoRunner Quick Installer
-# Usage: curl -sL https://raw.githubusercontent.com/neorunner/neorunner/main/install.sh | bash
+# Usage: curl -sL https://raw.githubusercontent.com/nickyg666/NeoRunner-Python/main/install.sh | bash
 #
 
 set -e
@@ -45,12 +45,12 @@ install_pkg() {
         sudo pacman -Sy --noconfirm "$@"
     else
         echo -e "${RED}Unsupported package manager. Please install manually:${NC}"
-        echo "  - tmux, curl, wget, rsync, unzip, zip, openjdk-21"
+        echo "  - tmux, curl, wget, rsync, unzip, zip, openjdk-21, python3-venv"
         return 1
     fi
 }
 
-SYSTEM_DEPS="tmux curl wget rsync unzip zip"
+SYSTEM_DEPS="tmux curl wget rsync unzip zip python3-venv python3-pip"
 if ! command -v java &> /dev/null; then
     SYSTEM_DEPS="$SYSTEM_DEPS openjdk-21-jre-headless"
 fi
@@ -71,44 +71,80 @@ echo -e "${GREEN}[3/6] Checking Python...${NC}"
 if command -v python3 &> /dev/null; then
     PYTHON_VERSION=$(python3 --version | cut -d' ' -f2 | cut -d'.' -f1-2)
     echo "  Python $PYTHON_VERSION detected"
+    
+    # Ensure pip is available
+    if ! command -v pip3 &> /dev/null && ! python3 -m pip --version &> /dev/null; then
+        echo "  Installing pip..."
+        install_pkg python3-pip
+    fi
 else
     echo -e "${RED}  ✗ Python 3 not found. Please install Python 3.9+.${NC}"
     exit 1
 fi
 
-# Create virtual environment
-echo -e "${GREEN}[4/6] Setting up...${NC}"
+# Get latest release tag
+echo -e "${GREEN}[4/6] Fetching latest release...${NC}"
 
+REPO_OWNER="nickyg666"
+REPO_NAME="NeoRunner-Python"
+
+# Fetch latest release tag
+LATEST_TAG=$(curl -s "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest" | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
+if [ -z "$LATEST_TAG" ]; then
+    LATEST_TAG="v2.3.0"
+fi
+echo "  Latest version: $LATEST_TAG"
+
+# Create install directory
 INSTALL_DIR="${INSTALL_DIR:-$HOME/neorunner}"
 echo "  Install directory: $INSTALL_DIR"
 
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
-# Clone repository
-REPO_URL="https://github.com/neorunner/neorunner.git"
-if [ -d .git ]; then
-    echo "  Updating..."
-    git pull origin main 2>/dev/null || true
+# Clone repository at specific tag (no checkout needed, just extract)
+REPO_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}.git"
+
+if [ -d ".git" ]; then
+    echo "  Updating to latest..."
+    git fetch --tags
+    git checkout "$LATEST_TAG" 2>/dev/null || git checkout main 2>/dev/null || true
 else
-    echo "  Cloning..."
-    git clone --depth 1 "$REPO_URL" . 2>/dev/null || {
-        echo -e "${RED}Failed to clone. Check network connection.${NC}"
-        exit 1
+    echo "  Cloning NeoRunner $LATEST_TAG..."
+    # Clone at specific tag
+    git clone --depth 1 --branch "$LATEST_TAG" "$REPO_URL" . 2>&1 || {
+        echo -e "${RED}Failed to clone. Trying main branch...${NC}"
+        git clone --depth 1 -b main "$REPO_URL" . 2>&1 || {
+            echo -e "${RED}Failed to clone. Check network connection.${NC}"
+            exit 1
+        }
     }
 fi
 
+# Verify critical files exist
+if [ ! -f "setup.py" ] && [ ! -f "neorunner_pkg/__init__.py" ]; then
+    echo -e "${RED}Repository contents invalid.${NC}"
+    exit 1
+fi
+
 # Create virtual environment
+echo "  Creating Python virtual environment..."
 if [ ! -d "neorunner_venv" ]; then
     python3 -m venv neorunner_venv
 fi
 
+# Activate and install
+echo "  Installing Python dependencies..."
 source neorunner_venv/bin/activate
-pip install --upgrade pip -q
-pip install -e . -q
+
+# Upgrade pip
+pip install --upgrade pip
+
+# Install the package
+pip install -e .
 
 # Create directories
-mkdir -p mods clientonly config backups crash-reports logs world
+mkdir -p mods clientonly config backups crash-reports logs world libraries loaders
 
 # Generate config
 echo -e "${GREEN}[5/6] Configuration...${NC}"
@@ -137,7 +173,7 @@ echo -e "${GREEN}[6/6] Complete!${NC}"
 
 echo ""
 echo -e "${GREEN}════════════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}  NeoRunner v2.3.0 installed!${NC}"
+echo -e "${GREEN}  NeoRunner $LATEST_TAG installed!${NC}"
 echo -e "${GREEN}════════════════════════════════════════════════════════════${NC}"
 echo ""
 echo "  To start:"

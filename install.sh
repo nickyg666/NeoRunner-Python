@@ -16,7 +16,7 @@ NC='\033[0m'
 echo -e "${BLUE}"
 echo "╔════════════════════════════════════════════════════════════╗"
 echo "║           NeoRunner v2.3.0 Installer                      ║"
-echo "║        Minecraft Modded Server Manager                      ║"
+echo "║        Minecraft Modded Server Manager                    ║"
 echo "╚════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
@@ -27,11 +27,11 @@ if [ -f /etc/os-release ]; then
     OS=$ID
 fi
 
-echo -e "${GREEN}[1/6] Detecting system...${NC}"
+echo -e "${GREEN}[1/7] Detecting system...${NC}"
 echo "  OS: $OS"
 
 # Install system dependencies
-echo -e "${GREEN}[2/6] Installing system dependencies...${NC}"
+echo -e "${GREEN}[2/7] Installing system dependencies...${NC}"
 
 install_pkg() {
     if command -v apt-get &> /dev/null; then
@@ -45,15 +45,20 @@ install_pkg() {
         sudo pacman -Sy --noconfirm "$@"
     else
         echo -e "${RED}Unsupported package manager. Please install manually:${NC}"
-        echo "  - tmux, curl, wget, rsync, unzip, zip, openjdk-21, python3-venv"
+        echo "  See: https://github.com/nickyg666/NeoRunner-Python#requirements"
         return 1
     fi
 }
 
-SYSTEM_DEPS="tmux curl wget rsync unzip zip python3-venv python3-pip"
+# Core system dependencies
+SYSTEM_DEPS="tmux curl wget rsync unzip zip python3 python3-venv python3-pip git"
+
+# Add Java if not present
 if ! command -v java &> /dev/null; then
     SYSTEM_DEPS="$SYSTEM_DEPS openjdk-21-jre-headless"
 fi
+
+# Install system packages
 install_pkg $SYSTEM_DEPS
 
 # Check Java
@@ -67,7 +72,7 @@ if command -v java &> /dev/null; then
 fi
 
 # Check Python
-echo -e "${GREEN}[3/6] Checking Python...${NC}"
+echo -e "${GREEN}[3/7] Checking Python...${NC}"
 if command -v python3 &> /dev/null; then
     PYTHON_VERSION=$(python3 --version | cut -d' ' -f2 | cut -d'.' -f1-2)
     echo "  Python $PYTHON_VERSION detected"
@@ -83,12 +88,11 @@ else
 fi
 
 # Get latest release tag
-echo -e "${GREEN}[4/6] Fetching latest release...${NC}"
+echo -e "${GREEN}[4/7] Fetching latest release...${NC}"
 
 REPO_OWNER="nickyg666"
 REPO_NAME="NeoRunner-Python"
 
-# Fetch latest release tag
 LATEST_TAG=$(curl -s "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest" | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
 if [ -z "$LATEST_TAG" ]; then
     LATEST_TAG="v2.3.0"
@@ -102,7 +106,7 @@ echo "  Install directory: $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
-# Clone repository at specific tag (no checkout needed, just extract)
+# Clone repository
 REPO_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}.git"
 
 if [ -d ".git" ]; then
@@ -111,9 +115,8 @@ if [ -d ".git" ]; then
     git checkout "$LATEST_TAG" 2>/dev/null || git checkout main 2>/dev/null || true
 else
     echo "  Cloning NeoRunner $LATEST_TAG..."
-    # Clone at specific tag
     git clone --depth 1 --branch "$LATEST_TAG" "$REPO_URL" . 2>&1 || {
-        echo -e "${RED}Failed to clone. Trying main branch...${NC}"
+        echo -e "${YELLOW}  Trying main branch...${NC}"
         git clone --depth 1 -b main "$REPO_URL" . 2>&1 || {
             echo -e "${RED}Failed to clone. Check network connection.${NC}"
             exit 1
@@ -128,27 +131,35 @@ if [ ! -f "setup.py" ] && [ ! -f "neorunner_pkg/__init__.py" ]; then
 fi
 
 # Create virtual environment
-echo "  Creating Python virtual environment..."
+echo -e "${GREEN}[5/7] Setting up Python environment...${NC}"
+
 if [ ! -d "neorunner_venv" ]; then
+    echo "  Creating virtual environment..."
     python3 -m venv neorunner_venv
 fi
 
-# Activate and install
-echo "  Installing Python dependencies..."
+# Activate
 source neorunner_venv/bin/activate
 
 # Upgrade pip
+echo "  Upgrading pip..."
 pip install --upgrade pip
 
-# Install the package
+# Install Python dependencies
+echo "  Installing Python dependencies..."
 pip install -e .
 
+# Try to install playwright (optional - for CurseForge scraping)
+if pip install playwright &>/dev/null; then
+    echo "  Installing Playwright browsers..."
+    playwright install chromium &>/dev/null || true
+fi
+
 # Create directories
+echo -e "${GREEN}[6/7] Creating server directories...${NC}"
 mkdir -p mods clientonly config backups crash-reports logs world libraries loaders
 
 # Generate config
-echo -e "${GREEN}[5/6] Configuration...${NC}"
-
 if [ ! -f config.json ]; then
     cat > config.json << 'EOF'
 {
@@ -169,7 +180,7 @@ if [ ! -f eula.txt ]; then
     echo "  ✓ Created eula.txt"
 fi
 
-echo -e "${GREEN}[6/6] Complete!${NC}"
+echo -e "${GREEN}[7/7] Complete!${NC}"
 
 echo ""
 echo -e "${GREEN}════════════════════════════════════════════════════════════${NC}"

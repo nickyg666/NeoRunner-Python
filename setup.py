@@ -32,6 +32,8 @@ setup(
         "apscheduler>=3.9.0",
         "tomli>=2.0.0; python_version<'3.11'",
         "waitress>=2.0.0",
+        "beautifulsoup4>=4.9.0",
+        "lxml>=4.6.0",
     ],
     extras_require={
         "full": ["playwright>=1.30.0", "playwright-stealth>=1.0.0"],

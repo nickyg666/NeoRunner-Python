@@ -104,3 +104,45 @@ FORCE_CLIENT_ONLY_MODS = {
 MAX_RESTART_ATTEMPTS = 5
 MAX_TOTAL_RESTARTS = 15
 CRASH_COOLDOWN_SECONDS = 10
+
+# Default version if unable to fetch
+DEFAULT_MC_VERSION = "1.21.11"
+
+
+def get_latest_minecraft_version() -> str:
+    """Fetch latest Minecraft version from Mojang."""
+    import json
+    import urllib.request
+    
+    try:
+        url = "https://launchermeta.mojang.com/mc/game/version_manifest.json"
+        req = urllib.request.Request(url, headers={"User-Agent": "NeoRunner/2.3.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+            # Get latest release version
+            return data.get("latest", {}).get("release", DEFAULT_MC_VERSION)
+    except Exception:
+        return DEFAULT_MC_VERSION
+
+
+def get_latest_minecraft_versions() -> dict:
+    """Fetch all available Minecraft versions."""
+    import json
+    import urllib.request
+    
+    try:
+        url = "https://launchermeta.mojang.com/mc/game/version_manifest.json"
+        req = urllib.request.Request(url, headers={"User-Agent": "NeoRunner/2.3.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+            return {
+                "latest_release": data.get("latest", {}).get("release"),
+                "latest_snapshot": data.get("latest", {}).get("snapshot"),
+                "versions": [v["id"] for v in data.get("versions", [])]
+            }
+    except Exception:
+        return {
+            "latest_release": DEFAULT_MC_VERSION,
+            "latest_snapshot": DEFAULT_MC_VERSION,
+            "versions": [DEFAULT_MC_VERSION]
+        }

@@ -6,21 +6,20 @@
 
 set -e
 
-# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
 echo -e "${BLUE}"
-echo "╔════════════════════════════════════════════════════════════╗"
-echo "║           NeoRunner v2.3.0 Installer                      ║"
-echo "║        Minecraft Modded Server Manager                    ║"
+echo "╔════════════════════════════════════════════════════════════════════╗"
+echo "║           NeoRunner v2.3.0 Installer                ║"
+echo "║        Minecraft Modded Server Manager              ║"
 echo "╚════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
-# Detect OS
 OS=""
 if [ -f /etc/os-release ]; then
     . /etc/os-release
@@ -29,9 +28,6 @@ fi
 
 echo -e "${GREEN}[1/7] Detecting system...${NC}"
 echo "  OS: $OS"
-
-# Install system dependencies
-echo -e "${GREEN}[2/7] Installing system dependencies...${NC}"
 
 install_pkg() {
     if command -v apt-get &> /dev/null; then
@@ -44,143 +40,101 @@ install_pkg() {
     elif command -v pacman &> /dev/null; then
         sudo pacman -Sy --noconfirm "$@"
     else
-        echo -e "${RED}Unsupported package manager. Please install manually:${NC}"
-        echo "  See: https://github.com/nickyg666/NeoRunner-Python#requirements"
+        echo -e "${RED}Unsupported package manager.${NC}"
         return 1
     fi
 }
 
-# Core system dependencies
 SYSTEM_DEPS="tmux curl wget rsync unzip zip python3 python3-venv python3-pip git"
-
-# Add Java if not present
 if ! command -v java &> /dev/null; then
     SYSTEM_DEPS="$SYSTEM_DEPS openjdk-21-jre-headless"
 fi
 
-# Install system packages
+echo -e "${GREEN}[2/7] Installing system dependencies...${NC}"
 install_pkg $SYSTEM_DEPS
 
-# Check Java
 if command -v java &> /dev/null; then
     JAVA_VERSION=$(java -version 2>&1 | head -1 | cut -d'"' -f2 | cut -d'.' -f1)
     if [ "$JAVA_VERSION" -ge 21 ]; then
-        echo -e "  ${GREEN}✓ Java 21+ detected${NC}"
+        echo -e "  ${GREEN}✓ Java $JAVA_VERSION detected${NC}"
     else
-        echo -e "${YELLOW}  ⚠ Java $JAVA_VERSION detected, Java 21 recommended${NC}"
+        echo -e "${YELLOW}  ⚠ Java $JAVA_VERSION detected, 21+ recommended${NC}"
     fi
 fi
 
-# Check Python
 echo -e "${GREEN}[3/7] Checking Python...${NC}"
-if command -v python3 &> /dev/null; then
-    PYTHON_VERSION=$(python3 --version | cut -d' ' -f2 | cut -d'.' -f1-2)
-    echo "  Python $PYTHON_VERSION detected"
-    
-    # Ensure pip is available
-    if ! command -v pip3 &> /dev/null && ! python3 -m pip --version &> /dev/null; then
-        echo "  Installing pip..."
-        install_pkg python3-pip
-    fi
-else
-    echo -e "${RED}  ✗ Python 3 not found. Please install Python 3.9+.${NC}"
+if ! command -v python3 &> /dev/null; then
+    echo -e "${RED}  ✗ Python 3 not found${NC}"
     exit 1
 fi
+PYTHON_VERSION=$(python3 --version | cut -d' ' -f2)
+echo "  Python $PYTHON_VERSION"
 
-# Get latest release tag
 echo -e "${GREEN}[4/7] Fetching latest release...${NC}"
-
 REPO_OWNER="nickyg666"
 REPO_NAME="NeoRunner-Python"
-
 LATEST_TAG=$(curl -s "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest" | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
-if [ -z "$LATEST_TAG" ]; then
-    LATEST_TAG="v2.3.0"
-fi
-echo "  Latest version: $LATEST_TAG"
+LATEST_TAG=${LATEST_TAG:-v2.3.0}
+echo "  Version: $LATEST_TAG"
 
-# Create install directory
 INSTALL_DIR="${INSTALL_DIR:-$HOME/neorunner}"
-echo "  Install directory: $INSTALL_DIR"
-
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
-# Clone repository
-REPO_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}.git"
+echo -e "${GREEN}[5/7] Installing Python package...${NC}"
+echo "  Directory: $INSTALL_DIR"
 
 if [ -d ".git" ]; then
-    echo "  Updating to latest..."
+    echo "  Updating..."
     git fetch --tags
     git checkout "$LATEST_TAG" 2>/dev/null || git checkout main 2>/dev/null || true
 else
-    echo "  Cloning NeoRunner $LATEST_TAG..."
-    git clone --depth 1 --branch "$LATEST_TAG" "$REPO_URL" . 2>&1 || {
-        echo -e "${YELLOW}  Trying main branch...${NC}"
-        git clone --depth 1 -b main "$REPO_URL" . 2>&1 || {
-            echo -e "${RED}Failed to clone. Check network connection.${NC}"
+    echo "  Cloning..."
+    git clone --depth 1 --branch "$LATEST_TAG" "https://github.com/${REPO_OWNER}/${REPO_NAME}.git" . 2>&1 || {
+        git clone --depth 1 -b main "https://github.com/${REPO_OWNER}/${REPO_NAME}.git" . 2>&1 || {
+            echo -e "${RED}Failed to clone${NC}"
             exit 1
         }
     }
 fi
 
-# Verify critical files exist
-if [ ! -f "setup.py" ] && [ ! -f "neorunner_pkg/__init__.py" ]; then
-    echo -e "${RED}Repository contents invalid.${NC}"
-    exit 1
-fi
-
-# Create virtual environment
-echo -e "${GREEN}[5/7] Setting up Python environment...${NC}"
-
+echo "  Creating virtual environment..."
 if [ ! -d "neorunner_venv" ]; then
-    echo "  Creating virtual environment..."
     python3 -m venv neorunner_venv
 fi
 
-# Activate
 source neorunner_venv/bin/activate
-
-# Upgrade pip
-echo "  Upgrading pip..."
 pip install --upgrade pip
-
-# Install Python dependencies
-echo "  Installing Python dependencies..."
+echo "  Installing neorunner..."
 pip install -e .
 
-# Try to install playwright (optional - for CurseForge scraping)
-if pip install playwright &>/dev/null; then
-    echo "  Installing Playwright browsers..."
+# Try playwright (optional)
+if pip install playwright &>/dev/null 2>&1; then
     playwright install chromium &>/dev/null || true
 fi
 
-# Create directories
-echo -e "${GREEN}[6/7] Creating server directories...${NC}"
+echo -e "${GREEN}[6/7] Creating directories...${NC}"
 mkdir -p mods clientonly config backups crash-reports logs world libraries loaders
-
-# Generate config
-if [ ! -f config.json ]; then
-    cat > config.json << 'EOF'
-{
-  "mc_version": "1.21.11",
-  "loader": "neoforge",
-  "mc_port": 25565,
-  "http_port": 8000,
-  "rcon_port": 25576,
-  "xmx": "4G",
-  "xms": "2G"
-}
-EOF
-    echo "  ✓ Created config.json"
-fi
 
 if [ ! -f eula.txt ]; then
     echo "eula=true" > eula.txt
-    echo "  ✓ Created eula.txt"
+    echo "  ✓ eula.txt"
 fi
 
-echo -e "${GREEN}[7/7] Complete!${NC}"
+echo -e "${GREEN}[7/7] Running NeoRunner installer...${NC}"
+
+# Check if config exists, if not create it with latest version
+if [ ! -f config.json ]; then
+    echo "  Creating config with latest MC version..."
+    neorunner init --latest --loader neoforge || true
+fi
+
+# Run full installer
+echo "  Running server installer..."
+neorunner install || {
+    echo -e "${YELLOW}  Installer needs interactive mode. Running neorunner setup...${NC}"
+    neorunner setup || echo -e "${YELLOW}  Setup incomplete - run 'neorunner install' manually${NC}"
+}
 
 echo ""
 echo -e "${GREEN}════════════════════════════════════════════════════════════${NC}"

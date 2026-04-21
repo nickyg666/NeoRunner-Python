@@ -239,7 +239,7 @@ def cmd_setup(args):
 def cmd_init(args):
     """Initialize default config."""
     from .config import save_cfg, ensure_config, ServerConfig
-    from .constants import CWD
+    from .constants import CWD, get_latest_minecraft_version
     
     config_path = CWD / "config.json"
     
@@ -248,8 +248,18 @@ def cmd_init(args):
         print("Use --force to overwrite")
         return 1
     
+    # Determine MC version
+    if args.latest:
+        print("Fetching latest Minecraft version...")
+        mc_version = get_latest_minecraft_version()
+        print(f"  Latest: {mc_version}")
+    elif args.mc_version:
+        mc_version = args.mc_version
+    else:
+        mc_version = "1.21.11"
+    
     cfg = ServerConfig(
-        mc_version=args.mc_version,
+        mc_version=mc_version,
         loader=args.loader,
         xmx=args.xmx,
         xms=args.xmx.replace("G", "G").replace("M", "M") if "G" in args.xmx else args.xmx,
@@ -445,10 +455,14 @@ def main():
     # Setup command
     subparsers.add_parser('setup', help='Run setup wizard')
     
+    # Install command (alias for setup)
+    subparsers.add_parser('install', help='Run full installer (same as setup)')
+    
     # Init command - create default config
     init_parser = subparsers.add_parser('init', help='Initialize default config')
     init_parser.add_argument('--force', action='store_true', help='Overwrite existing config')
-    init_parser.add_argument('--mc-version', default='1.21.11', help='Minecraft version')
+    init_parser.add_argument('--latest', action='store_true', help='Use latest Minecraft version')
+    init_parser.add_argument('--mc-version', default=None, help='Minecraft version')
     init_parser.add_argument('--loader', default='neoforge', choices=['neoforge', 'forge', 'fabric'], help='Mod loader')
     init_parser.add_argument('--xmx', default='4G', help='Max heap memory')
     
@@ -488,6 +502,7 @@ def main():
         'restart': cmd_restart,
         'setup': cmd_setup,
         'init': cmd_init,
+        'install': cmd_setup,  # 'install' is alias for 'setup'
         'status': cmd_status,
         'config': cmd_config,
         'world': cmd_world,

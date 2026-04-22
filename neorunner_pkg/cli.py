@@ -257,7 +257,8 @@ def cmd_setup(args):
 def cmd_init(args):
     """Initialize default config."""
     from .config import save_cfg, ensure_config, ServerConfig
-    from .constants import CWD, get_latest_minecraft_version
+    from .constants import CWD
+    from .version import get_latest_minecraft_version
     
     config_path = CWD / "config.json"
     

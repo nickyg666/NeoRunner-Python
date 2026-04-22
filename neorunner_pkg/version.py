@@ -18,7 +18,7 @@ VERSIONS_CACHE = CACHE_DIR / "mc_versions.json"
 
 
 def get_latest_minecraft_version(force_refresh: bool = False) -> str:
-    """Fetch latest Minecraft release version from Mojang."""
+    """Fetch latest Minecraft RELEASE version from Mojang."""
     if not force_refresh and VERSIONS_CACHE.exists():
         try:
             import time
@@ -34,7 +34,13 @@ def get_latest_minecraft_version(force_refresh: bool = False) -> str:
         req = urllib.request.Request(url, headers={"User-Agent": "NeoRunner/2.3.0"})
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode())
-            latest = data.get("latest", {}).get("release", DEFAULT_MC_VERSION)
+            # Find latest RELEASE (not snapshot)
+            for v in data.get("versions", []):
+                if v.get("type") == "release":
+                    latest = v.get("id", DEFAULT_MC_VERSION)
+                    break
+            else:
+                latest = data.get("latest", {}).get("release", DEFAULT_MC_VERSION)
             
             cache_data = {"latest_release": latest, "versions": [v["id"] for v in data.get("versions", [])]}
             VERSIONS_CACHE.write_text(json.dumps(cache_data, indent=2))

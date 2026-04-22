@@ -28,6 +28,23 @@ def signal_handler(sig, frame):
 
 def cmd_start(args):
     """Start the NeoRunner server and services with crash recovery."""
+    
+    if args.daemon:
+        pid = os.fork()
+        if pid > 0:
+            if args.pid_file:
+                with open(args.pid_file, 'w') as f:
+                    f.write(str(pid))
+            sys.exit(0)
+        
+        os.setsid()
+        
+        devnull = os.open(os.devnull, os.O_RDWR)
+        os.dup2(devnull, 0)
+        os.dup2(devnull, 1)
+        os.dup2(devnull, 2)
+        os.close(devnull)
+    
     cfg = load_cfg()
     
     from .config import ensure_config, validate_config
@@ -48,6 +65,7 @@ def cmd_start(args):
     from .server import run_server, is_server_running, wait_for_server, stop_server
     from .dashboard import run_dashboard
     from .log import log_event
+    from .version import get_latest_minecraft_version, get_all_minecraft_versions
     
     # Check system dependencies
     if not check_system_deps():
@@ -445,6 +463,8 @@ def main():
     start_parser.add_argument('--no-mod-server', action='store_true', help='Don\'t start mod hosting server')
     start_parser.add_argument('--force', action='store_true', help='Force start even with missing deps')
     start_parser.add_argument('--foreground', action='store_true', help='Run in foreground (don\'t daemonize)')
+    start_parser.add_argument('--daemon', '-d', action='store_true', help='Run in background (daemon mode)')
+    start_parser.add_argument('--pid-file', help='PID file to write when daemonizing')
     
     # Stop command
     subparsers.add_parser('stop', help='Stop the server')

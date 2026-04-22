@@ -23,6 +23,7 @@ from flask import Flask, render_template, jsonify, request, send_file, Response
 from .config import ServerConfig, load_cfg, save_cfg
 from .constants import CWD
 from .log import log_event
+from .version import get_latest_minecraft_version, get_all_minecraft_versions
 
 # Setup logging
 log = logging.getLogger(__name__)
@@ -82,6 +83,8 @@ def scan_worlds() -> List[Dict[str, Any]]:
     """Scan for world folders (folders containing level.dat)."""
     cfg = load_cfg()
     server_mc_version = cfg.mc_version
+    if not server_mc_version:
+        server_mc_version = get_latest_minecraft_version()
     worlds = []
     
     try:
@@ -148,6 +151,8 @@ def switch_world(world_name: str, force: bool = False) -> tuple[bool, str]:
     cfg = load_cfg()
     if not force:
         server_mc_version = cfg.mc_version
+        if not server_mc_version:
+            server_mc_version = get_latest_minecraft_version()
         try:
             from .nbt_parser import get_world_version
             version_info = get_world_version(str(level_dat))
@@ -268,11 +273,16 @@ def get_server_status() -> Dict[str, Any]:
             client_mod_count = len([f for f in os.listdir(check_dir) if f.endswith(".jar")])
             break
     
+    # Determine MC version - use dynamic fetch if missing from config
+    mc_version = cfg.mc_version
+    if not mc_version:
+        mc_version = get_latest_minecraft_version()
+    
     return {
         "running": running,
         "status_detail": status_detail,
         "loader": cfg.loader,
-        "mc_version": cfg.mc_version,
+        "mc_version": mc_version,
         "mod_count": mod_count,
         "client_mod_count": client_mod_count,
         "player_count": len([p for p in players if p.strip()]) if players else 0,
@@ -956,7 +966,9 @@ def api_worlds():
     props = parse_server_properties()
     current = props.get("level-name", "world")
     cfg = load_cfg()
-    server_mc_version = getattr(cfg, 'mc_version', '1.21.11')
+    server_mc_version = getattr(cfg, 'mc_version', None)
+    if not server_mc_version:
+        server_mc_version = get_latest_minecraft_version()
     server_loader = getattr(cfg, 'loader', 'neoforge')
     return jsonify({"worlds": worlds, "current": current, "server_mc_version": server_mc_version, "server_loader": server_loader})
 
@@ -968,7 +980,9 @@ def api_worlds_scan():
     props = parse_server_properties()
     current = props.get("level-name", "world")
     cfg = load_cfg()
-    server_mc_version = getattr(cfg, 'mc_version', '1.21.11')
+    server_mc_version = getattr(cfg, 'mc_version', None)
+    if not server_mc_version:
+        server_mc_version = get_latest_minecraft_version()
     server_loader = getattr(cfg, 'loader', 'neoforge')
     return jsonify({"success": True, "worlds": worlds, "current": current, "server_mc_version": server_mc_version, "server_loader": server_loader})
 
@@ -1109,10 +1123,13 @@ def api_loaders():
             })
         
         cfg = load_cfg()
+        mc_ver = cfg.mc_version
+        if not mc_ver:
+            mc_ver = get_latest_minecraft_version()
         return jsonify({
             "loaders": loaders,
             "current": cfg.loader.lower(),
-            "mc_version": cfg.mc_version
+            "mc_version": mc_ver
         })
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 400
@@ -1390,7 +1407,9 @@ def api_loaders_install():
     try:
         data = request.json
         loader = data.get("loader", "neoforge")
-        mc_version = data.get("mc_version", "1.21.11")
+        mc_version = data.get("mc_version", None)
+        if not mc_version:
+            mc_version = get_latest_minecraft_version()
         
         from .installer import install_loader
         cfg = load_cfg()
@@ -1411,7 +1430,9 @@ def api_loaders_switch():
     try:
         data = request.json
         loader = data.get("loader", "neoforge")
-        mc_version = data.get("mc_version", "1.21.11")
+        mc_version = data.get("mc_version", None)
+        if not mc_version:
+            mc_version = get_latest_minecraft_version()
         
         cfg = load_cfg()
         cfg.loader = loader
@@ -1944,7 +1965,10 @@ def api_setup_install():
         
         # Create config
         cfg = ServerConfig()
-        cfg.mc_version = data.get("mc_version", "1.21.11")
+        mc_version = data.get("mc_version", None)
+        if not mc_version:
+            mc_version = get_latest_minecraft_version()
+        cfg.mc_version = mc_version
         cfg.loader = data.get("loader", "neoforge")
         cfg.mc_port = data.get("mc_port", 25565)
         cfg.http_port = data.get("http_port", 8000)

@@ -10,6 +10,15 @@ from typing import Any
 from .constants import CWD, PARALLEL_PORTS, MOD_LOADERS
 
 
+def _get_default_version() -> str:
+    """Get default Minecraft version dynamically."""
+    try:
+        from .version import get_latest_minecraft_version
+        return get_latest_minecraft_version()
+    except Exception:
+        return "1.21.11"
+
+
 @dataclass
 class ServerConfig:
     """Main server configuration."""
@@ -21,7 +30,7 @@ class ServerConfig:
     mods_dir: str = "mods"
     clientonly_dir: str = "clientonly"
     quarantine_dir: str = "quarantine"
-    mc_version: str = "1.21.11"
+    mc_version: str = field(default_factory=_get_default_version)
     loader: str = "neoforge"
     max_download_mb: int = 600
     rate_limit_seconds: int = 2
@@ -54,6 +63,7 @@ class ServerConfig:
     crash_report_retention_days: int = 30
     live_log_max_size_mb: int = 10
     live_log_backup_count: int = 5
+    version_check_interval_hours: int = 24  # How often to check for version updates
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ServerConfig:

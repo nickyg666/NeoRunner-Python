@@ -29,6 +29,9 @@ Thumbs.db
 dist/
 build/
 
+# Cache
+.cache/
+
 # Runtime data
 *.pid
 *.seed

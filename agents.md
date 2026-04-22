@@ -1,9 +1,34 @@
 # NeoRunner Implementation Plan
 
 ## Overview
-This document describes the implementation plan for NeoRunner features including crash log analysis, network channel logging, log management, and comprehensive testing.
-Repeat after me: I will not do foolish things. I will find the path of least resistance to implement a feature. I will not modify things manually, instead I will ensure they are programatically modified by the program itself for the sake of automation. I will not make manual lists that have to be manually added to. I will automate as much as possible.
-I will not do stupid shit.
+This document describes the implementation plan for NeoRunner features.
+**IMPORTANT: Always use the dynamic version system. Never hardcode Minecraft versions.**
+
+## Dynamic Version System
+
+### Core Principle
+ALL Minecraft version references must use the version module, not hardcoded strings:
+
+```python
+# CORRECT - use version module
+from neorunner_pkg.version import get_latest_minecraft_version, get_all_minecraft_versions
+
+version = get_latest_minecraft_version()  # Gets latest from Mojang API
+
+# Also get loader-specific versions
+from neorunner_pkg.version import get_latest_for_loader
+forge_version = get_latest_for_loader("neoforge")  # Latest NeoForge for current MC
+fabric_version = get_latest_for_loader("fabric")  # Latest Fabric
+```
+
+### Version Module Locations
+- `/neorunner_pkg/version.py` - fetches from Mojang/Maven API
+- Cached in `.cache/mc_versions.json` for offline use
+
+### Configuration
+- `config.py` ServerConfig.mc_version - uses dynamic default
+- `constants.py` - provides get_current_mc_version()
+- Config option: `version_check_interval_hours` (default 24)
 ---
 
 ## Phase 1: Crash Log Analyzer (Client-Side Analysis)

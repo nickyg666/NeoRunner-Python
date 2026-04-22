@@ -34,13 +34,40 @@ def get_latest_minecraft_version(force_refresh: bool = False) -> str:
         req = urllib.request.Request(url, headers={"User-Agent": "NeoRunner/2.3.0"})
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode())
-            # Find latest RELEASE (not snapshot)
+            # Find latest RELEASE that looks like a game version (1.x.x format)
+            latest = DEFAULT_MC_VERSION
             for v in data.get("versions", []):
+                vid = v.get("id", "")
                 if v.get("type") == "release":
-                    latest = v.get("id", DEFAULT_MC_VERSION)
-                    break
-            else:
-                latest = data.get("latest", {}).get("release", DEFAULT_MC_VERSION)
+                    # Accept both old (1.x.x) and new (1.xx.x) formats
+                    if vid.startswith("1.") or vid.startswith("24.") or vid.startswith("25."):
+                        latest = vid
+                        break
+                    elif vid.startswith("26."):
+                        # New versioning - convert to 1.x format or keep as fallback
+                        # For now, prefer older format if available
+                        pass
+            
+            # If only new format available, convert 26.x to 1.21.x
+            if latest == DEFAULT_MC_VERSION:
+                # Find any release and convert new format
+                for v in data.get("versions", []):
+                    vid = v.get("id", "")
+                    if v.get("type") == "release":
+                        if vid.startswith("26."):
+                            # 26.1.x = 1.21.x
+                            parts = vid.split(".")
+                            if len(parts) >= 2:
+                                try:
+                                    minor = int(parts[1])
+                                    if minor >= 10:
+                                        latest = f"1.2{minor - 9}.{parts[2].split('-')[0]}" if len(parts) > 2 else f"1.2{minor - 9}.0"
+                                        break
+                                except:
+                                    pass
+                        elif vid.startswith("1."):
+                            latest = vid
+                            break
             
             cache_data = {"latest_release": latest, "versions": [v["id"] for v in data.get("versions", [])]}
             VERSIONS_CACHE.write_text(json.dumps(cache_data, indent=2))

@@ -141,8 +141,8 @@ if [ ! -d "neorunner_venv" ]; then
 fi
 
 source neorunner_venv/bin/activate
-pip install --upgrade pip
-pip install --break-system-packages -e .
+pip install --upgrade pip --break-system-packages
+pip install --break-system-packages --force-reinstall -e .
 
 # Verify installation
 if ! command -v neorunner &> /dev/null; then

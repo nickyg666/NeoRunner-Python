@@ -2,7 +2,7 @@
 #
 # NeoRunner Quick Installer
 # Usage: curl -sL https://raw.githubusercontent.com/nickyg666/NeoRunner-Python/main/install.sh | bash
-# Or for fresh reinstall: curl -sL https://raw.githubusercontent.com/nickyg666/NeoRunner-Python/main/install.sh | bash -s --fresh
+# Or for fresh reinstall: curl -sL https://raw.githubusercontent.com/nickyg666/NeoRunner-Python/main/install.sh | bash -s -- --fresh
 #
 
 set -e

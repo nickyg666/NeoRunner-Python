@@ -398,12 +398,9 @@ def api_config():
     config_dict["query_port"] = props.get("query.port", "25565")
     config_dict["rcon_port"] = props.get("rcon.port", cfg.rcon_port)
     
-    # Get server IP for display
-    import socket
-    try:
-        server_ip = socket.gethostbyname(socket.gethostname())
-    except:
-        server_ip = "0.0.0.0"
+    # Get server IP for display - dynamically detect LAN IP, never hardcode
+    from .mod_hosting import get_server_ip as _detect_ip
+    server_ip = _detect_ip() or "0.0.0.0"
     config_dict["server_ip"] = server_ip
     
     return jsonify(config_dict)
@@ -2156,7 +2153,7 @@ def run_dashboard(host: str = "0.0.0.0", port: int = 8000, debug: bool = False):
     DASHBOARD_PORT = port
     
     log_event("DASHBOARD", f"Starting dashboard on {host}:{port} with Waitress")
-    serve(app, host=host, port=port, threads=4)
+    serve(app, host=host, port=port, threads=8, queue_max=2048)
 
 
 if __name__ == "__main__":

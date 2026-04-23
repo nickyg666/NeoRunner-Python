@@ -832,6 +832,18 @@ read -p "Press Enter to continue..."
 
 def get_server_ip() -> str:
     """Get the server IP address for client scripts."""
+    # First, try config server_ip
+    try:
+        from .config import load_cfg
+        cfg = load_cfg()
+        if cfg and hasattr(cfg, 'server_ip') and cfg.server_ip:
+            ip = cfg.server_ip
+            if ip and ip != 'localhost' and not ip.startswith('127.'):
+                return ip
+    except:
+        pass
+    
+    # Fallback to auto-detect
     return _get_local_ip()
 
 

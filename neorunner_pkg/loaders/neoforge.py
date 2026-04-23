@@ -65,12 +65,15 @@ class NeoForgeLoader(LoaderBase):
 -XX:+UseG1GC
 -Djava.net.preferIPv4Stack=true
 """
+        log_event("LOADER_NEOFORGE", f"Writing user_jvm_args.txt: xmx={xmx}, xms={xms}")
         with open(jvm_file, 'w') as f:
             f.write(jvm_args)
         
         # Read back and verify - if still corrupted, fix immediately
+        log_event("LOADER_NEOFORGE", f"Verifying user_jvm_args.txt after write")
         with open(jvm_file) as f:
             content = f.read()
+        log_event("LOADER_NEOFORGE", f"Content after write: {content[:100]}")
         if 'echo' in content or 'Dashboard' in content:
             # Overwrite with clean content
             with open(jvm_file, 'w') as f:

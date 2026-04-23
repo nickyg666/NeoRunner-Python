@@ -172,22 +172,8 @@
         }
 
         .card.tabs-card {
-            max-height: 600px;
+            max-height: 1000px;
             overflow-y: auto;
-        }
-
-        .tab-content {
-            display: none;
-            max-height: 75vh;
-            min-height: 50vh;
-            height: 65vh;
-            overflow-y: auto;
-            padding-right: 8px;
-        }
-        
-        .tab-content.active {
-            display: block;
-            animation: fadeIn 0.4s ease;
         }
 
         .card::before {
@@ -404,10 +390,6 @@
             border-bottom: 2px solid rgba(0, 240, 255, 0.2);
             flex-wrap: wrap;
             padding-bottom: 15px;
-            position: sticky;
-            top: 0;
-            z-index: 100;
-            background: #0a0e17;
         }
         
         .tab-button {
@@ -456,9 +438,7 @@
         
         .tab-content {
             display: none;
-            max-height: 75vh;
-            min-height: 50vh;
-            height: 65vh;
+            max-height: 1000px;
             overflow-y: auto;
         }
         
@@ -1051,285 +1031,6 @@
         .loader-worlds-list .world-row.disabled {
             opacity: 0.4;
         }
-
-        /* Theme: Chrome - Silver/Metallic look */
-        body.theme-chrome {
-            background: linear-gradient(180deg, #3a3a3a 0%, #1a1a1a 50%, #2a2a2a 100%) !important;
-            min-height: 100vh;
-        }
-        body.theme-chrome .container {
-            background: transparent !important;
-        }
-        body.theme-chrome header {
-            background: linear-gradient(180deg, #5a5a5a, #3a3a3a) !important;
-            border-bottom: 3px solid #c0c0c0 !important;
-            box-shadow: 0 4px 20px rgba(192,192,192,0.3) !important;
-        }
-        body.theme-chrome header h1 {
-            color: #f5f5f5 !important;
-            text-shadow: 0 0 15px rgba(255,255,255,0.6), 0 2px 4px #000 !important;
-            letter-spacing: 2px !important;
-        }
-        body.theme-chrome header p {
-            color: #b0b0b0 !important;
-        }
-        body.theme-chrome .card {
-            background: linear-gradient(145deg, rgba(70,70,70,0.95), rgba(45,45,45,0.95)) !important;
-            border: 2px solid #909090 !important;
-            box-shadow: 8px 8px 16px rgba(0,0,0,0.5), -4px -4px 12px rgba(150,150,150,0.1), inset 0 0 20px rgba(200,200,200,0.05) !important;
-            border-radius: 12px !important;
-        }
-        body.theme-chrome h2, body.theme-chrome .stat-value, body.theme-chrome label {
-            color: #e8e8e8 !important;
-        }
-        body.theme-chrome .stat-label {
-            color: #909090 !important;
-        }
-        body.theme-chrome button {
-            background: linear-gradient(145deg, #606060, #454545) !important;
-            border: 2px solid #808080 !important;
-            color: #f0f0f0 !important;
-            box-shadow: 4px 4px 8px rgba(0,0,0,0.4), -2px -2px 6px rgba(120,120,120,0.2) !important;
-        }
-        body.theme-chrome button:hover:not(:disabled) {
-            background: linear-gradient(145deg, #757575, #555555) !important;
-            box-shadow: 0 0 20px rgba(200,200,200,0.5), inset 0 0 10px rgba(255,255,255,0.1) !important;
-        }
-        body.theme-chrome button.success {
-            background: linear-gradient(145deg, #2e7d32, #1b5e20) !important;
-            border-color: #4caf50 !important;
-        }
-        body.theme-chrome button.danger {
-            background: linear-gradient(145deg, #c62828, #b71c1c) !important;
-            border-color: #ef5350 !important;
-        }
-        body.theme-chrome input, body.theme-chrome select, body.theme-chrome textarea {
-            background: linear-gradient(145deg, #2a2a2a, #1a1a1a) !important;
-            border: 2px solid #606060 !important;
-            color: #f0f0f0 !important;
-            box-shadow: inset 3px 3px 6px rgba(0,0,0,0.4) !important;
-        }
-        body.theme-chrome .tab-button {
-            background: #3a3a3a !important;
-            border-color: #606060 !important;
-            color: #b0b0b0 !important;
-        }
-        body.theme-chrome .tab-button.active {
-            background: linear-gradient(145deg, #505050, #404040) !important;
-            border-color: #c0c0c0 !important;
-            color: #fff !important;
-        }
-        body.theme-chrome .modal-overlay {
-            background: rgba(0,0,0,0.85) !important;
-        }
-        body.theme-chrome .modal {
-            background: linear-gradient(145deg, #404040, #2a2a2a) !important;
-            border: 2px solid #909090 !important;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.8) !important;
-        }
-        body.theme-chrome .alert-success { background: #1b5e20 !important; border-color: #4caf50 !important; }
-        body.theme-chrome .alert-error { background: #b71c1c !important; border-color: #ef5350 !important; }
-
-        /* Theme: Minecraft - Earthy brown/stone look */
-        body.theme-minecraft {
-            background: linear-gradient(180deg, #4a3020 0%, #2a1810 50%, #3a2515 100%) !important;
-            min-height: 100vh;
-        }
-        body.theme-minecraft .container { background: transparent !important; }
-        body.theme-minecraft header {
-            background: linear-gradient(180deg, #6d4c41, #4e342e) !important;
-            border-bottom: 5px solid #8d6e63 !important;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.6) !important;
-        }
-        body.theme-minecraft header h1 {
-            color: #d7ccc8 !important;
-            text-shadow: 3px 3px 0 #3e2723, 0 0 10px rgba(141,110,99,0.5) !important;
-        }
-        body.theme-minecraft header p { color: #a1887f !important; }
-        body.theme-minecraft .card {
-            background: linear-gradient(145deg, rgba(62,39,35,0.98), rgba(46,30,27,0.98)) !important;
-            border: 4px solid #5d4037 !important;
-            box-shadow: 6px 6px 12px rgba(0,0,0,0.6), inset 0 0 25px rgba(141,110,99,0.2) !important;
-            border-radius: 8px !important;
-        }
-        body.theme-minecraft h2 { color: #bcaaa4 !important; text-shadow: 1px 1px 0 #1a0f0a !important; }
-        body.theme-minecraft .stat-value, body.theme-minecraft label { color: #d7ccc8 !important; }
-        body.theme-minecraft .stat-label { color: #8d6e63 !important; }
-        body.theme-minecraft button {
-            background: linear-gradient(180deg, #6d4c41, #4e342e) !important;
-            border: 3px solid #8d6e63 !important;
-            color: #efebe9 !important;
-            box-shadow: 4px 4px 0 #3e2723 !important;
-            font-family: 'Minecraft', 'Segoe UI', sans-serif !important;
-        }
-        body.theme-minecraft button:hover:not(:disabled) {
-            background: linear-gradient(180deg, #8d6e63, #6d4c41) !important;
-            transform: translate(1px, 1px);
-            box-shadow: 3px 3px 0 #3e2723 !important;
-        }
-        body.theme-minecraft button.success { border-color: #66bb6a !important; }
-        body.theme-minecraft button.danger { border-color: #ef5350 !important; }
-        body.theme-minecraft input, body.theme-minecraft select {
-            background: #2d1a0f !important;
-            border: 3px solid #5d4037 !important;
-            color: #d7ccc8 !important;
-            font-family: 'Minecraft', 'Segoe UI', sans-serif !important;
-        }
-        body.theme-minecraft .tab-button {
-            background: #3e2723 !important;
-            border: 3px solid #5d4037 !important;
-            color: #a1887f !important;
-        }
-        body.theme-minecraft .tab-button.active {
-            background: #4e342e !important;
-            border-color: #8d6e63 !important;
-            color: #fff !important;
-        }
-        body.theme-minecraft .modal-overlay { background: rgba(0,0,0,0.9) !important; }
-        body.theme-minecraft .modal {
-            background: linear-gradient(145deg, #4e342e, #3e2723) !important;
-            border: 4px solid #8d6e63 !important;
-        }
-
-        /* Theme: Cyberpunk - Neon pink/cyan */
-        body.theme-cyberpunk {
-            background: linear-gradient(180deg, #0a0015 0%, #150030 50%, #0d0020 100%) !important;
-            min-height: 100vh;
-        }
-        body.theme-cyberpunk .container { background: transparent !important; }
-        body.theme-cyberpunk header {
-            background: linear-gradient(180deg, #2d0040, #1a0025) !important;
-            border-bottom: 3px solid #ff00ff !important;
-            box-shadow: 0 0 30px rgba(255,0,255,0.4), 0 4px 20px rgba(0,0,0,0.5) !important;
-        }
-        body.theme-cyberpunk header h1 {
-            color: #ff00ff !important;
-            text-shadow: 0 0 20px #ff00ff, 0 0 40px #ff00ff, 0 2px 4px #000 !important;
-            animation: cyberGlow 2s ease-in-out infinite alternate !important;
-        }
-        @keyframes cyberGlow { from { text-shadow: 0 0 20px #ff00ff, 0 0 40px #ff00ff; } to { text-shadow: 0 0 30px #ff00ff, 0 0 60px #ff00ff, 0 0 80px #00ffff; } }
-        body.theme-cyberpunk header p { color: #00ffff !important; text-shadow: 0 0 10px #00ffff !important; }
-        body.theme-cyberpunk .card {
-            background: linear-gradient(145deg, rgba(25,0,45,0.95), rgba(15,0,30,0.95)) !important;
-            border: 2px solid #ff00ff !important;
-            box-shadow: 0 0 35px rgba(255,0,255,0.35), inset 0 0 50px rgba(255,0,255,0.08) !important;
-            border-radius: 4px !important;
-        }
-        body.theme-cyberpunk h2 {
-            color: #ff00ff !important;
-            text-shadow: 0 0 15px #ff00ff !important;
-        }
-        body.theme-cyberpunk .stat-value, body.theme-cyberpunk label {
-            color: #00ffff !important;
-            text-shadow: 0 0 12px #00ffff !important;
-        }
-        body.theme-cyberpunk .stat-label { color: #ff00ff !important; }
-        body.theme-cyberpunk button {
-            background: linear-gradient(135deg, rgba(255,0,255,0.25), rgba(0,255,255,0.15)) !important;
-            border: 2px solid #ff00ff !important;
-            color: #00ffff !important;
-            text-shadow: 0 0 8px #00ffff !important;
-            box-shadow: 0 0 15px rgba(255,0,255,0.3), inset 0 0 20px rgba(0,255,255,0.05) !important;
-        }
-        body.theme-cyberpunk button:hover:not(:disabled) {
-            background: linear-gradient(135deg, rgba(255,0,255,0.5), rgba(0,255,255,0.35)) !important;
-            box-shadow: 0 0 35px rgba(255,0,255,0.6), 0 0 50px rgba(0,255,255,0.3) !important;
-            animation: cyberPulse 0.5s ease-in-out infinite !important;
-        }
-        @keyframes cyberPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.02); } }
-        body.theme-cyberpunk button.success { border-color: #00ff88 !important; color: #00ff88 !important; }
-        body.theme-cyberpunk button.danger { border-color: #ff0044 !important; color: #ff0044 !important; }
-        body.theme-cyberpunk input, body.theme-cyberpunk select, body.theme-cyberpunk textarea {
-            background: rgba(5,0,15,0.9) !important;
-            border: 2px solid #ff00ff !important;
-            color: #00ffff !important;
-            box-shadow: inset 0 0 15px rgba(255,0,255,0.2), 0 0 10px rgba(0,255,255,0.2) !important;
-        }
-        body.theme-cyberpunk .tab-button {
-            background: rgba(20,0,40,0.8) !important;
-            border: 2px solid #ff00ff !important;
-            color: #ff00ff !important;
-        }
-        body.theme-cyberpunk .tab-button.active {
-            background: linear-gradient(135deg, rgba(255,0,255,0.4), rgba(0,255,255,0.2)) !important;
-            border-color: #00ffff !important;
-            color: #00ffff !important;
-            box-shadow: 0 0 20px rgba(0,255,255,0.5) !important;
-        }
-        body.theme-cyberpunk .modal-overlay { background: rgba(0,0,0,0.92) !important; }
-        body.theme-cyberpunk .modal {
-            background: linear-gradient(145deg, rgba(20,0,45,0.98), rgba(10,0,25,0.98)) !important;
-            border: 3px solid #ff00ff !important;
-            box-shadow: 0 0 50px rgba(255,0,255,0.5), 0 25px 80px rgba(0,0,0,0.8) !important;
-        }
-
-        /* Theme: Mario Style - Blue sky/green ground */
-        body.theme-mario {
-            background: linear-gradient(180deg, #5c94fc 0%, #4a7adb 25%, #3d5afe 40%, #4caf50 60%, #388e3c 80%, #2e7d32 100%) !important;
-            background-attachment: fixed !important;
-            min-height: 100vh;
-        }
-        body.theme-mario .container { background: transparent !important; }
-        body.theme-mario header {
-            background: linear-gradient(180deg, #e70012, #b5000a) !important;
-            border-bottom: 5px solid #ffcc00 !important;
-            box-shadow: 0 6px 20px rgba(0,0,0,0.5) !important;
-        }
-        body.theme-mario header h1 {
-            color: #ffcc00 !important;
-            text-shadow: 3px 3px 0 #000, -2px -2px 0 #0033cc, 0 0 20px rgba(255,204,0,0.5) !important;
-            font-weight: 900 !important;
-            letter-spacing: 1px !important;
-        }
-        body.theme-mario header p { color: #fff !important; text-shadow: 1px 1px 0 #000 !important; }
-        body.theme-mario .card {
-            background: linear-gradient(180deg, rgba(30,80,150,0.95), rgba(20,60,130,0.95)) !important;
-            border: 5px solid #ffcc00 !important;
-            box-shadow: 8px 8px 0 rgba(0,0,0,0.4), inset 0 0 30px rgba(255,204,0,0.15) !important;
-            border-radius: 12px !important;
-        }
-        body.theme-mario h2 { color: #fff !important; text-shadow: 2px 2px 0 #000 !important; }
-        body.theme-mario .stat-value { color: #7fff00 !important; text-shadow: 1px 1px 0 #000 !important; }
-        body.theme-mario .stat-label { color: #ffcc00 !important; text-shadow: 1px 1px 0 #000 !important; }
-        body.theme-mario label { color: #fff !important; text-shadow: 1px 1px 0 #000 !important; }
-        body.theme-mario button {
-            background: linear-gradient(180deg, #e70012, #b5000a) !important;
-            border: 4px solid #fff !important;
-            color: #fff !important;
-            font-weight: 900 !important;
-            text-shadow: 1px 1px 0 #000 !important;
-            box-shadow: 4px 4px 0 #000 !important;
-            font-size: 14px !important;
-        }
-        body.theme-mario button:hover:not(:disabled) {
-            background: linear-gradient(180deg, #ff3333, #e70012) !important;
-            transform: translate(2px, 2px);
-            box-shadow: 2px 2px 0 #000 !important;
-        }
-        body.theme-mario button.success { background: linear-gradient(180deg, #4caf50, #2e7d32) !important; }
-        body.theme-mario button.danger { background: linear-gradient(180deg, #ff5722, #e64a19) !important; }
-        body.theme-mario input, body.theme-mario select, body.theme-mario textarea {
-            background: #1a3a6e !important;
-            border: 3px solid #ffcc00 !important;
-            color: #fff !important;
-            box-shadow: 3px 3px 0 #000 !important;
-        }
-        body.theme-mario .tab-button {
-            background: #1565c0 !important;
-            border: 3px solid #fff !important;
-            color: #fff !important;
-            font-weight: bold !important;
-        }
-        body.theme-mario .tab-button.active {
-            background: #e70012 !important;
-            border-color: #ffcc00 !important;
-        }
-        body.theme-mario .modal-overlay { background: rgba(0,0,0,0.85) !important; }
-        body.theme-mario .modal {
-            background: linear-gradient(180deg, #1976d2, #1565c0) !important;
-            border: 5px solid #ffcc00 !important;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.6) !important;
-        }
     </style>
 </head>
 <body>
@@ -1360,30 +1061,12 @@
                 <br><br>
                 <button onclick="openModSelector()">📋 Browse CF/MR Mods</button>
                 <button onclick="openConvertModal()" style="background:#9C27B0;">🔄 Convert Modpack</button>
-                <button onclick="openCrashAnalyzer()" style="background:#E91E63;">💥 Crash Analyzer</button>
-                <button onclick="runPreflight()" style="background:#4CAF50;">🛡️ Preflight Check</button>
                 <br><br>
-                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
-                    <input type="text" id="broadcast-msg" placeholder="Broadcast message to players..." style="flex:1;min-width:150px;padding:8px 12px;border-radius:6px;border:1px solid #444;background:#1a1a2a;color:#fff;font-size:13px;">
-                    <button onclick="sendBroadcast()" style="background:#673AB7;color:white;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px;">📢</button>
-                </div>
-                <br>
                 <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                     <input type="text" id="quick-search" placeholder="Search mod name..." style="flex:1;min-width:150px;padding:8px 12px;border-radius:6px;border:1px solid #444;background:#1a1a2a;color:#fff;font-size:13px;">
                     <button onclick="quickSearchMod()" style="background:#00BCD4;color:white;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px;">🔍 Fetch</button>
                 </div>
                 <p style="color:#666;font-size:11px;margin-top:6px;">Enter mod name to auto-fetch</p>
-                <hr style="border:none;border-top:1px solid rgba(0,240,255,0.2);margin:12px 0;">
-                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                    <label style="margin:0;font-size:13px;color:var(--neon-cyan);">Theme:</label>
-                    <select id="theme-selector" onchange="applyTheme(this.value)" style="padding:6px 10px;border-radius:4px;background:#1a1a2a;color:#fff;border:1px solid #444;font-size:12px;width:auto;">
-                        <option value="futuristic">Futuristic (Default)</option>
-                        <option value="chrome">Chrome</option>
-                        <option value="minecraft">Minecraft</option>
-                        <option value="cyberpunk">Cyberpunk</option>
-                        <option value="mario">Mario Style</option>
-                    </select>
-                </div>
             </div>
         </div>
         
@@ -1394,7 +1077,6 @@
                 <h2>🌍 World Management</h2>
                 <p style="color:#888; font-size:13px; margin-bottom:12px;">Manage multiple worlds.</p>
                 <button onclick="scanWorlds()" style="background: #2196F3; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">🌐 Scan Worlds</button>
-                <button onclick="backupCurrentWorld()" style="background: #FF9800; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-left: 8px;">💾 Backup</button>
                 <div id="world-management-dedicated" style="margin-top:12px;">
                     <p style="color:#888;">Click "Scan Worlds"</p>
                 </div>
@@ -1411,14 +1093,8 @@
                 </a>
                 <p style="color:#888; font-size:11px; margin-top:10px;">
                     <strong>PowerShell:</strong> 
-                    <code id="cmd-oneliner" style="background:#2a2a2a;padding:2px 6px;border-radius:3px;cursor:pointer;font-family:monospace;" title="Click to copy" onclick="copyToClipboard(this.textContent)">Loading...</code>
+                    <code id="cmd-oneliner" style="background:#2a2a2a;padding:2px 6px;border-radius:3px;cursor:pointer;font-family:monospace;" onclick="copyToClipboard(this)">Loading...</code>
                 </p>
-                <div style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(0,240,255,0.2);">
-                    <p style="color:#888; font-size:11px;margin-bottom:8px;"><strong>Direct Downloads:</strong></p>
-                    <a href="/download/manifest" target="_blank" style="color:#2196F3;font-size:12px;margin-right:12px;">📋 Manifest</a>
-                    <a href="/download/mods_latest.zip" target="_blank" style="color:#4CAF50;font-size:12px;margin-right:12px;">📦 All Mods (.zip)</a>
-                    <a href="/download/all" target="_blank" style="color:#FF9800;font-size:12px;">📁 All Mods</a>
-                </div>
             </div>
         </div>
         
@@ -1428,11 +1104,8 @@
                 <button class="tab-button active" onclick="switchTab('server-mods')">Server</button>
                 <button class="tab-button" onclick="switchTab('client-mods')">Client</button>
                 <button class="tab-button" onclick="switchTab('quarantine')">Quarantine</button>
-                <button class="tab-button" onclick="switchTab('blacklist')">Blacklist</button>
                 <button class="tab-button" onclick="switchTab('loader')">Loader</button>
                 <button class="tab-button" onclick="switchTab('config')">Config</button>
-                <button class="tab-button" onclick="switchTab('events')">Events</button>
-                <button class="tab-button" onclick="switchTab('server-events')">Server</button>
                 <button class="tab-button" onclick="switchTab('logs')">Logs</button>
             </div>
             
@@ -1448,7 +1121,7 @@
                     <button onclick="serverQuarantineSelected()" style="background:#e74c3c;color:white;padding:8px 16px;border-radius:4px;cursor:pointer;margin-left:8px;">Quarantine</button>
                     <button onclick="serverDeleteSelected()" style="background:#c82333;color:white;padding:8px 16px;border-radius:4px;cursor:pointer;margin-left:8px;">Delete</button>
                 </div>
-                <div id="server-mods-list" style="max-height:60vh; overflow-y:auto;">
+                <div id="server-mods-list" style="max-height:150px; overflow-y:auto;">
                     <div class="loading"></div> Loading server mods...
                 </div>
             </div>
@@ -1462,7 +1135,7 @@
                     <button onclick="deleteSelected()" style="background:#c82333;color:white;padding:8px 16px;border-radius:4px;cursor:pointer;margin-left:8px;">Delete Selected</button>
                     <button onclick="selectAll()" style="background:#607d8b;color:white;padding:8px 16px;border-radius:4px;cursor:pointer;margin-left:8px;">Select All</button>
                 </div>
-                <div id="client-mods-list" style="max-height:60vh; overflow-y:auto;">
+                <div id="client-mods-list" style="max-height:150px; overflow-y:auto;">
                     <div class="loading"></div> Loading client mods...
                 </div>
             </div>
@@ -1707,17 +1380,6 @@
                     <div class="loading"></div> Loading logs...
                 </div>
             </div>
-            
-            <!-- Server Events Tab -->
-            <div id="server-events" class="tab-content">
-                <h2>Server Connection Events</h2>
-                <p style="color:#666; font-size:13px; margin-bottom:12px;">Real-time channel mismatch detection and client connection events.</p>
-                <button onclick="loadServerEvents()">🔄 Refresh</button>
-                <button onclick="clearServerEvents()" class="danger" style="margin-left:8px;">Clear</button>
-                <div id="server-events-content" class="event-timeline" style="margin-top:12px;">
-                    <div class="loading"></div> Loading server events...
-                </div>
-            </div>
         </div>
 
         <!-- Mod Selection Modal -->
@@ -1804,27 +1466,6 @@
             </div>
         </div>
         
-        <!-- Crash Analyzer Modal -->
-        <div id="crash-analyzer-modal" class="modal-overlay">
-            <div class="modal" style="max-width: 800px;">
-                <div class="modal-header">
-                    <h2 style="color: #E91E63;">💥 Crash Log Analyzer</h2>
-                    <button class="close-btn" onclick="closeCrashAnalyzer()">×</button>
-                </div>
-                <div class="modal-body" style="padding: 24px;">
-                    <p style="color:#888; margin-bottom:15px;">
-                        Paste your client crash log below. The server will analyze it and recommend which mods to add or remove for compatibility.
-                    </p>
-                    <textarea id="crash-log-input" rows="12" placeholder="Paste crash log here...&#10;Example:&#10;---- Minecraft Crash Report ----&#10;java.lang.NoClassDefFoundError: sodium&#10;..." style="font-family:monospace;font-size:12px;width:100%;background:#1a1a2a;color:#ccc;border:1px solid #444;padding:12px;border-radius:8px;"></textarea>
-                    <div style="margin-top:15px; display:flex; justify-content:space-between; align-items:center;">
-                        <button onclick="closeCrashAnalyzer()">Cancel</button>
-                        <button class="success" onclick="analyzeCrashLog()" id="analyze-crash-btn" style="background:#E91E63;">Analyze Crash Log</button>
-                    </div>
-                    <div id="crash-analysis-results" style="margin-top:20px;"></div>
-                </div>
-            </div>
-        </div>
-        
         <!-- Java Upgrade Modal -->
         <div id="java-modal" class="modal-overlay">
             <div class="modal" style="max-width: 600px;">
@@ -1858,79 +1499,6 @@
     </div>
     
         <script>
-            // Copy to clipboard with fallback
-            function copyToClipboard(text) {
-                if (navigator.clipboard) {
-                    navigator.clipboard.writeText(text).then(() => {
-                        showAlert('Copied to clipboard!', 'success');
-                    }).catch(() => {
-                        fallbackCopy(text);
-                    });
-                } else {
-                    fallbackCopy(text);
-                }
-            }
-            
-            function fallbackCopy(text) {
-                const textarea = document.createElement('textarea');
-                textarea.value = text;
-                textarea.style.position = 'fixed';
-                textarea.style.opacity = '0';
-                document.body.appendChild(textarea);
-                textarea.select();
-                try {
-                    document.execCommand('copy');
-                    showAlert('Copied to clipboard!', 'success');
-                } catch (e) {
-                    showAlert('Failed to copy - please copy manually', 'error');
-                }
-                document.body.removeChild(textarea);
-            }
-            
-            let logEventSource = null;
-            
-            function refreshLogs() {
-                // Try to use Server-Sent Events for live streaming
-                if (!logEventSource) {
-                    logEventSource = new EventSource('/api/logs/stream');
-                    logEventSource.onmessage = function(event) {
-                        const content = document.getElementById('logs-content');
-                        if (content) {
-                            content.innerHTML += event.data + '\n';
-                            content.scrollTop = content.scrollHeight;
-                        }
-                    };
-                    logEventSource.onerror = function() {
-                        // Fall back to polling if SSE fails
-                        if (logEventSource) {
-                            logEventSource.close();
-                            logEventSource = null;
-                        }
-                        pollLogs();
-                    };
-                }
-            }
-            
-            function pollLogs() {
-                fetch('/api/logs?lines=100')
-                    .then(r => r.json())
-                    .then(data => {
-                        const content = document.getElementById('logs-content');
-                        if (content && data.logs) {
-                            content.innerHTML = data.logs.join('\n');
-                            content.scrollTop = content.scrollHeight;
-                        }
-                    })
-                    .catch(() => {});
-            }
-            
-            function stopLogStream() {
-                if (logEventSource) {
-                    logEventSource.close();
-                    logEventSource = null;
-                }
-            }
-            
             // Tab switching
             function switchTab(tabId) {
                 document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
@@ -1946,113 +1514,667 @@
                 setTimeout(() => alertsDiv.innerHTML = '', 3000);
             }
             
-            // Theme management
-            function applyTheme(theme) {
-                document.body.classList.remove('theme-chrome', 'theme-minecraft', 'theme-cyberpunk', 'theme-mario');
-                if (theme !== 'futuristic') {
-                    document.body.classList.add('theme-' + theme);
-                }
-                localStorage.setItem('neorunner-theme', theme);
-                showAlert('Theme: ' + theme, 'success');
+            function copyToClipboard(element) {
+                const text = element.textContent;
+                navigator.clipboard.writeText(text).then(() => {
+                    showAlert('Copied to clipboard!', 'success');
+                }).catch(() => {
+                    showAlert('Failed to copy', 'error');
+                });
             }
             
-            function loadTheme() {
-                const saved = localStorage.getItem('neorunner-theme') || 'futuristic';
-                const selector = document.getElementById('theme-selector');
-                if (selector) selector.value = saved;
-                if (saved !== 'futuristic') {
-                    document.body.classList.add('theme-' + saved);
-                }
+            function refreshStatus() {
+                fetch('/api/status')
+                    .then(r => r.json())
+                    .then(data => {
+                        const content = document.getElementById('status-content') || document.querySelector('.card .stat');
+                        if (content) {
+                            const running = data.running ? 
+                                '<span class="status-badge status-running">Running</span>' : 
+                                '<span class="status-badge status-stopped">' + (data.status_detail || 'Stopped') + '</span>';
+                            
+                            // Format preflight time
+                            let preflightBadge = '<span style="color:#666;font-size:11px;">Never</span>';
+                            if (data.preflight_status) {
+                                preflightBadge = '<span style="color:#4CAF50;font-size:11px;">' + data.preflight_status + '</span>';
+                            }
+                            
+                            // World version badge
+                            let worldBadge = data.world_version || 'unknown';
+                            let worldColor = worldBadge === 'unknown' ? '#f44336' : (worldBadge === data.mc_version ? '#4CAF50' : '#FF9800');
+                            
+                            content.innerHTML = `
+                                <div class="stat"><span class="stat-label">Status</span><span class="stat-value">${running}</span></div>
+                                <div class="stat"><span class="stat-label">Loader</span><span class="stat-value">${data.loader || 'unknown'}</span></div>
+                                <div class="stat"><span class="stat-label">MC Version</span><span class="stat-value">${data.mc_version || 'unknown'}</span></div>
+                                <div class="stat"><span class="stat-label">World</span><span class="stat-value" style="color:${worldColor};">${data.world_name || 'world'} (${worldBadge})</span></div>
+                                <div class="stat"><span class="stat-label">Server Mods</span><span class="stat-value">${data.mod_count || 0}</span></div>
+                                <div class="stat"><span class="stat-label">Client Mods</span><span class="stat-value">${data.client_mod_count || 0}</span></div>
+                                <div class="stat"><span class="stat-label">Players</span><span class="stat-value">${data.player_count || 0}</span></div>
+                                <div class="stat"><span class="stat-label">Preflight</span><span class="stat-value">${preflightBadge}</span></div>
+                                <div class="stat"><span class="stat-label">Java</span><span class="stat-value">${data.java_path || 'auto'}</span></div>
+                                ${data.downloading ? '<div class="stat"><span class="stat-label">Activity</span><span class="stat-value"><span style="color:#4CAF50;">⬇ Client downloading</span></span></div>' : ''}
+                            `;
+                        }
+                        const btnStart = document.getElementById('btn-start');
+                        const btnStop = document.getElementById('btn-stop');
+                        const btnRestart = document.getElementById('btn-restart');
+                        if (btnStart) btnStart.disabled = data.running || data.downloading;
+                        if (btnStop) btnStop.disabled = !data.running || data.downloading;
+                        if (btnRestart) btnRestart.disabled = data.downloading;
+                    }).catch(() => {});
             }
             
-            // Crash Analyzer
-            function openCrashAnalyzer() {
-                document.getElementById('crash-analyzer-modal').classList.add('active');
+            function refreshMods() {
+                loadServerMods();
+                loadClientMods();
             }
             
-            function closeCrashAnalyzer() {
-                document.getElementById('crash-analyzer-modal').classList.remove('active');
+            function loadConfig() {
+                fetch('/api/config').then(r => r.json()).then(cfg => {
+                    const mcVer = cfg.mc_version || '';
+                    if (document.getElementById('mc-version')) document.getElementById('mc-version').value = mcVer;
+                    if (document.getElementById('target-mc-version')) {
+                        document.getElementById('target-mc-version').value = mcVer;
+                    }
+                    if (document.getElementById('update-freq')) document.getElementById('update-freq').value = cfg.ferium_update_interval_hours || 4;
+                    
+                    // Feature 15: Populate port display in header
+                    const serverIp = cfg.server_ip || window.location.hostname || 'localhost';
+                    const httpPort = cfg.http_port || 8000;
+                    if (document.getElementById('game-port')) document.getElementById('game-port').textContent = cfg.server_port || '25565';
+                    if (document.getElementById('query-port')) document.getElementById('query-port').textContent = cfg.query_port || '25565';
+                    if (document.getElementById('rcon-port')) document.getElementById('rcon-port').textContent = cfg.rcon_port || '25575';
+                    if (document.getElementById('http-port')) document.getElementById('http-port').textContent = httpPort;
+                    
+                    // Feature 14: Populate PowerShell one-liner with auto-detected server IP
+                    const onelinerEl = document.getElementById('cmd-oneliner');
+                    if (onelinerEl) {
+                        const oneliner = `curl.exe -sL "http://${serverIp}:${httpPort}/download/install-mods.bat" -o %TEMP%\\install-mods.bat && %TEMP%\\install-mods.bat`;
+                        onelinerEl.textContent = oneliner;
+                    }
+                }).catch(() => {});
             }
             
-            function analyzeCrashLog() {
-                const textarea = document.getElementById('crash-log-input');
-                const logContent = textarea.value.trim();
+            function refreshLogs() {
+                fetch('/api/logs?lines=50').then(r => r.json()).then(data => {
+                    const content = document.getElementById('logs-content');
+                    if (content && data.logs) {
+                        content.innerHTML = data.logs.map(l => `<div class="log-line">${l}</div>`).join('');
+                    }
+                }).catch(() => {});
+            }
+            
+            function loadQuarantine() {
+                fetch('/api/quarantine').then(r => r.json()).then(data => {
+                    const content = document.getElementById('quarantine-tab-content');
+                    if (content) {
+                        if (data.mods && data.mods.length) {
+                            content.innerHTML = data.mods.map(m => `
+                                <div class="quarantine-item">
+                                    <div class="q-info">
+                                        <span class="q-name">${m.name || m.id}</span>
+                                        <span class="q-reason">${m.reason || 'Unknown'}</span>
+                                    </div>
+                                    <button class="q-restore" onclick="restoreMod('${m.id}')">Restore</button>
+                                </div>
+                            `).join('');
+                        } else {
+                            content.innerHTML = '<p style="color:#666;">No quarantined mods</p>';
+                        }
+                    }
+                }).catch(() => {});
+            }
+            
+            function loadBlacklist() {
+                fetch('/api/blacklist').then(r => r.json()).then(data => {
+                    const content = document.getElementById('blacklist-content');
+                    if (content) {
+                        content.innerHTML = (data.mods || []).map(m => `<div class="mod-item"><span>${m}</span></div>`).join('') || '<p style="color:#666;">No blacklisted mods</p>';
+                    }
+                }).catch(() => {});
+            }
+            
+            function loadEvents() {
+                fetch('/api/events').then(r => r.json()).then(data => {
+                    const content = document.getElementById('events-content');
+                    if (content) {
+                        content.innerHTML = (data.events || []).map(e => `
+                            <div class="event-item">
+                                <span class="event-time">${e.time || ''}</span>
+                                <span class="event-type event-type-${(e.type || 'default').toLowerCase()}">${e.type || ''}</span>
+                                <span class="event-msg">${e.message || ''}</span>
+                            </div>
+                        `).join('') || '<p style="color:#666;">No events</p>';
+                    }
+                }).catch(() => {});
+            }
+            
+            function openModSelector() {
+                document.getElementById('mod-selector-modal').classList.add('active');
+            }
+            
+            function closeModSelector() {
+                document.getElementById('mod-selector-modal').classList.remove('active');
+            }
+            
+            function rescanMods() {
+                showAlert('Rescanning mods...', 'info');
+                fetch('/api/rescan-mods', {method: 'POST'}).then(r => r.json()).then(data => {
+                    showAlert(data.message || 'Rescan complete', 'success');
+                    loadServerMods();
+                }).catch(err => showAlert('Error: ' + err, 'error'));
+            }
+            
+            function analyzeMods() {
+                showAlert('Analyzing mods for mixin conflicts...', 'info');
+                fetch('/api/mods/analyze').then(r => r.json()).then(data => {
+                    if (data.status === 'success') {
+                        const conflictCount = data.conflicts?.length || 0;
+                        const msg = `Found ${data.mods_scanned} mods, ${conflictCount} potential conflicts`;
+                        showAlert(msg, 'success');
+                        updateCompatibilityStatus(data);
+                    } else {
+                        showAlert(data.error || 'Analysis failed', 'error');
+                    }
+                }).catch(err => showAlert('Error: ' + err, 'error'));
+            }
+            
+            function optimizeLoadOrder() {
+                if (!confirm('Optimize mod load order? This will rename mods with priority prefixes (APIs first, addons last).')) return;
+                showAlert('Optimizing load order...', 'info');
+                fetch('/api/mods/optimize-load-order', {method: 'POST'}).then(r => r.json()).then(data => {
+                    if (data.status === 'success') {
+                        showAlert(`Optimized ${data.renamed?.length || 0} mods`, 'success');
+                        loadServerMods();
+                    } else {
+                        showAlert(data.error || 'Optimization failed', 'error');
+                    }
+                }).catch(err => showAlert('Error: ' + err, 'error'));
+            }
+            
+            function patchMods() {
+                if (!confirm('Auto-patch mods for mixin compatibility? This modifies mod JARs. Backups will be created.')) return;
+                showAlert('Patching mods...', 'info');
+                fetch('/api/mods/patch', {method: 'POST'}).then(r => r.json()).then(data => {
+                    if (data.status === 'success') {
+                        showAlert(`Patched ${data.patched || 0} mods, skipped ${data.skipped || 0}`, 'success');
+                    } else {
+                        showAlert(data.error || 'Patching failed', 'error');
+                    }
+                }).catch(err => showAlert('Error: ' + err, 'error'));
+            }
+            
+            function loadLoaders() {
+                fetch('/api/loaders').then(r => r.json()).then(data => {
+                    updateLoaderStatus(data);
+                    updateLoaderList(data);
+                }).catch(() => {});
                 
-                if (!logContent) {
-                    showAlert('Please paste a crash log first', 'warning');
+                fetch('/api/loaders/archives').then(r => r.json()).then(data => {
+                    updateLoaderArchives(data.archives || []);
+                }).catch(() => {});
+                
+                fetch('/api/loaders/snapshots').then(r => r.json()).then(data => {
+                    updateLoaderSnapshots(data.snapshots || []);
+                }).catch(() => {});
+            }
+            
+            function updateLoaderSnapshots(snapshots) {
+                const container = document.getElementById('loader-snapshots');
+                if (!container) return;
+                
+                if (!snapshots.length) {
+                    container.innerHTML = '<p style="color:#666;">No snapshots found. Snapshots are created automatically when switching loaders.</p>';
                     return;
                 }
                 
-                const btn = document.getElementById('analyze-crash-btn');
-                btn.disabled = true;
-                btn.textContent = 'Analyzing...';
+                let html = '<div style="background:rgba(26,26,46,0.6);padding:12px;border-radius:4px;border:1px solid rgba(0,240,255,0.15);">';
+                snapshots.forEach(snap => {
+                    const worldIcon = snap.has_world ? '🌍' : '📁';
+                    const worldText = snap.has_world ? ' (world included)' : '';
+                    html += `<div style="padding:8px;border-bottom:1px solid rgba(0,240,255,0.15);">
+                        <strong>${worldIcon} ${snap.name}</strong>
+                        <span style="color:#888;font-size:12px;">${snap.loader} ${snap.mc_version}</span>
+                        <span style="color:#2196F3;font-size:12px;margin-left:8px;">${snap.mod_count} mods${worldText}</span>
+                    </div>`;
+                });
+                html += '</div>';
+                container.innerHTML = html;
+            }
+            
+            function updateLoaderStatus(data) {
+                const container = document.getElementById('loader-status');
+                if (!container) return;
                 
-                fetch('/api/analyze-crash-log', {
+                container.innerHTML = `
+                    <div style="background:rgba(26,26,46,0.6);padding:12px;border-radius:4px;border:1px solid rgba(0,240,255,0.15);">
+                        <p><strong>Current Loader:</strong> <span style="color:#4CAF50;text-transform:uppercase;font-weight:bold;">${data.current || 'neoforge'}</span></p>
+                        <p><strong>MC Version:</strong> ${data.mc_version || '1.21.11'}</p>
+                        <p><strong>Active Snapshot:</strong> <code>${data.current || 'neoforge'}${data.mc_version || '1.21.11'}/</code></p>
+                    </div>
+                `;
+            }
+            
+            function updateLoaderList(data) {
+                const container = document.getElementById('loader-list');
+                if (!container) return;
+                
+                const loaders = data.loaders || [];
+                let html = '<div style="background:rgba(26,26,46,0.6);padding:12px;border-radius:4px;border:1px solid rgba(0,240,255,0.15);">';
+                
+                loaders.forEach(loader => {
+                    const isCurrent = loader.name === data.current;
+                    const statusColor = loader.installed ? '#4CAF50' : '#e74c3c';
+                    const statusText = loader.installed ? (loader.version || 'installed') : 'not installed';
+                    const badge = isCurrent ? '<span style="background:#4CAF50;color:white;padding:2px 8px;border-radius:3px;font-size:11px;margin-left:8px;">ACTIVE</span>' : '';
+                    
+                    html += `<div style="padding:8px;border-bottom:1px solid rgba(0,240,255,0.15);">
+                        <strong style="text-transform:capitalize;">${loader.name}</strong>${badge}
+                        <span style="color:${statusColor};font-size:12px;margin-left:8px;">${statusText}</span>
+                    </div>`;
+                });
+                
+                html += '</div>';
+                container.innerHTML = html;
+            }
+            
+            function updateLoaderArchives(archives) {
+                const container = document.getElementById('loader-archives');
+                if (!container) return;
+                
+                if (!archives.length) {
+                    container.innerHTML = '<p style="color:#666;">No archived mods found.</p>';
+                    return;
+                }
+                
+                let html = '<div style="background:rgba(26,26,46,0.6);padding:12px;border-radius:4px;border:1px solid rgba(0,240,255,0.15);">';
+                archives.forEach(archive => {
+                    html += `<div style="padding:8px;border-bottom:1px solid rgba(0,240,255,0.15);">
+                        <strong style="text-transform:capitalize;">${archive.loader}</strong> ${archive.version || ''}
+                        <span style="color:#888;font-size:12px;">(${archive.mc_version})</span>
+                        <span style="color:#2196F3;font-size:12px;margin-left:8px;">${archive.mod_count} mods</span>
+                    </div>`;
+                });
+                html += '</div>';
+                container.innerHTML = html;
+            }
+            
+            function installLoader() {
+                const loader = document.getElementById('target-loader').value;
+                const mcVersionInput = document.getElementById('target-mc-version');
+                const mcVersion = mcVersionInput?.value || '';
+                
+                if (!confirm(`Install ${loader} server for MC ${mcVersion}?\n\nThis will download and set up the ${loader} mod loader.`)) return;
+                showAlert(`Installing ${loader} for MC ${mcVersion}...`, 'info');
+                
+                fetch('/api/loaders/install', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({crash_log: logContent})
-                })
-                .then(r => r.json())
-                .then(data => {
-                    btn.disabled = false;
-                    btn.textContent = 'Analyze Crash Log';
+                    body: JSON.stringify({loader: loader, mc_version: mcVersion})
+                }).then(r => r.json()).then(data => {
+                    if (data.success) {
+                        showAlert(`Successfully installed ${loader} for MC ${mcVersion}`, 'success');
+                        loadLoaders();
+                    } else {
+                        showAlert(data.error || 'Installation failed', 'error');
+                    }
+                }).catch(err => showAlert('Error: ' + err, 'error'));
+            }
+            
+            function switchLoader() {
+                const loader = document.getElementById('target-loader').value;
+                const mcVersionInput = document.getElementById('target-mc-version');
+                const mcVersion = mcVersionInput?.value || '';
+                
+                let incompatibleWorlds = [];
+                let warningWorlds = [];
+                cachedWorlds.forEach(w => {
+                    const compat = getCompatibilityStatus(w.mc_version, mcVersion);
+                    if (compat.status === 'incompatible') incompatibleWorlds.push(w.name);
+                    else if (compat.status === 'warning') warningWorlds.push(w.name);
+                });
+                
+                let worldWarning = '';
+                if (incompatibleWorlds.length > 0) {
+                    worldWarning = `\n\n⚠️ WARNING: ${incompatibleWorlds.length} world(s) are INCOMPATIBLE with MC ${mcVersion}:\n• ${incompatibleWorlds.join('\n• ')}\nThese worlds may experience chunk corruption or data loss.`;
+                }
+                if (warningWorlds.length > 0) {
+                    worldWarning += `\n\n⚠️ NOTE: ${warningWorlds.length} world(s) have minor version mismatch:\n• ${warningWorlds.join('\n• ')}\nThese may have minor issues but should work.`;
+                }
+                
+                let confirmMsg = `Switch to ${loader} for MC ${mcVersion}?\n\nThis will:\n1. Create backup snapshot at {current_loader}{current_mc}/ (mods + world)\n2. Archive current mods\n3. Restore any mods found for ${loader} ${mcVersion}${worldWarning}\n\nProceed?`;
+                
+                if (!confirm(confirmMsg)) return;
+                showAlert(`Switching to ${loader}${mcVersion}...`, 'info');
+                
+                fetch('/api/loaders/switch', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({loader: loader, mc_version: mcVersion})
+                }).then(r => r.json()).then(data => {
+                    if (data.success) {
+                        const backup = data.backup || {};
+                        const archive = data.archive || {};
+                        const restore = data.restore || {};
+                        const backupMods = (backup.mods || 0) + (backup.clientonly || 0);
+                        const archiveMods = (archive.mods || 0) + (archive.clientonly || 0);
+                        const restoreMods = (restore.restored?.mods || 0) + (restore.restored?.clientonly || 0);
+                        
+                        let msg = `Switched to ${loader}${mcVersion}!\n`;
+                        msg += `Backup: ${backupMods} mods, world=${backup.world || false}\n`;
+                        msg += `Archived: ${archiveMods} mods\n`;
+                        msg += `Restored: ${restoreMods} mods`;
+                        
+                        showAlert(msg, 'success');
+                        loadLoaders();
+                        loadWorlds();
+                    } else {
+                        showAlert(data.error || 'Switch failed', 'error');
+                    }
+                }).catch(err => showAlert('Error: ' + err, 'error'));
+            }
+            
+            function updateCompatibilityStatus(data) {
+                const container = document.getElementById('compatibility-status');
+                if (!container) return;
+                
+                const conflicts = data.conflicts || [];
+                const resolved = data.resolved || 0;
+                
+                let html = `<p style="color:#666;">Analyzed ${data.mods_scanned} mods`;
+                if (conflicts.length) {
+                    html += `, found <strong style="color:#e74c3c;">${conflicts.length} potential conflicts</strong>`;
+                } else {
+                    html += `, <strong style="color:#4CAF50;">no conflicts detected</strong>`;
+                }
+                if (resolved) {
+                    html += `, resolved <strong style="color:#2196F3;">${resolved}</strong>`;
+                }
+                html += '.</p>';
+                
+                if (conflicts.length) {
+                    html += '<details style="margin-top:8px;"><summary style="cursor:pointer;color:#666;">View conflict details</summary>';
+                    html += '<div style="background:rgba(26,26,46,0.6);padding:8px;margin-top:8px;border-radius:4px;border:1px solid rgba(255,0,85,0.3);">';
+                    conflicts.slice(0, 10).forEach(c => {
+                        html += `<div style="margin-bottom:4px;"><strong>${c.target}</strong>: ${c.mods?.join(', ') || 'unknown'}</div>`;
+                    });
+                    if (conflicts.length > 10) {
+                        html += `<div style="color:#888;">...and ${conflicts.length - 10} more</div>`;
+                    }
+                    html += '</div></details>';
+                }
+                
+                container.innerHTML = html;
+            }
+            
+            function scanWorlds() {
+                showAlert('Scanning worlds...', 'info');
+                fetch('/api/worlds/scan', {method: 'POST'}).then(r => r.json()).then(data => {
+                    const count = data.worlds?.length || 0;
+                    showAlert(`Found ${count} worlds`, 'success');
+                    updateWorldSwitcher(data.worlds || [], data.current, data.server_mc_version);
+                }).catch(err => showAlert('Error: ' + err, 'error'));
+            }
+            
+            let cachedWorlds = [];
+            let cachedServerMcVersion = 'unknown';
+            
+            function loadWorlds() {
+                fetch('/api/worlds').then(r => r.json()).then(data => {
+                    cachedWorlds = data.worlds || [];
+                    cachedServerMcVersion = data.server_mc_version || 'unknown';
+                    updateWorldSwitcher(cachedWorlds, data.current, cachedServerMcVersion);
+                    updateLoaderWorldsPreview();
+                }).catch(() => {});
+            }
+            
+            function parseMcVersion(version) {
+                if (!version) return null;
+                const parts = String(version).split('.');
+                return {
+                    major: parseInt(parts[0]) || 0,
+                    minor: parseInt(parts[1]) || 0,
+                    patch: parseInt(parts[2]) || 0,
+                    full: version
+                };
+            }
+            
+            function getCompatibilityStatus(worldVersion, serverVersion) {
+                const wv = parseMcVersion(worldVersion);
+                const sv = parseMcVersion(serverVersion);
+                
+                if (!wv || !sv) return { status: 'unknown', label: 'Unknown' };
+                if (wv.full === sv.full) return { status: 'compatible', label: 'Compatible' };
+                if (wv.major === sv.major && wv.minor === sv.minor) {
+                    return { status: 'warning', label: 'May have issues' };
+                }
+                return { status: 'incompatible', label: 'Incompatible' };
+            }
+            
+            function updateWorldSwitcher(worlds, current, serverMcVersion) {
+                const dedicated = document.getElementById('world-management-dedicated');
+                const versionDisplay = document.getElementById('server-mc-version-display');
+                
+                if (versionDisplay) {
+                    versionDisplay.innerHTML = `Server MC: <strong style="color:#4CAF50;">${serverMcVersion || 'unknown'}</strong>`;
+                }
+                
+                if (!worlds.length) {
+                    if (dedicated) dedicated.innerHTML = '<p style="color:#666;">No worlds found. Create a world in-game first.</p>';
+                    return;
+                }
+                
+                const sizeMB = (bytes) => (bytes / 1024 / 1024).toFixed(1);
+                const worldList = worlds.map(w => {
+                    const isCurrent = w.name === current;
+                    const wMcVer = w.mc_version || 'unknown';
+                    const compat = getCompatibilityStatus(wMcVer, serverMcVersion);
                     
-                    if (data.error) {
-                        showAlert(data.error, 'error');
+                    const activeBadge = isCurrent ? '<span style="background:#4CAF50;color:white;padding:2px 6px;border-radius:3px;font-size:11px;margin-left:8px;">ACTIVE</span>' : '';
+                    const size = w.size ? `<span style="color:#888;font-size:12px;">(${sizeMB(w.size)} MB)</span>` : '';
+                    
+                    const mcBadge = `<span class="mc-version-badge ${compat.status}">MC ${wMcVer}</span>`;
+                    const compatBadge = `<span class="compat-status ${compat.status === 'compatible' ? 'green' : compat.status === 'warning' ? 'yellow' : 'red'}">${compat.label}</span>`;
+                    
+                    const isIncompatible = compat.status === 'incompatible';
+                    const isWarning = compat.status === 'warning';
+                    
+                    const btn = isCurrent ? '' : 
+                        `<button onclick="switchWorld('${w.name}', '${wMcVer}', '${serverMcVersion}', '${compat.status}')" 
+                            style="background:${isIncompatible ? '#e74c3c' : isWarning ? '#FF9800' : '#2196F3'};
+                            color:white;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;margin-left:8px;font-size:12px;"
+                            ${isIncompatible ? 'title="WARNING: This world is incompatible with server MC version"' : ''}>
+                            ${isIncompatible ? '⚠️ Switch' : 'Switch'}
+                        </button>`;
+                    
+                    return `<div class="world-item ${isIncompatible ? 'incompatible' : ''}" style="padding:8px;border-bottom:1px solid rgba(0,240,255,0.15);">
+                        <span class="world-name" style="font-weight:${isCurrent ? 'bold' : 'normal'};">${w.name}</span> ${mcBadge} ${compatBadge} ${size} ${activeBadge} ${btn}
+                    </div>`;
+                }).join('');
+                
+                const worldHtml = `
+                    <p style="color:#888;margin-bottom:10px;">Current world: <strong>${current}</strong> | ${worlds.length} world(s) found</p>
+                    <div style="background:rgba(26,26,46,0.6);border-radius:4px;border:1px solid rgba(0,240,255,0.15);">${worldList}</div>
+                    <p style="color:#888;font-size:11px;margin-top:8px;">World changes take effect on next server restart. <strong style="color:#e74c3c;">Red worlds are incompatible</strong> - switching may cause chunk corruption or data loss.</p>
+                `;
+                
+                if (dedicated) dedicated.innerHTML = worldHtml;
+            }
+            
+            function switchWorld(worldName, worldMcVersion, serverMcVersion, compatStatus) {
+                const wv = worldMcVersion || 'unknown';
+                const sv = serverMcVersion || 'unknown';
+                
+                let confirmMsg = `Switch to world "${worldName}"?\n\n`;
+                let confirmTitle = 'Switch World';
+                
+                if (compatStatus === 'incompatible') {
+                    confirmMsg = `⚠️ WARNING: VERSION MISMATCH ⚠️\n\nWorld MC version: ${wv}\nServer MC version: ${sv}\n\nThis world was created with a DIFFERENT MAJOR VERSION of Minecraft.\n\nSwitching may cause:\n• Chunk corruption\n• Data loss\n• Missing blocks/entities\n• World may fail to load\n\nAre you SURE you want to proceed?`;
+                    if (!confirm(confirmMsg)) return;
+                    confirmMsg = `FINAL WARNING: You are about to switch to an INCOMPATIBLE world.\n\nType "CONFIRM" to proceed with switching to "${worldName}".`;
+                    const input = prompt(confirmMsg);
+                    if (input !== 'CONFIRM') {
+                        showAlert('World switch cancelled.', 'info');
                         return;
                     }
-                    
-                    const resultsDiv = document.getElementById('crash-analysis-results');
-                    let html = '<h4 style="color:var(--neon-cyan);margin-bottom:12px;">Analysis Results</h4>';
-                    
-                    if (data.issues && data.issues.length > 0) {
-                        html += '<div style="margin-bottom:15px;">';
-                        data.issues.forEach(issue => {
-                            const color = issue.severity === 'error' ? 'var(--neon-red)' : 'var(--neon-orange)';
-                            html += `<div style="padding:8px 12px;margin-bottom:8px;background:rgba(255,0,0,0.1);border-left:3px solid ${color};border-radius:4px;">
-                                <strong style="color:${color};">${issue.type}</strong>: ${issue.message}
-                            </div>`;
-                        });
-                        html += '</div>';
-                    } else {
-                        html += '<p style="color:var(--neon-green);">No issues detected in crash log.</p>';
-                    }
-                    
-                    if (data.actions && data.actions.length > 0) {
-                        html += '<h5 style="color:var(--neon-cyan);margin:12px 0 8px;">Recommended Actions:</h5><ul style="color:#ccc;margin-left:20px;">';
-                        data.actions.forEach(action => {
-                            html += `<li style="margin-bottom:4px;">${action}</li>`;
-                        });
-                        html += '</ul>';
-                    }
-                    
-                    resultsDiv.innerHTML = html;
-                })
-                .catch(err => {
-                    btn.disabled = false;
-                    btn.textContent = 'Analyze Crash Log';
-                    showAlert('Analysis failed: ' + err, 'error');
-                });
-            }
-
-            function sendBroadcast() {
-                const msg = document.getElementById('broadcast-msg').value.trim();
-                if (!msg) { showAlert('Enter a message to broadcast', 'warning'); return; }
-                fetch('/api/broadcast', {
+                } else if (compatStatus === 'warning') {
+                    confirmMsg = `⚠️ Version Mismatch Warning\n\nWorld MC version: ${wv}\nServer MC version: ${sv}\n\nThis world was created with the same major.minor version but a different patch.\n\nSome blocks or features may not work correctly, but major corruption is unlikely.\n\nSwitch to world "${worldName}"?`;
+                    if (!confirm(confirmMsg)) return;
+                } else {
+                    confirmMsg = `Switch to world "${worldName}"?\n\nWorld version (${wv}) matches server version (${sv}).\n\nThis will take effect after restarting the server.`;
+                    if (!confirm(confirmMsg)) return;
+                }
+                
+                fetch('/api/worlds/switch', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({message: msg})
-                })
-                .then(r => r.json())
-                .then(data => {
-                    if (data.error) {
-                        showAlert('Broadcast failed: ' + data.error, 'error');
+                    body: JSON.stringify({world: worldName})
+                }).then(r => r.json()).then(data => {
+                    if (data.success) {
+                        showAlert(data.message, 'success');
+                        loadWorlds();
                     } else {
-                        showAlert('Broadcast sent!', 'success');
-                        document.getElementById('broadcast-msg').value = '';
+                        showAlert('Error: ' + data.error, 'error');
                     }
-                })
-                .catch(err => showAlert('Broadcast failed: ' + err, 'error'));
+                }).catch(err => showAlert('Error: ' + err, 'error'));
+            }
+            
+            function updateLoaderWorldsPreview() {
+                const loader = document.getElementById('target-loader')?.value;
+                const mcVersion = document.getElementById('target-mc-version')?.value;
+                const previewDiv = document.getElementById('loader-worlds-preview');
+                const listDiv = document.getElementById('loader-worlds-list');
+                
+                if (!previewDiv || !listDiv || !cachedWorlds.length) return;
+                
+                previewDiv.style.display = 'block';
+                
+                let html = '';
+                cachedWorlds.forEach(w => {
+                    const wMcVer = w.mc_version || 'unknown';
+                    const compat = getCompatibilityStatus(wMcVer, mcVersion);
+                    const isCompatible = compat.status === 'compatible';
+                    const isWarning = compat.status === 'warning';
+                    const isIncompatible = compat.status === 'incompatible';
+                    
+                    const mcBadge = `<span class="mc-version-badge ${compat.status}">MC ${wMcVer}</span>`;
+                    const statusLabel = `<span style="color:${isCompatible ? '#4CAF50' : isWarning ? '#FF9800' : '#e74c3c'};font-size:11px;margin-left:6px;">${compat.label}</span>`;
+                    
+                    html += `<div class="world-row ${isIncompatible ? 'disabled' : ''}">
+                        <span style="${isIncompatible ? 'text-decoration:line-through;color:#888;' : ''}">${w.name}</span>
+                        ${mcBadge}${statusLabel}
+                    </div>`;
+                });
+                
+                listDiv.innerHTML = html || '<p style="color:#666;font-size:12px;">No worlds found</p>';
+            }
+            
+            function broadcastModUpdate() {
+                if (!confirm('Send mod update notification to all online players?')) return;
+                fetch('/api/broadcast-mods', {method: 'POST'}).then(r => r.json()).then(data => {
+                    showAlert(data.message || 'Broadcast sent', 'success');
+                }).catch(err => showAlert('Error: ' + err, 'error'));
+            }
+            
+            function saveConfig() {
+                const cfg = {
+                    mc_version: document.getElementById('mc-version')?.value,
+                    ferium_update_interval_hours: parseInt(document.getElementById('update-freq')?.value || 4),
+                };
+                fetch('/api/config', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(cfg)})
+                    .then(r => r.json()).then(data => showAlert('Config saved', 'success'))
+                    .catch(err => showAlert('Error: ' + err, 'error'));
+            }
+            
+            // Auto-refresh status every 5 seconds
+            setInterval(refreshStatus, 5000);
+            setInterval(refreshMods, 30000);
+            setInterval(loadQuarantine, 15000);
+            setInterval(loadEvents, 10000);
+            
+            // New functions for mod management
+            function quarantineClientMods() {
+                if (!confirm('Quarantine all mods with client-side functionality? This will move them to quarantine folder.')) return;
+                
+                fetch('/api/quarantine-client-mods', { method: 'POST' })
+                    .then(r => r.json())
+                    .then(result => {
+                        if (result.success) {
+                            showAlert(`Quarantined ${result.quarantined} client mods`, 'success');
+                            loadMods();
+                            loadClientMods();
+                        } else {
+                            showAlert(`Error: ${result.error}`, 'error');
+                        }
+                    })
+                    .catch(err => showAlert(`Error: ${err}`, 'error'));
+            }
+            
+            function loadServerMods() {
+                fetch('/api/server-mods')
+                    .then(r => r.json())
+                    .then(data => {
+                        const content = document.getElementById('server-mods-list');
+                        if (data.mods && data.mods.length) {
+                            content.innerHTML = data.mods.map(mod => `
+                                <div class="mod-item">
+                                    <input type="checkbox" class="server-mod-checkbox" value="${mod.id}" style="width:18px;height:18px;margin-right:12px;accent-color:var(--neon-cyan);">
+                                    <div class="mod-info">
+                                        <span class="mod-name">${mod.name || mod.id}</span>
+                                        <span class="mod-size">${mod.size || ''}</span>
+                                    </div>
+                                    <div class="mod-actions">
+                                        <button onclick="quarantineMod('${mod.id}')" class="btn-small">Quarantine</button>
+                                    </div>
+                                </div>
+                            `).join('');
+                        } else {
+                            content.innerHTML = '<p style="color:#666;">No server mods installed</p>';
+                        }
+                    })
+                    .catch(() => {
+                        document.getElementById('server-mods-list').innerHTML = '<p style="color:#c00;">Error loading server mods</p>';
+                    });
+            }
+            
+            function serverSelectAll() {
+                const checkboxes = document.querySelectorAll('.server-mod-checkbox');
+                const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+                checkboxes.forEach(cb => cb.checked = !allChecked);
+            }
+
+            function getSelectedServerModIds() {
+                const checkboxes = document.querySelectorAll('.server-mod-checkbox:checked');
+                return Array.from(checkboxes).map(cb => cb.value);
+            }
+
+            function serverQuarantineSelected() {
+                const selected = getSelectedServerModIds();
+                if (!selected.length) { showAlert('No mods selected', 'error'); return; }
+                if (!confirm(`Quarantine ${selected.length} selected mod(s)?`)) return;
+                fetch('/api/quarantine-mods', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({mod_ids: selected, folder: 'mods'})
+                }).then(r => r.json()).then(data => {
+                    showAlert(data.message || `Quarantined ${selected.length} mods`, 'success');
+                    loadServerMods();
+                }).catch(err => showAlert('Error: ' + err, 'error'));
+            }
+
+            function serverDeleteSelected() {
+                const selected = getSelectedServerModIds();
+                if (!selected.length) { showAlert('No mods selected', 'error'); return; }
+                if (!confirm(`DELETE ${selected.length} selected mod(s)? This cannot be undone!`)) return;
+                fetch('/api/delete-mods', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({mod_ids: selected, folder: 'mods'})
+                }).then(r => r.json()).then(data => {
+                    showAlert(data.message || `Deleted ${selected.length} mods`, 'success');
+                    loadServerMods();
+                }).catch(err => showAlert('Error: ' + err, 'error'));
             }
 
             function quickSearchMod() {
@@ -2300,10 +2422,8 @@
                 loadQuarantine();
                 loadBlacklist();
                 loadEvents();
-                loadServerEvents();
                 loadWorlds();
                 loadLoaders();
-                loadTheme();
                 
                 // First-visit check: show mod selector if never loaded AND config allows it
                 if (!localStorage.getItem('neorunner-mods-loaded')) {

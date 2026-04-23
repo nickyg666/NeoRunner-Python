@@ -238,16 +238,93 @@ def cmd_restart(args):
 
 
 def cmd_setup(args):
-    """Run setup wizard."""
+    """Run setup wizard - interactive or non-interactive based on arguments."""
+    from .config import ensure_config, load_cfg, save_cfg, ServerConfig
+    from .installer import setup
+    from .version import get_latest_minecraft_version, get_all_minecraft_versions, get_latest_for_loader
+    
     cfg = load_cfg()
-    from .config import ensure_config
     cfg = ensure_config(cfg)
     
-    from .installer import setup
+    # If args provided, use them; otherwise interactive
+    interactive = not (args.mc_version and args.loader and args.xmx)
     
-    print("Running NeoRunner setup...")
+    if args.mc_version:
+        cfg.mc_version = args.mc_version
+    if args.loader:
+        cfg.loader = args.loader
+    if args.xmx:
+        cfg.xmx = args.xmx
+        if "G" in args.xmx:
+            val = int(args.xmx.replace("G", "")) // 2
+            cfg.xms = f"{val}G"
+    if args.xms:
+        cfg.xms = args.xms
+    if args.http_port:
+        cfg.http_port = args.http_port
+    
+    print("="*50)
+    print("NeoRunner Setup Wizard")
+    print("="*50)
+    
+    if interactive:
+        print("\nStep 1: Select Minecraft Version")
+        print(f"  Current: {cfg.mc_version}")
+        print("  [1] Latest (auto-detect)")
+        print("  [2] Custom version")
+        ver_choice = input("  Select [1]: ").strip() or "1"
+        
+        if ver_choice == "1":
+            print("    Fetching latest version...")
+            cfg.mc_version = get_latest_minecraft_version()
+            print(f"    Using: {cfg.mc_version}")
+        elif ver_choice == "2":
+            all_vers = get_all_minecraft_versions()
+            print(f"  Available: {', '.join(all_vers[:5])}")
+            cfg.mc_version = input("  Enter version: ").strip() or cfg.mc_version
+        
+        print("\nStep 2: Select Mod Loader")
+        print(f"  Current: {cfg.loader}")
+        print("  [1] NeoForge (recommended)")
+        print("  [2] Forge")
+        print("  [3] Fabric")
+        loader_choice = input("  Select [1]: ").strip() or "1"
+        
+        loader_map = {"1": "neoforge", "2": "forge", "3": "fabric"}
+        cfg.loader = loader_map.get(loader_choice, "neoforge")
+        
+        print(f"    Fetching latest {cfg.loader} version...")
+        loader_ver = get_latest_for_loader(cfg.loader)
+        print(f"    Version: {loader_ver}")
+        
+        print("\nStep 3: Memory Allocation")
+        print(f"  Current max: {cfg.xmx}")
+        xmx_input = input(f"  Enter max memory [default: {cfg.xmx}]: ").strip()
+        if xmx_input:
+            cfg.xmx = xmx_input
+            if "G" in xmx_input:
+                val = int(xmx_input.replace("G", "")) // 2
+                cfg.xms = f"{val}G"
+            else:
+                cfg.xms = cfg.xmx
+        
+        print("\nStep 4: Server Configuration")
+        print(f"  HTTP Port: {cfg.http_port}")
+        port_input = input(f"  Enter HTTP port [default: {cfg.http_port}]: ").strip()
+        if port_input:
+            cfg.http_port = int(port_input)
+        
+        save_cfg(cfg)
+        print("\nConfiguration saved!")
+    
+    print("\nRunning NeoRunner setup...")
     if setup(cfg):
         print("Setup complete!")
+        print(f"\nServer configured for:")
+        print(f"  Minecraft: {cfg.mc_version}")
+        print(f"  Loader: {cfg.loader}")
+        print(f"  Memory: {cfg.xms} -> {cfg.xmx}")
+        print(f"  HTTP Port: {cfg.http_port}")
         return 0
     else:
         print("Setup failed!")
@@ -474,10 +551,24 @@ def main():
     subparsers.add_parser('restart', help='Restart the server')
     
     # Setup command
-    subparsers.add_parser('setup', help='Run setup wizard')
+    setup_parser = subparsers.add_parser('setup', help='Run interactive setup wizard')
+    setup_parser.add_argument('--mc-version', default=None, help='Minecraft version (auto-detected if not specified)')
+    setup_parser.add_argument('--loader', default=None, choices=['neoforge', 'forge', 'fabric'], help='Mod loader (NeoForge default)')
+    setup_parser.add_argument('--xmx', default=None, help='Max heap memory (default: 4G)')
+    setup_parser.add_argument('--xms', default=None, help='Initial heap memory')
+    setup_parser.add_argument('--http-port', type=int, default=None, help='HTTP port for dashboard')
+    setup_parser.add_argument('--query-port', type=int, default=None, help='Game port')
+    setup_parser.add_argument('--force', action='store_true', help='Force setup even if config exists')
     
-    # Install command (alias for setup)
-    subparsers.add_parser('install', help='Run full installer (same as setup)')
+    # Install command (alias for setup, fully interactive)
+    install_parser = subparsers.add_parser('install', help='Run interactive installation (same as setup)')
+    install_parser.add_argument('--mc-version', default=None, help='Minecraft version')
+    install_parser.add_argument('--loader', default=None, choices=['neoforge', 'forge', 'fabric'], help='Mod loader')
+    install_parser.add_argument('--xmx', default=None, help='Max heap memory')
+    install_parser.add_argument('--xms', default=None, help='Initial heap memory')
+    install_parser.add_argument('--http-port', type=int, default=None, help='HTTP port')
+    install_parser.add_argument('--query-port', type=int, default=None, help='Game port')
+    install_parser.add_argument('--force', action='store_true', help='Force installation')
     
     # Init command - create default config
     init_parser = subparsers.add_parser('init', help='Initialize default config')

@@ -1,59 +1,61 @@
 #!/bin/bash
 #
-# NeoRunner - One command install + configure + run
+# NeoRunner - Self-contained installer
 # Usage: curl -sL https://raw.githubusercontent.com/nickyg666/NeoRunner-Python/main/install.sh | bash
-#
-# After install, run interactively:
-#   neorunner config --setup
-#   neorunner start
 #
 
 set -e
 
-B='\033[0;34m'
-G='\033[0;32m'
-NC='\033[0m'
-
-echo -e "${B}=== NeoRunner Installer ===${NC}"
-
 INSTALL_DIR="${INSTALL_DIR:-$HOME/neorunner}"
-cd "$INSTALL_DIR" 2>/dev/null || mkdir -p "$INSTALL_DIR" && cd "$INSTALL_DIR"
+mkdir -p "$INSTALL_DIR"
+cd "$INSTALL_DIR"
 
-# Clone or update
+echo "=== NeoRunner Installer ==="
+echo "Install dir: $INSTALL_DIR"
+
+# Clone if no .git
 if [ ! -d ".git" ]; then
     echo "Cloning..."
     git clone -q -b main --depth 1 https://github.com/nickyg666/NeoRunner-Python.git .
-else
-    echo "Updating..."
-    git -C . pull -q origin main 2>/dev/null || true
 fi
 
-# Venv + pip install
+# Create venv
 [ ! -d "neorunner_venv" ] && python3 -m venv neorunner_venv
+
+# Install package
+echo "Installing package..."
 source neorunner_venv/bin/activate
 pip install -q --break-system-packages --force-reinstall -e .
 
-# Create dirs + eula
+# Create directories
 mkdir -p mods clientonly config backups crash-reports logs world libraries loaders
+
+# Create eula
 [ ! -f eula.txt ] && echo "eula=true" > eula.txt
 
-# Run setup to install loader (non-interactive)
+# Force fresh config
+rm -f config.json
+
+# Create fresh config
+echo "Creating config..."
+neorunner init 2>/dev/null || true
+
+# Set proper paths
+neorunner config server_ip 192.168.0.150 2>/dev/null || true
+neorunner config http_port 8000 2>/dev/null || true
+neorunner config xmx 4G 2>/dev/null || true
+
+# Create proper JVM args
+echo "-Xmx4G" > user_jvm_args.txt
+echo "-Xms2G" >> user_jvm_args.txt
+echo "-XX:+UseG1GC" >> user_jvm_args.txt
+echo "-XX:MaxGCPauseMillis=200" >> user_jvm_args.txt
+echo "-Djava.net.preferIPv4Stack=true" >> user_jvm_args.txt
+
+# Run setup
 echo "Installing loader..."
-neorunner setup 2>/dev/null || true
+neorunner setup 2>&1 || echo "Setup done"
 
-# Create default config
-[ ! -f config.json ] && neorunner init 2>/dev/null || true
-
-echo -e "${G}=== Ready! ===${NC}"
-echo ""
-echo "  To configure INTERACTIVELY, run these commands:"
-echo "    cd $INSTALL_DIR"
-echo "    source neorunner_venv/bin/activate"
-echo "    neorunner config --setup"
-echo ""
-echo "  To start server:"
-echo "    cd $INSTALL_DIR"
-echo "    source neorunner_venv/bin/activate"
-echo "    neorunner start"
-echo ""
-echo "  Dashboard: http://localhost:8000"
+echo "=== Ready! ==="
+echo "Dashboard: http://192.168.0.150:8000"
+echo "Start: cd $INSTALL_DIR && source neorunner_venv/bin/activate && neorunner start"

@@ -138,7 +138,10 @@ fi
 
 source neorunner_venv/bin/activate
 pip install --upgrade pip --break-system-packages
-pip install --break-system-packages --force-reinstall -e .
+pip install --break-system-packages --force-reinstall --no-cache-dir -e .
+
+# Verify and show version
+neorunner --version 2>/dev/null || echo "  neorunner command ready"
 
 # Verify installation
 if ! command -v neorunner &> /dev/null; then
@@ -171,11 +174,9 @@ fi
 echo -e "${GREEN}[8/8] Running NeoRunner installer...${NC}"
 echo "  Running server installer..."
 
-# Auto-install with default settings (non-interactive when no TTY)
-# This fetches latest versions automatically
-neorunner install --mc-version latest --loader neoforge 2>&1 || {
-    echo "  ✗ Installation failed, trying with explicit defaults..."
-    neorunner install --mc-version 1.21.11 --loader neoforge --xmx 4G 2>&1 || true
+# Use setup (not install) for compatibility
+neorunner setup --mc-version latest --loader neoforge --xmx 4G 2>&1 || {
+    echo "  ✗ Setup failed..."
 }
 
 echo ""

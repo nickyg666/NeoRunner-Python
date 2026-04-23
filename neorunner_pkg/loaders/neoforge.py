@@ -57,29 +57,22 @@ class NeoForgeLoader(LoaderBase):
     
     def _setup_jvm_args(self) -> None:
         """Create user_jvm_args.txt with memory and performance settings."""
-        jvm_file = self.cwd / "user_jvm_args.txt" if isinstance(self.cwd, Path) else os.path.join(self.cwd, "user_jvm_args.txt")
+        # Use absolute string path - not Path object
+        cwd_str = str(self.cwd) if hasattr(self.cwd, '__fspath__') else str(self.cwd)
+        jvm_file = os.path.join(cwd_str, "user_jvm_args.txt")
         
-        # Always regenerate - ensure fresh clean args (skip if recently modified)
+        # ALWAYS remove and recreate - no time check
         if os.path.exists(jvm_file):
-            try:
-                import time
-                if time.time() - os.path.getmtime(jvm_file) < 300:  # < 5 min old, keep it
-                    return
-            except:
-                pass
             os.remove(jvm_file)
         
         xmx = _get_cfg_value(self.cfg, "xmx", "4G")
         xms = _get_cfg_value(self.cfg, "xms", "2G")
         
-        jvm_args = f"""-Xmx{xmx}
--Xms{xms}
--XX:+UseG1GC
--XX:MaxGCPauseMillis=200
--XX:+ParallelRefProcEnabled
--XX:+UnlockExperimentalVMOptions
--XX:+AlwaysPreTouch
--XX:-OmitStackTraceInFastThrow
+        # Simple clean args - no fancy formatting
+        jvm_args = f"-Xmx{xmx}\n-Xms{xms}\n-XX:+UseG1GC\n-Djava.net.preferIPv4Stack=true\n"
+        
+        with open(jvm_file, 'w') as f:
+            f.write(jvm_args)
 -XX:+ExplicitGCInvokesConcurrent
 -Djava.net.preferIPv4Stack=true
 """

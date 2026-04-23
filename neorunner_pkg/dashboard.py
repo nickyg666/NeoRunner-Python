@@ -2153,7 +2153,7 @@ def run_dashboard(host: str = "0.0.0.0", port: int = 8000, debug: bool = False):
     DASHBOARD_PORT = port
     
     log_event("DASHBOARD", f"Starting dashboard on {host}:{port} with Waitress")
-    serve(app, host=host, port=port, threads=8, queue_max=2048)
+    serve(app, host=host, port=port, threads=8)
 
 
 if __name__ == "__main__":

@@ -145,32 +145,36 @@ class NeoForgeLoader(LoaderBase):
         """Build NeoForge launch command."""
         nf_ver = self._get_neoforge_version()
         
-        # Run NeoForge installer --install to set up all files (ALL versions)
-        log_event("LOADER_NEOFORGE", "Running installer to extract files...")
         jar = f"libraries/net/neoforged/neoforge/{nf_ver}/neoforge-{nf_ver}-universal.jar"
-        
-        try:
-            subprocess.run(
-                ["java", "-jar", jar, "--install", "."],
-                capture_output=True,
-                timeout=180,
-                cwd=str(self.cwd)
-            )
-        except Exception as e:
-            log_event("LOADER_NEOFORGE", f"Installer note: {e}")
-        
-        # Direct -jar launch (works after installer runs)
         cwd_str = str(self.cwd) if hasattr(self.cwd, '__fspath__') else str(self.cwd)
-        jar = f"libraries/net/neoforged/neoforge/{nf_ver}/neoforge-{nf_ver}-universal.jar"
         jar_path = os.path.join(cwd_str, jar)
         
-        java_cmd = [
-            "java",
-            "@user_jvm_args.txt",
-            "-jar",
-            jar_path,
-            "nogui"
-        ]
+        # Check if run.sh exists - if not, need to run installer
+        run_script = os.path.join(cwd_str, "run.sh")
+        if not os.path.exists(run_script):
+            log_event("LOADER_NEOFORGE", "Running installer to extract files...")
+            try:
+                subprocess.run(
+                    ["java", "-jar", jar_path, "--installServer", "."],
+                    capture_output=True,
+                    timeout=180,
+                    cwd=cwd_str
+                )
+            except Exception as e:
+                log_event("LOADER_NEOFORGE", f"Installer note: {e}")
+        
+        # For NeoForge 26.x, use run.sh after installer runs
+        if os.path.exists(run_script):
+            java_cmd = ["java", "@user_jvm_args.txt", "-jar", "server.jar", "nogui"]
+        else:
+            # Fallback to direct -jar (for older versions)
+            java_cmd = [
+                "java",
+                "@user_jvm_args.txt",
+                "-jar",
+                jar_path,
+                "nogui"
+            ]
         return java_cmd
     
     def _get_neoforge_version(self) -> str:

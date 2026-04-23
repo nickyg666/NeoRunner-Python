@@ -144,7 +144,7 @@ class NeoForgeLoader(LoaderBase):
         """Extract NeoForge version from libraries - dynamically."""
         lib_path = self.cwd / "libraries" / "net" / "neoforged" / "neoforge" if isinstance(self.cwd, Path) else os.path.join(self.cwd, "libraries/net/neoforged/neoforge")
         if os.path.exists(lib_path):
-            versions = [d for d in os.listdir(lib_path) if os.path.isdir(os.path.join(lib_path, d)) and d.startswith("26.")]
+            versions = [d for d in os.listdir(lib_path) if os.path.isdir(os.path.join(lib_path, d))]
             if versions:
                 latest = sorted(versions)[-1]
                 # Verify the universal jar exists
@@ -158,7 +158,7 @@ class NeoForgeLoader(LoaderBase):
         if latest:
             # Convert format like "26.1.2.22-beta" to "26.1.2"
             return latest.split("-")[0] if "-" in latest else latest
-        return "26.1.2"
+        return "21.11.42"
     
     def detect_crash_reason(self, log_output: str) -> Dict[str, Any]:
         """Parse NeoForge crash logs for common issues.

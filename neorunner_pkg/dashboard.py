@@ -32,6 +32,7 @@ log = logging.getLogger(__name__)
 template_dir = Path(__file__).parent / "templates"
 static_dir = Path(__file__).parent / "static"
 app = Flask(__name__, template_folder=str(template_dir), static_folder=str(static_dir))
+DASHBOARD_PORT = None
 app.secret_key = os.urandom(24)
 
 
@@ -2093,6 +2094,32 @@ def api_run_preflight():
 def run_dashboard(host: str = "0.0.0.0", port: int = 8000, debug: bool = False):
     """Run the dashboard with Waitress production server."""
     from waitress import serve
+    import socket
+    
+    def is_port_free(p: int) -> bool:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind((host, p))
+                return True
+        except OSError:
+            return False
+    
+    # Try ports incrementally if in use
+    original_port = port
+    for try_port in range(port, port + 10):
+        if is_port_free(try_port):
+            port = try_port
+            break
+    else:
+        log_event("ERROR", f"No free ports available in range {port}-{port+9}")
+        return
+    
+    if port != original_port:
+        log_event("DASHBOARD", f"Port {original_port} in use, using {port} instead")
+    
+    global DASHBOARD_PORT
+    DASHBOARD_PORT = port
+    
     log_event("DASHBOARD", f"Starting dashboard on {host}:{port} with Waitress")
     serve(app, host=host, port=port, threads=4)
 

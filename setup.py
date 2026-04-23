@@ -3,6 +3,7 @@
 Setup script for NeoRunner - Minecraft Modded Server Manager
 
 Install: pip install -e .
+     or: pip install .
 """
 
 from setuptools import setup, find_packages
@@ -19,8 +20,8 @@ setup(
     description="Minecraft modded server manager for NeoForge, Forge, and Fabric",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/neorunner/neorunner",
-    packages=["neorunner_pkg", "neorunner_pkg.loaders"],
+    url="https://github.com/nickyg666/NeoRunner-Python",
+    packages=find_packages(include=["neorunner_pkg", "neorunner_pkg.*"]),
     package_data={
         "neorunner_pkg": ["templates/*.html", "static/*"],
     },
@@ -46,7 +47,7 @@ setup(
     },
     keywords="minecraft server modded neoforge forge fabric mods",
     project_urls={
-        "Bug Reports": "https://github.com/neorunner/neorunner/issues",
-        "Source": "https://github.com/neorunner/neorunner",
+        "Bug Reports": "https://github.com/nickyg666/NeoRunner-Python/issues",
+        "Source": "https://github.com/nickyg666/NeoRunner-Python",
     },
 )

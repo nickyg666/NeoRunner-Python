@@ -132,10 +132,19 @@ class NeoForgeLoader(LoaderBase):
     
     def build_java_command(self) -> List[str]:
         """Build NeoForge launch command."""
+        nf_ver = self._get_neoforge_version()
+        args_file = f"libraries/net/neoforged/neoforge/{nf_ver}/unix_args.txt"
+        
+        # Create unix_args.txt if missing (NeoForge 26+ uses @libraries args)
+        if not os.path.exists(args_file):
+            with open(args_file, 'w') as f:
+                jar = f"libraries/net/neoforged/neoforge/{nf_ver}/neoforge-{nf_ver}-universal.jar"
+                f.write(f"-jar {jar}\n")
+        
         java_cmd = [
             "java",
             "@user_jvm_args.txt",
-            f"@libraries/net/neoforged/neoforge/{self._get_neoforge_version()}/unix_args.txt",
+            f"@{args_file}",
             "nogui"
         ]
         return java_cmd

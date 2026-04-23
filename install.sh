@@ -82,6 +82,10 @@ if [ ! -f eula.txt ]; then
     echo "eula=true" > eula.txt
 fi
 
+echo "Running loader installation..."
+source neorunner_venv/bin/activate
+neorunner setup 2>&1 | head -20
+
 if [ ! -f config.json ]; then
     echo "Creating config..."
     neorunner init || true

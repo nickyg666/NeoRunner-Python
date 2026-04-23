@@ -31,9 +31,6 @@ class JavaVersion:
 class JavaManager:
     """Manages Java installations for the server."""
     
-    # Minimum required Java version
-    MIN_VERSION = 21
-    
     # Known Java vendors
     VENDORS = {
         "openjdk": "OpenJDK",
@@ -46,6 +43,45 @@ class JavaManager:
     def __init__(self):
         self.installations: List[JavaVersion] = []
         self.scan_installations()
+    
+    @staticmethod
+    def get_required_java_version(loader: str = "neoforge", loader_version: str = None) -> int:
+        """Get required Java version based on loader/loader version.
+        
+        NeoForge 26.x requires Java 25
+        NeoForge 21.x requires Java 21
+        """
+        if loader == "neoforge" and loader_version:
+            # Check for 26.x versions (e.g., "26.1.2.22", "21.11.42")
+            major = loader_version.split(".")[0]
+            try:
+                if int(major) >= 26:
+                    return 25
+            except (ValueError, IndexError):
+                pass
+        # Default: Java 21
+        return 21
+    
+    def _get_loader_version(self) -> str:
+        """Get current loader version from config."""
+        try:
+            cfg = load_cfg()
+            loader = cfg.loader
+            # Get loader version - check libraries first
+            lib_path = CWD / "libraries" / "net" / "neoforged" / "neoforge"
+            if lib_path.exists():
+                versions = [d.name for d in lib_path.iterdir() if d.is_dir()]
+                if versions:
+                    return sorted(versions)[-1]
+            # Fallback: just return a high version to trigger Java 25
+            return "21.11.42"
+        except Exception:
+            return "21.11.42"
+    
+    @property
+    def MIN_VERSION(self) -> int:
+        """Dynamic minimum Java version based on config."""
+        return self.get_required_java_version(loader_version=self._get_loader_version())
     
     def scan_installations(self):
         """Scan system for Java installations."""
@@ -140,7 +176,7 @@ class JavaManager:
     
     def get_compatible_installations(self) -> List[JavaVersion]:
         """Get Java installations that meet minimum requirements."""
-        return [j for j in self.installations if j.version_number >= self.MIN_VERSION]
+        return [j for j in self.installations if j.version_number >= self.get_required_java_version()]
     
     def get_best_java(self) -> Optional[JavaVersion]:
         """Get the best available Java installation."""
@@ -263,16 +299,16 @@ class JavaManager:
             return {
                 "has_java": False,
                 "message": "No compatible Java installation found",
-                "required_version": self.MIN_VERSION,
+                "required_version": self.get_required_java_version(),
             }
         
         # Check for Java-specific issues in mods
         issues = []
         
-        if best_java.version_number < self.MIN_VERSION:
+        if best_java.version_number < self.get_required_java_version():
             issues.append({
                 "type": "version",
-                "message": f"Java {best_java.version} is too old. Minimum required: {self.MIN_VERSION}",
+                "message": f"Java {best_java.version} is too old. Minimum required: {JavaManager.get_required_java_version()}",
                 "severity": "error"
             })
         
@@ -310,7 +346,7 @@ def get_java_info() -> Dict[str, Any]:
                 "version": j.version,
                 "vendor": j.vendor,
                 "is_default": j.is_default,
-                "compatible": j.version_number >= JavaManager.MIN_VERSION
+                "compatible": j.version_number >= JavaManager.get_required_java_version(loader_version=manager._get_loader_version())
             }
             for j in manager.installations
         ],

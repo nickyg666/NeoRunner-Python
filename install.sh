@@ -3,6 +3,10 @@
 # NeoRunner - One command install + configure + run
 # Usage: curl -sL https://raw.githubusercontent.com/nickyg666/NeoRunner-Python/main/install.sh | bash
 #
+# After install, run interactively:
+#   neorunner config --setup
+#   neorunner start
+#
 
 set -e
 
@@ -33,16 +37,23 @@ pip install -q --break-system-packages --force-reinstall -e .
 mkdir -p mods clientonly config backups crash-reports logs world libraries loaders
 [ ! -f eula.txt ] && echo "eula=true" > eula.txt
 
-# Run interactive config (will prompt!)
-echo "Running interactive config..."
-neorunner config --setup || true
-
-# Run setup to install loader
+# Run setup to install loader (non-interactive)
 echo "Installing loader..."
-neorunner setup 2>&1 || true
+neorunner setup 2>/dev/null || true
+
+# Create default config
+[ ! -f config.json ] && neorunner init 2>/dev/null || true
 
 echo -e "${G}=== Ready! ===${NC}"
-echo "  cd $INSTALL_DIR"
-echo "  source neorunner_venv/bin/activate"
-echo "  neorunner start"
+echo ""
+echo "  To configure INTERACTIVELY, run these commands:"
+echo "    cd $INSTALL_DIR"
+echo "    source neorunner_venv/bin/activate"
+echo "    neorunner config --setup"
+echo ""
+echo "  To start server:"
+echo "    cd $INSTALL_DIR"
+echo "    source neorunner_venv/bin/activate"
+echo "    neorunner start"
+echo ""
 echo "  Dashboard: http://localhost:8000"

@@ -28,7 +28,7 @@ echo -e "${BLUE}"
 echo "╔════════════════════════════════════════════════════════════════════╗"
 echo "║           NeoRunner v2.3.1 Installer                ║"
 ...
-LATEST_TAG=${LATEST_TAG:-v2.3.1}
+LATEST_TAG=${LATEST_TAG:-main}
 echo "  Version: $LATEST_TAG"
 
 INSTALL_DIR="${INSTALL_DIR:-$HOME/neorunner}"

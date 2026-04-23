@@ -26,7 +26,7 @@ done
 
 echo -e "${BLUE}"
 echo "╔════════════════════════════════════════════════════════════════════╗"
-echo "║           NeoRunner v2.3.1 Installer                ║"
+echo "║           NeoRunner Installer                ║"
 ...
 LATEST_TAG=${LATEST_TAG:-main}
 echo "  Version: $LATEST_TAG"

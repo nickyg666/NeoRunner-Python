@@ -153,6 +153,14 @@ def install_neoforge(cfg: ServerConfig) -> bool:
         
         if loader_dir.exists():
             log_event("INFO", f"NeoForge {neo_version} installed")
+            # Update config with the correct server_jar path
+            from .config import load_cfg, save_cfg
+            cfg = load_cfg()
+            server_jar_path = str(loader_dir / f"neoforge-{neo_version}-universal.jar")
+            cfg.server_jar = server_jar_path
+            # Also set server_port from version if needed
+            save_cfg(cfg)
+            log_event("INFO", f"Config updated: server_jar={server_jar_path}")
             return True
         else:
             log_event("ERROR", f"Install failed: {result.stderr[:500]}")

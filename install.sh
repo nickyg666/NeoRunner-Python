@@ -87,12 +87,23 @@ if [ ! -f config.json ]; then
     neorunner init || true
 fi
 
-echo "Running setup..."
-source neorunner_venv/bin/activate
-neorunner setup --yes 2>&1 || true
-
 echo ""
 echo "========================================================"
+echo "  NeoRunner ready!"
+echo "========================================================"
+echo ""
+echo "  To configure interactively:"
+echo "    cd $INSTALL_DIR"
+echo "    source neorunner_venv/bin/activate"
+echo "    neorunner config --setup"
+echo ""
+echo "  To start server:"
+echo "    cd $INSTALL_DIR"
+echo "    source neorunner_venv/bin/activate"
+echo "    neorunner start"
+echo ""
+echo "  Dashboard: http://localhost:8000"
+echo ""
 echo "  NeoRunner ready!"
 echo "========================================================"
 echo ""

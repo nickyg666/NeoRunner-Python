@@ -422,6 +422,10 @@ def cmd_config(args):
     """Manage configuration."""
     cfg = load_cfg()
     
+    if args.setup:
+        # Interactive config wizard
+        return cmd_config_setup(cfg)
+    
     if args.show:
         print("Current Configuration:")
         print(json.dumps(cfg.to_dict(), indent=2))
@@ -436,9 +440,59 @@ def cmd_config(args):
             print(f"Unknown config key: {args.key}")
             return 1
     else:
-        print("Use --show to display config, or KEY VALUE to update")
+        print("Use --show to display config, --setup for interactive wizard, or KEY VALUE to update")
     
     return 0
+
+
+def cmd_config_setup(cfg):
+    """Interactive configuration wizard."""
+    from .config import ensure_config, save_cfg, ServerConfig
+    from .version import get_latest_minecraft_version, get_latest_for_loader
+    
+    print("="*50)
+    print("NeoRunner Configuration Wizard")
+    print("="*50)
+    
+    try:
+        print(f"\n  Current MC: {cfg.mc_version}, Loader: {cfg.loader}")
+        mc_input = input("  Enter MC version (or 'latest'): ").strip()
+        if mc_input.lower() == "latest":
+            cfg.mc_version = get_latest_minecraft_version()
+        elif mc_input:
+            cfg.mc_version = mc_input
+        
+        print(f"\n  Current Loader: {cfg.loader}")
+        print("  [1] NeoForge  [2] Forge  [3] Fabric")
+        loader_choice = input("  Select [1]: ").strip() or "1"
+        loader_map = {"1": "neoforge", "2": "forge", "3": "fabric"}
+        cfg.loader = loader_map.get(loader_choice, "neoforge")
+        
+        if cfg.loader:
+            latest = get_latest_for_loader(cfg.loader)
+            print(f"  Latest {cfg.loader}: {latest}")
+        
+        print(f"\n  Current Memory: {cfg.xmx}")
+        xmx_input = input("  Enter max memory (e.g. 4G): ").strip()
+        if xmx_input:
+            cfg.xmx = xmx_input
+            if "G" in xmx_input:
+                val = int(xmx_input.replace("G", "")) // 2
+                cfg.xms = f"{val}G"
+        
+        print(f"\n  Current HTTP Port: {cfg.http_port}")
+        port_input = input("  Enter HTTP port: ").strip()
+        if port_input and port_input.isdigit():
+            cfg.http_port = int(port_input)
+        
+        cfg = ensure_config(cfg)
+        save_cfg(cfg)
+        print("\nConfiguration saved!")
+        return 0
+        
+    except EOFError:
+        print("\nCancelled.")
+        return 1
 
 
 def cmd_world(args):
@@ -609,6 +663,7 @@ def main():
     # Config command
     config_parser = subparsers.add_parser('config', help='Manage configuration')
     config_parser.add_argument('--show', action='store_true', help='Show current config')
+    config_parser.add_argument('--setup', action='store_true', help='Interactive configuration wizard')
     config_parser.add_argument('key', nargs='?', help='Config key to update')
     config_parser.add_argument('value', nargs='?', help='New value')
     

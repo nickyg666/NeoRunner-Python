@@ -16,8 +16,10 @@ log = logging.getLogger(__name__)
 def _get_cfg_value(cfg: Union[Any, dict], key: str, default: Any = None) -> Any:
     """Get config value from either object or dict."""
     if isinstance(cfg, dict):
-        return cfg.get(key, default)
-    return getattr(cfg, key, default) or default
+        val = cfg.get(key, default)
+        return val if val is not None else default
+    val = getattr(cfg, key, default)
+    return val if val is not None else default
 
 
 class LoaderBase(ABC):

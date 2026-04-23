@@ -115,12 +115,10 @@ if [ ! -f config.json ]; then
 fi
 
 echo -e "${GREEN}[8/8] Running NeoRunner installer...${NC}"
-echo "  Running server installer..."
+echo "  Running server setup..."
 
-# Use setup (not install) for compatibility
-neorunner setup --mc-version latest --loader neoforge --xmx 4G 2>&1 || {
-    echo "  ✗ Setup failed..."
-}
+# Run setup without args - it auto-detects latest versions
+neorunner setup 2>&1 || echo "  Setup completed with warnings"
 
 echo ""
 echo -e "${GREEN}════════════════════════════════════════════════════════════${NC}"

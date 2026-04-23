@@ -8,3 +8,7 @@
 -XX:-OmitStackTraceInFastThrow
 -XX:+ExplicitGCInvokesConcurrent
 -Djava.net.preferIPv4Stack=true
+-Dusemtl=false
+-DdisableAsyncChunkLoading=true
+-Dneoforge.logging.debugNetwork=true
+-Dforge.logging.console.level=DEBUG

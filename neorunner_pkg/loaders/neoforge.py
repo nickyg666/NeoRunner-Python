@@ -150,10 +150,15 @@ class NeoForgeLoader(LoaderBase):
             log_event("LOADER_NEOFORGE", f"Installer note: {e}")
         
         # Direct -jar launch (works after installer runs)
+        cwd_str = str(self.cwd) if hasattr(self.cwd, '__fspath__') else str(self.cwd)
+        jar = f"libraries/net/neoforged/neoforge/{nf_ver}/neoforge-{nf_ver}-universal.jar"
+        jar_path = os.path.join(cwd_str, jar)
+        
         java_cmd = [
             "java",
             "@user_jvm_args.txt",
-            f"-jar {jar}",
+            "-jar",
+            jar_path,
             "nogui"
         ]
         return java_cmd

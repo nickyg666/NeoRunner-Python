@@ -19,7 +19,10 @@ class NeoForgeLoader(LoaderBase):
         """Setup NeoForge server environment."""
         log_event("LOADER_NEOFORGE", f"Preparing {self.get_loader_display_name()} environment ({self.mc_version})")
         
+        log_event("DEBUG", "DEBUG: About to call _setup_jvm_args")
         self._setup_jvm_args()
+        log_event("DEBUG", "DEBUG: After _setup_jvm_args")
+        
         self._setup_server_properties()
         self._setup_eula()
         

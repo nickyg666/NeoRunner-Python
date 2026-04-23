@@ -239,6 +239,7 @@ def cmd_restart(args):
 
 def cmd_setup(args):
     """Run setup wizard - interactive or non-interactive based on arguments."""
+    import sys
     from .config import ensure_config, load_cfg, save_cfg, ServerConfig
     from .installer import setup
     from .version import get_latest_minecraft_version, get_all_minecraft_versions, get_latest_for_loader
@@ -246,8 +247,10 @@ def cmd_setup(args):
     cfg = load_cfg()
     cfg = ensure_config(cfg)
     
-    # If args provided, use them; otherwise interactive
-    interactive = not (args.mc_version and args.loader and args.xmx)
+    # Check if stdin is a TTY for interactive mode, plus check for args
+    is_interactive = sys.stdin.isatty() if sys.stdin else False
+    has_args = bool(args.mc_version and args.loader and args.xmx)
+    interactive = is_interactive and not has_args
     
     if args.mc_version:
         cfg.mc_version = args.mc_version
@@ -267,7 +270,13 @@ def cmd_setup(args):
     print("NeoRunner Setup Wizard")
     print("="*50)
     
-    if interactive:
+    if not interactive:
+        # Non-interactive: use defaults or command-line args, skip prompts
+        print("Running in non-interactive mode...")
+        if has_args:
+            print(f"  Using: MC {cfg.mc_version}, {cfg.loader}, {cfg.xmx}")
+    else:
+        # Interactive mode - only if TTY is available
         print("\nStep 1: Select Minecraft Version")
         print(f"  Current: {cfg.mc_version}")
         print("  [1] Latest (auto-detect)")

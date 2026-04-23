@@ -113,7 +113,20 @@ class ForgeLoader(LoaderBase):
     
     def build_java_command(self) -> List[str]:
         """Build Forge launch command."""
+        # Run installer --install to set up files
+        log_event("LOADER_FORGE", "Running installer to extract files...")
         jar_file = self.cwd / _get_cfg_value(self.cfg, "server_jar", "forge.jar") if isinstance(self.cwd, Path) else os.path.join(self.cwd, _get_cfg_value(self.cfg, "server_jar", "forge.jar"))
+        
+        try:
+            subprocess.run(
+                ["java", "-jar", str(jar_file), "--install", "."],
+                capture_output=True,
+                timeout=180,
+                cwd=str(self.cwd)
+            )
+        except Exception as e:
+            log_event("LOADER_FORGE", f"Installer note: {e}")
+        
         java_cmd = [
             "java",
             "@user_jvm_args.txt",

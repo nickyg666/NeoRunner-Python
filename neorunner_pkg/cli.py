@@ -464,15 +464,16 @@ def cmd_config_setup(cfg):
     
     try:
         print(f"\n  Current MC: {cfg.mc_version}, Loader: {cfg.loader}")
-        mc_input = input("  Enter MC version (or 'latest'): ").strip()
-        if mc_input.lower() == "latest":
+        mc_input = input("  Enter MC version (or 'latest' for auto): ").strip()
+        if mc_input.lower() == "latest" or not mc_input:
             cfg.mc_version = get_latest_minecraft_version()
+            print(f"  Using: {cfg.mc_version}")
         elif mc_input:
             cfg.mc_version = mc_input
         
         print(f"\n  Current Loader: {cfg.loader}")
         print("  [1] NeoForge  [2] Forge  [3] Fabric")
-        loader_choice = input("  Select [1]: ").strip() or "1"
+        loader_choice = input("  Select loader [1]: ").strip() or "1"
         loader_map = {"1": "neoforge", "2": "forge", "3": "fabric"}
         cfg.loader = loader_map.get(loader_choice, "neoforge")
         
@@ -481,17 +482,20 @@ def cmd_config_setup(cfg):
             print(f"  Latest {cfg.loader}: {latest}")
         
         print(f"\n  Current Memory: {cfg.xmx}")
-        xmx_input = input("  Enter max memory (e.g. 4G): ").strip()
-        if xmx_input:
-            cfg.xmx = xmx_input
-            if "G" in xmx_input:
-                val = int(xmx_input.replace("G", "")) // 2
-                cfg.xms = f"{val}G"
+        xmx_input = input("  Enter max memory [e.g. 4G, Enter for default]: ").strip()
+        if not xmx_input:
+            xmx_input = "4G"
+        cfg.xmx = xmx_input
+        if "G" in xmx_input:
+            val = int(xmx_input.replace("G", "")) // 2
+            cfg.xms = f"{val}G"
         
         print(f"\n  Current HTTP Port: {cfg.http_port}")
-        port_input = input("  Enter HTTP port: ").strip()
+        port_input = input("  Enter HTTP port [Enter for default]: ").strip()
         if port_input and port_input.isdigit():
             cfg.http_port = int(port_input)
+        elif not port_input:
+            cfg.http_port = 8000
         
         cfg = ensure_config(cfg)
         save_cfg(cfg)

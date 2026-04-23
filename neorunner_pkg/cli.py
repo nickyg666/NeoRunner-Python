@@ -356,16 +356,24 @@ def cmd_setup(args):
 
 
 def cmd_init(args):
-    """Initialize default config."""
-    from .config import save_cfg, ensure_config, ServerConfig
+    """Initialize default config - only if missing or --force."""
+    from .config import save_cfg, ensure_config, ServerConfig, load_cfg
     from .constants import CWD
     from .version import get_latest_minecraft_version
     
     config_path = CWD / "config.json"
     
-    if config_path.exists() and not args.force:
-        print(f"Config already exists at {config_path}")
-        print("Use --force to overwrite")
+    # If config exists and --force not given, show info and exit
+    if config_path.exists():
+        if not args.force:
+            print(f"Config already exists at {config_path}")
+            # Show current config instead of error
+            cfg = load_cfg()
+            print(f"  MC: {cfg.mc_version}, Loader: {cfg.loader}, Memory: {cfg.xmx}")
+            print("  Use --force to regenerate, or 'neorunner config --setup' to edit interactively")
+            return 0
+        # With --force, we still shouldn't destroy good config, ask user
+        print("Config exists. Use 'neorunner config --setup' to edit, or delete config.json first")
         return 1
     
     # Determine MC version

@@ -2,7 +2,7 @@
 #
 # NeoRunner Quick Installer
 # Usage: curl -sL https://raw.githubusercontent.com/nickyg666/NeoRunner-Python/main/install.sh | bash
-# Or for fresh reinstall: curl -sL https://raw.githubusercontent.com/nickyg666/NeoRunner-Python/main/install.sh | bash -s -- --fresh
+# For fresh reinstall: rm -rf ~/neorunner && curl -sL ... | bash
 #
 
 set -e
@@ -90,12 +90,13 @@ echo "  Version: $LATEST_TAG"
 
 INSTALL_DIR="${INSTALL_DIR:-$HOME/neorunner}"
 
-# Fresh install: remove old installation first
+# Fresh install if no config exists
 echo -e "${GREEN}[5/8] Preparing installation directory...${NC}"
 mkdir -p "$INSTALL_DIR"
 
-if [ "$FORCE_FRESH" = true ] || [ ! -f "$INSTALL_DIR/config.json" ]; then
-    echo "  Removing old installation for fresh install..."
+# Clean old installation if no config
+if [ ! -f "$INSTALL_DIR/config.json" ]; then
+    echo "  Fresh install - cleaning old installation..."
     # Kill any running processes
     pkill -f "neorunner" 2>/dev/null || true
     pkill -f "waitress" 2>/dev/null || true
@@ -107,11 +108,6 @@ if [ "$FORCE_FRESH" = true ] || [ ! -f "$INSTALL_DIR/config.json" ]; then
     rm -rf "$INSTALL_DIR/neorunner_pkg.egg-info" 2>/dev/null || true
     rm -rf "$INSTALL_DIR/__pycache__" 2>/dev/null || true
     rm -rf "$INSTALL_DIR/neorunner_pkg/__pycache__" 2>/dev/null || true
-    
-    # Only remove if --fresh flag
-    if [ "$FORCE_FRESH" = true ]; then
-        rm -rf "$INSTALL_DIR/.cache" 2>/dev/null || true
-    fi
     
     echo "  ✓ Old installation cleaned"
 fi

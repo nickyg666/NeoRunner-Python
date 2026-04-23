@@ -48,12 +48,18 @@ class NeoForgeLoader(LoaderBase):
         """Create user_jvm_args.txt with memory and performance settings."""
         jvm_file = self.cwd / "user_jvm_args.txt" if isinstance(self.cwd, Path) else os.path.join(self.cwd, "user_jvm_args.txt")
         
-        # Validate existing file, regenerate if corrupted
-        if os.path.exists(jvm_file) and not self._validate_jvm_args(jvm_file):
+        # Always regenerate - ensure fresh clean args (skip if recently modified)
+        if os.path.exists(jvm_file):
+            try:
+                import time
+                if time.time() - os.path.getmtime(jvm_file) < 300:  # < 5 min old, keep it
+                    return
+            except:
+                pass
             os.remove(jvm_file)
         
-        xmx = _get_cfg_value(self.cfg, "xmx", "6G")
-        xms = _get_cfg_value(self.cfg, "xms", "4G")
+        xmx = _get_cfg_value(self.cfg, "xmx", "4G")
+        xms = _get_cfg_value(self.cfg, "xms", "2G")
         
         jvm_args = f"""-Xmx{xmx}
 -Xms{xms}
@@ -65,10 +71,6 @@ class NeoForgeLoader(LoaderBase):
 -XX:-OmitStackTraceInFastThrow
 -XX:+ExplicitGCInvokesConcurrent
 -Djava.net.preferIPv4Stack=true
--Dusemtl=false
--DdisableAsyncChunkLoading=true
--Dneoforge.logging.debugNetwork=true
--Dforge.logging.console.level=DEBUG
 """
         with open(jvm_file, 'w') as f:
             f.write(jvm_args)

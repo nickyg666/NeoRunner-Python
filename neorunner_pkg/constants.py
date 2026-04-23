@@ -3,8 +3,11 @@
 import os
 from pathlib import Path
 
-# All paths relative to this module directory
-CWD = Path(__file__).parent.parent.resolve()
+# All paths relative to the installation directory (where neorunner is run from)
+# Fall back to package dir only if CWD doesn't exist
+_package_dir = Path(__file__).parent.parent.resolve()
+_actual_cwd = Path.cwd() if Path.cwd().exists() else _package_dir
+CWD = Path(os.environ.get('NEORUNNER_DIR', _actual_cwd))
 
 MOD_LOADERS = ["neoforge", "forge", "fabric"]
 

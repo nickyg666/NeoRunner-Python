@@ -47,17 +47,18 @@ class NeoForgeLoader(LoaderBase):
     
     def _setup_jvm_args(self) -> None:
         """Create user_jvm_args.txt with memory and performance settings."""
-        # ALWAYS delete and recreate - never trust existing file
         cwd_str = str(self.cwd) if hasattr(self.cwd, '__fspath__') else str(self.cwd)
         jvm_file = os.path.join(cwd_str, "user_jvm_args.txt")
         
-        # Force delete
-        if os.path.exists(jvm_file):
-            os.remove(jvm_file)
-        
-        # Use validated getter - handles corrupted config automatically
+        # Validate config values before using
         xmx = _get_cfg_value(self.cfg, 'xmx', '4G')
         xms = _get_cfg_value(self.cfg, 'xms', '2G')
+        
+        # Validate - must be proper memory format
+        if not (xmx.endswith('G') or xmx.endswith('M')):
+            xmx = '4G'
+        if not (xms.endswith('G') or xms.endswith('M')):
+            xms = '2G'
         
         jvm_args = f"""-Xmx{xmx}
 -Xms{xms}
@@ -66,6 +67,14 @@ class NeoForgeLoader(LoaderBase):
 """
         with open(jvm_file, 'w') as f:
             f.write(jvm_args)
+        
+        # Read back and verify - if still corrupted, fix immediately
+        with open(jvm_file) as f:
+            content = f.read()
+        if 'echo' in content or 'Dashboard' in content:
+            # Overwrite with clean content
+            with open(jvm_file, 'w') as f:
+                f.write(f"-Xmx{xmx}\n-Xms{xms}\n-XX:+UseG1GC\n-Djava.net.preferIPv4Stack=true\n")
         
         log_event("LOADER_NEOFORGE", f"Created user_jvm_args.txt: {xmx}/{xms}")
     

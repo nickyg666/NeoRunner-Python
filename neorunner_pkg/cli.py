@@ -495,7 +495,16 @@ def cmd_config_setup(cfg):
         
         cfg = ensure_config(cfg)
         save_cfg(cfg)
-        print("\nConfiguration saved!")
+        print("Configuration saved!")
+        
+        # Now install the loader
+        from .installer import setup
+        print("\nInstalling loader...")
+        if setup(cfg):
+            print("Loader installed!")
+        else:
+            print("Loader install had issues - try 'neorunner setup' later")
+        
         return 0
         
     except EOFError:

@@ -88,7 +88,8 @@ if [ ! -f config.json ]; then
 fi
 
 echo "Running setup..."
-neorunner setup 2>&1 || true
+source neorunner_venv/bin/activate
+neorunner setup --yes 2>&1 || true
 
 echo ""
 echo "========================================================"

@@ -293,14 +293,20 @@ def cmd_setup(args):
         elif ver_choice == "2":
             all_vers = get_all_minecraft_versions()
             print(f"  Available: {', '.join(all_vers[:5])}")
-            cfg.mc_version = input("  Enter version: ").strip() or cfg.mc_version
+            try:
+                cfg.mc_version = input("  Enter version: ").strip() or cfg.mc_version
+            except (EOFError, AttributeError):
+                pass
         
         print("\nStep 2: Select Mod Loader")
         print(f"  Current: {cfg.loader}")
         print("  [1] NeoForge (recommended)")
         print("  [2] Forge")
         print("  [3] Fabric")
-        loader_choice = input("  Select [1]: ").strip() or "1"
+        try:
+            loader_choice = input("  Select [1]: ").strip() or "1"
+        except (EOFError, AttributeError):
+            loader_choice = "1"
         
         loader_map = {"1": "neoforge", "2": "forge", "3": "fabric"}
         cfg.loader = loader_map.get(loader_choice, "neoforge")
@@ -311,20 +317,26 @@ def cmd_setup(args):
         
         print("\nStep 3: Memory Allocation")
         print(f"  Current max: {cfg.xmx}")
-        xmx_input = input(f"  Enter max memory [default: {cfg.xmx}]: ").strip()
-        if xmx_input:
-            cfg.xmx = xmx_input
-            if "G" in xmx_input:
-                val = int(xmx_input.replace("G", "")) // 2
-                cfg.xms = f"{val}G"
-            else:
-                cfg.xms = cfg.xmx
+        try:
+            xmx_input = input(f"  Enter max memory [default: {cfg.xmx}]: ").strip()
+            if xmx_input:
+                cfg.xmx = xmx_input
+                if "G" in xmx_input:
+                    val = int(xmx_input.replace("G", "")) // 2
+                    cfg.xms = f"{val}G"
+                else:
+                    cfg.xms = cfg.xmx
+        except (EOFError, AttributeError):
+            pass
         
         print("\nStep 4: Server Configuration")
         print(f"  HTTP Port: {cfg.http_port}")
-        port_input = input(f"  Enter HTTP port [default: {cfg.http_port}]: ").strip()
-        if port_input:
-            cfg.http_port = int(port_input)
+        try:
+            port_input = input(f"  Enter HTTP port [default: {cfg.http_port}]: ").strip()
+            if port_input and port_input.isdigit():
+                cfg.http_port = int(port_input)
+        except (ValueError, EOFError, AttributeError):
+            pass  # Keep default
         
         save_cfg(cfg)
         print("\nConfiguration saved!")

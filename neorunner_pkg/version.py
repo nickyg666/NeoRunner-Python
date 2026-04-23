@@ -97,7 +97,7 @@ def get_loaders_for_minecraft(mc_version: str = None) -> dict:
 
 
 def _get_all_neoforge_versions() -> List[dict]:
-    """Get NeoForge versions - latest 5 + MC compatible."""
+    """Get NeoForge versions - latest 5 (including beta)."""
     try:
         url = "https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge"
         req = urllib.request.Request(url, headers={"User-Agent": "NeoRunner/2.3.0"})
@@ -106,11 +106,12 @@ def _get_all_neoforge_versions() -> List[dict]:
             data = json.loads(resp.read().decode())
             versions = data.get("versions", [])
             
-            # Get latest 5 stable releases (not alpha/beta/snapshot)
+            # Get latest 5 (beta versions are basically stable in NeoForge)
             latest_5 = []
             count = 0
             for v in reversed(versions):
-                if any(x in v.lower() for x in ["alpha", "beta", "snapshot", "pre", "rc"]):
+                # Include all except alpha/snapshot
+                if "alpha" in v.lower() or "snapshot" in v.lower():
                     continue
                 latest_5.append({"version": v, "type": "latest"})
                 count += 1

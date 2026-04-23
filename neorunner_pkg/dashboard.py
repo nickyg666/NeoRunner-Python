@@ -2117,6 +2117,26 @@ def api_run_preflight():
         return jsonify({"success": False, "error": str(e)}), 400
 
 
+@app.route("/api/config/reset-memory", methods=["POST"])
+def api_reset_memory():
+    """Reset corrupted xmx/xms values in config.json."""
+    try:
+        from .config import load_cfg, save_cfg
+        
+        cfg = load_cfg()
+        
+        # Reset memory values to clean defaults
+        cfg.xmx = "4G"
+        cfg.xms = "2G"
+        
+        save_cfg(cfg)
+        
+        return jsonify({"success": True, "xmx": cfg.xmx, "xms": cfg.xms})
+    
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
 def run_dashboard(host: str = "0.0.0.0", port: int = 8000, debug: bool = False):
     """Run the dashboard with Waitress production server."""
     from waitress import serve

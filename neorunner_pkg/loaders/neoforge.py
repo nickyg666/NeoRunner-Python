@@ -55,19 +55,10 @@ class NeoForgeLoader(LoaderBase):
         if os.path.exists(jvm_file):
             os.remove(jvm_file)
         
-        # Get values with hardcoded fallback - never trust config if corrupted before
-        try:
-            xmx = getattr(self.cfg, 'xmx', None) or '4G'
-            xms = getattr(self.cfg, 'xms', None) or '2G'
-            # Validate - if it looks like bash echo, use defaults
-            if 'echo' in str(xmx) or 'echo' in str(xms):
-                xmx = '4G'
-                xms = '2G'
-        except:
-            xmx = '4G'
-            xms = '2G'
+        # Use validated getter - handles corrupted config automatically
+        xmx = _get_cfg_value(self.cfg, 'xmx', '4G')
+        xms = _get_cfg_value(self.cfg, 'xms', '2G')
         
-        # Hardcode clean args - no config needed
         jvm_args = f"""-Xmx{xmx}
 -Xms{xms}
 -XX:+UseG1GC

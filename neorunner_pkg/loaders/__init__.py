@@ -14,11 +14,22 @@ log = logging.getLogger(__name__)
 
 
 def _get_cfg_value(cfg: Union[Any, dict], key: str, default: Any = None) -> Any:
-    """Get config value from either object or dict."""
+    """Get config value from either object or dict with validation for memory values."""
     if isinstance(cfg, dict):
         val = cfg.get(key, default)
-        return val if val is not None else default
-    val = getattr(cfg, key, default)
+    else:
+        val = getattr(cfg, key, default)
+    
+    # Validate memory values (xmx/xms) - reject corrupted values
+    if key in ("xmx", "xms") and val is not None:
+        val_str = str(val)
+        # Check for common corruption patterns
+        if "echo" in val_str.lower() or "dashboard" in val_str.lower() or "http" in val_str.lower():
+            return default
+        # Must be a valid memory format like "4G", "2G", "512M"
+        if not (val_str.endswith("G") or val_str.endswith("M")):
+            return default
+    
     return val if val is not None else default
 
 

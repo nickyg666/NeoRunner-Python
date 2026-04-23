@@ -47,32 +47,36 @@ class NeoForgeLoader(LoaderBase):
     
     def _setup_jvm_args(self) -> None:
         """Create user_jvm_args.txt with memory and performance settings."""
-        jvm_file = self.cwd / "user_jvm_args.txt" if isinstance(self.cwd, Path) else os.path.join(self.cwd, "user_jvm_args.txt")
+        # ALWAYS delete and recreate - never trust existing file
+        cwd_str = str(self.cwd) if hasattr(self.cwd, '__fspath__') else str(self.cwd)
+        jvm_file = os.path.join(cwd_str, "user_jvm_args.txt")
         
-        # Validate existing file, regenerate if corrupted
-        if os.path.exists(jvm_file) and not self._validate_jvm_args(jvm_file):
+        # Force delete
+        if os.path.exists(jvm_file):
             os.remove(jvm_file)
         
-        xmx = _get_cfg_value(self.cfg, "xmx", "6G")
-        xms = _get_cfg_value(self.cfg, "xms", "4G")
+        # Get values with hardcoded fallback - never trust config if corrupted before
+        try:
+            xmx = getattr(self.cfg, 'xmx', None) or '4G'
+            xms = getattr(self.cfg, 'xms', None) or '2G'
+            # Validate - if it looks like bash echo, use defaults
+            if 'echo' in str(xmx) or 'echo' in str(xms):
+                xmx = '4G'
+                xms = '2G'
+        except:
+            xmx = '4G'
+            xms = '2G'
         
+        # Hardcode clean args - no config needed
         jvm_args = f"""-Xmx{xmx}
 -Xms{xms}
 -XX:+UseG1GC
--XX:MaxGCPauseMillis=200
--XX:+ParallelRefProcEnabled
--XX:+UnlockExperimentalVMOptions
--XX:+AlwaysPreTouch
--XX:-OmitStackTraceInFastThrow
--XX:+ExplicitGCInvokesConcurrent
 -Djava.net.preferIPv4Stack=true
--Dusemtl=false
--DdisableAsyncChunkLoading=true
--Dneoforge.logging.debugNetwork=true
--Dforge.logging.console.level=DEBUG
 """
         with open(jvm_file, 'w') as f:
             f.write(jvm_args)
+        
+        log_event("LOADER_NEOFORGE", f"Created user_jvm_args.txt: {xmx}/{xms}")
     
     def _setup_server_properties(self) -> None:
         """Setup server.properties with RCON and basic settings."""

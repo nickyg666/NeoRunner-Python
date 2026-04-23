@@ -73,7 +73,7 @@ fi
 echo "Installing package..."
 source neorunner_venv/bin/activate
 pip install -q --upgrade pip
-pip install -q --break-system-packages --force-reinstall -e .
+pip install -q --break-system-packages --force-reinstall --no-cache-dir -e .
 
 echo "Creating directories..."
 mkdir -p mods clientonly config backups crash-reports logs world libraries loaders

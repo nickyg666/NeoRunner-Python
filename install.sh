@@ -26,66 +26,9 @@ done
 
 echo -e "${BLUE}"
 echo "╔════════════════════════════════════════════════════════════════════╗"
-echo "║           NeoRunner v2.3.0 Installer                ║"
-echo "║        Minecraft Modded Server Manager              ║"
-echo "╚════════════════════════════════════════════════════════════╝"
-echo -e "${NC}"
-
-OS=""
-if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    OS=$ID
-fi
-
-echo -e "${GREEN}[1/8] Detecting system...${NC}"
-echo "  OS: $OS"
-
-install_pkg() {
-    if command -v apt-get &> /dev/null; then
-        sudo apt-get update
-        sudo apt-get install -y "$@"
-    elif command -v dnf &> /dev/null; then
-        sudo dnf install -y "$@"
-    elif command -v yum &> /dev/null; then
-        sudo yum install -y "$@"
-    elif command -v pacman &> /dev/null; then
-        sudo pacman -Sy --noconfirm "$@"
-    else
-        echo -e "${RED}Unsupported package manager.${NC}"
-        return 1
-    fi
-}
-
-SYSTEM_DEPS="tmux curl wget rsync unzip zip python3 python3-venv python3-pip git"
-if ! command -v java &> /dev/null; then
-    SYSTEM_DEPS="$SYSTEM_DEPS openjdk-21-jre-headless"
-fi
-
-echo -e "${GREEN}[2/8] Installing system dependencies...${NC}"
-install_pkg $SYSTEM_DEPS
-
-if command -v java &> /dev/null; then
-    JAVA_VERSION=$(java -version 2>&1 | head -1 | cut -d'"' -f2 | cut -d'.' -f1)
-    if [ "$JAVA_VERSION" -ge 21 ]; then
-        echo -e "  ${GREEN}✓ Java $JAVA_VERSION detected${NC}"
-    else
-        echo -e "${YELLOW}  ⚠ Java $JAVA_VERSION detected, 21+ recommended${NC}"
-    fi
-fi
-
-echo -e "${GREEN}[3/8] Checking Python...${NC}"
-if ! command -v python3 &> /dev/null; then
-    echo -e "${RED}  ✗ Python 3 not found${NC}"
-    exit 1
-fi
-PYTHON_VERSION=$(python3 --version | cut -d' ' -f2)
-echo "  Python $PYTHON_VERSION"
-
-echo -e "${GREEN}[4/8] Fetching latest release...${NC}"
-REPO_OWNER="nickyg666"
-REPO_NAME="NeoRunner-Python"
-LATEST_TAG=$(curl -s "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest" | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
-LATEST_TAG=${LATEST_TAG:-v2.3.0}
+echo "║           NeoRunner v2.3.1 Installer                ║"
+...
+LATEST_TAG=${LATEST_TAG:-v2.3.1}
 echo "  Version: $LATEST_TAG"
 
 INSTALL_DIR="${INSTALL_DIR:-$HOME/neorunner}"

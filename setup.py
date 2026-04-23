@@ -14,7 +14,7 @@ long_description = readme_path.read_text() if readme_path.exists() else "NeoRunn
 
 setup(
     name="neorunner",
-    version="2.3.0",
+    version="2.3.1",
     author="NeoRunner Team",
     author_email="contact@neorunner.dev",
     description="Minecraft modded server manager for NeoForge, Forge, and Fabric",

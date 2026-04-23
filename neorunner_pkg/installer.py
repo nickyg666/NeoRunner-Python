@@ -106,9 +106,15 @@ def install_neoforge(cfg: ServerConfig) -> bool:
     
     log_event("INFO", f"Installing NeoForge for MC {mc_version}...")
     
-    # Determine NeoForge version
+    # Determine NeoForge version - handle both 1.21.x and 26.x formats
     mc_parts = mc_version.split(".")
-    prefix = f"{mc_parts[1]}.{mc_parts[2]}" if len(mc_parts) >= 3 else "21.11"
+    # For MC 1.21.x use "21.x", for 26.x use "26.x"
+    if len(mc_parts) >= 2 and mc_parts[0] == "1":
+        prefix = f"{mc_parts[1]}.{mc_parts[2]}" if len(mc_parts) >= 3 else "21.11"
+    elif len(mc_parts) >= 2 and mc_parts[0] == "26":
+        prefix = f"{mc_parts[0]}.{mc_parts[1]}" if len(mc_parts) >= 2 else "26.1"
+    else:
+        prefix = "26.1"  # Default to latest
     
     # Fetch latest version from Maven
     neo_version = None

@@ -130,7 +130,7 @@ class NeoForgeLoader(LoaderBase):
             with open(eula_file, 'w') as f:
                 f.write("eula=true\n")
     
-def build_java_command(self) -> List[str]:
+    def build_java_command(self) -> List[str]:
         """Build NeoForge launch command."""
         nf_ver = self._get_neoforge_version()
         
@@ -153,12 +153,6 @@ def build_java_command(self) -> List[str]:
             "java",
             "@user_jvm_args.txt",
             f"-jar {jar}",
-            "nogui"
-        ]
-        return java_cmd
-            "java",
-            "@user_jvm_args.txt",
-            f"@{args_file}",
             "nogui"
         ]
         return java_cmd

@@ -15,7 +15,7 @@
   "curator_limit": 100,
   "curator_show_optional_audit": true,
   "curator_max_depth": 3,
-  "server_jar": "/development/neorunner/libraries/net/neoforged/neoforge/neoforge-21.11.42-universal.jar",
+  "server_jar": null,
   "hostname": "",
   "broadcast_enabled": true,
   "broadcast_auto_on_install": true,

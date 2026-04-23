@@ -142,8 +142,7 @@ fi
 
 source neorunner_venv/bin/activate
 pip install --upgrade pip
-echo "  Installing neorunner..."
-pip install -e .
+pip install --break-system-packages -e .
 
 # Verify installation
 if ! command -v neorunner &> /dev/null; then
@@ -154,7 +153,7 @@ fi
 echo "  ✓ neorunner installed"
 
 # Try playwright (optional)
-if pip install playwright &>/dev/null 2>&1; then
+if pip install --break-system-packages playwright &>/dev/null 2>&1; then
     echo "  Installing Playwright..."
     playwright install chromium &>/dev/null || true
 fi

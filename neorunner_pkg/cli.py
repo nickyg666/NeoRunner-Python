@@ -594,6 +594,19 @@ def cmd_mods(args):
             print("Mod upgrade failed!")
             return 1
     
+    elif args.keywords:
+        # Install by keywords
+        from .mod_manager import ModManager
+        cfg_dict = {'loader': cfg.loader, 'mc_version': cfg.mc_version, 'mods_dir': cfg.mods_dir}
+        mm = ModManager(cfg_dict, cwd=str(CWD))
+        result = mm.install_by_keywords(args.keywords)
+        print(f"\nInstalled: {len(result.get('installed', []))}")
+        for slug in result.get('installed', []):
+            print(f"  + {slug}")
+        if result.get('failed'):
+            print(f"Failed: {len(result['failed'])}")
+        return 0
+    
     elif args.sort:
         print("Sorting mods by type...")
         from .mods import sort_mods_by_type
@@ -701,6 +714,7 @@ def main():
     mods_parser.add_argument('--list', action='store_true', help='List mods')
     mods_parser.add_argument('--upgrade', action='store_true', help='Upgrade mods')
     mods_parser.add_argument('--sort', action='store_true', help='Sort mods by type')
+    mods_parser.add_argument('--keywords', nargs='+', help='Keywords to search/install mods')
     
     args = parser.parse_args()
     

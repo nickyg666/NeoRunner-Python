@@ -336,3 +336,63 @@ class ModManager:
         }
         with open(self.mod_inventory, 'w') as f:
             json.dump(inventory, f, indent=2)
+    
+    # === Keyword-based installation ===
+    
+    def search_mods_by_keyword(self, keyword: str, limit: int = 10) -> List['ModInfo']:
+        """Search mods by keyword on Modrinth"""
+        url = "https://api.modrinth.com/v2/search"
+        params = {"query": keyword, "game_versions": f"[{self.mc_version}]", "facets": '[["project_type:mod"]]', "limit": limit}
+        
+        try:
+            resp = requests.get(url, params=params, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+            
+            mods = []
+            for hit in data.get("hits", []):
+                loaders = hit.get("loaders", [])
+                if self.loader in loaders or not loaders:
+                    mods.append(ModInfo(slug=hit["slug"], name=hit["title"], loader=self.loader, mc_version=self.mc_version, source="modrinth"))
+            return mods
+        except Exception:
+            return []
+    
+    def install_by_keywords(self, keywords: List[str], resolve_deps: bool = True) -> Dict:
+        """Install mods matching keywords"""
+        all_mods = {}
+        
+        for kw in keywords:
+            mods = self.search_mods_by_keyword(kw, limit=5)
+            if mods:
+                all_mods[mods[0].slug] = mods[0]
+        
+        if not all_mods:
+            return {"status": "no_matches", "installed": [], "failed": []}
+        
+        # Download each mod
+        installed, failed = [], []
+        
+        for slug, mod in all_mods.items():
+            try:
+                version_url = f"https://api.modrinth.com/v2/project/{slug}/version"
+                params = {"game_versions": [self.mc_version], "loaders": [self.loader]}
+                
+                resp = requests.get(version_url, params=params, timeout=30)
+                versions = resp.json()
+                
+                if versions:
+                    for f in versions[0].get("files", []):
+                        if f.get("primary"):
+                            jar_path = os.path.join(self.mods_dir, f["filename"])
+                            resp = requests.get(f["url"], timeout=60)
+                            with open(jar_path, 'wb') as pf:
+                                pf.write(resp.content)
+                            installed.append(slug)
+                            break
+                else:
+                    failed.append(slug)
+            except Exception:
+                failed.append(slug)
+        
+        return {"status": "success" if installed else "error", "installed": installed, "failed": failed}

@@ -238,7 +238,7 @@ def cmd_restart(args):
 
 
 def cmd_setup(args):
-    """Run setup wizard - interactive or non-interactive based on arguments."""
+    """Run setup wizard - prompts unless --yes flag or all args provided."""
     import sys
     from .config import ensure_config, load_cfg, save_cfg, ServerConfig
     from .installer import setup
@@ -247,10 +247,9 @@ def cmd_setup(args):
     cfg = load_cfg()
     cfg = ensure_config(cfg)
     
-    # Check if stdin is a TTY for interactive mode, plus check for args
-    is_interactive = sys.stdin.isatty() if sys.stdin else False
-    has_args = bool(args.mc_version and args.loader and args.xmx)
-    interactive = is_interactive and not has_args
+    # Always prompt unless --yes flag OR all required args provided
+    has_all_args = bool(args.mc_version and args.loader and args.xmx and args.http_port)
+    skip_prompts = args.yes or has_all_args
     
     if args.mc_version:
         if args.mc_version.lower() == "latest":
@@ -274,11 +273,11 @@ def cmd_setup(args):
     print("NeoRunner Setup Wizard")
     print("="*50)
     
-    if not interactive:
+    if skip_prompts:
         # Non-interactive: use defaults or command-line args, skip prompts
         print("Running in non-interactive mode...")
-        if has_args:
-            print(f"  Using: MC {cfg.mc_version}, {cfg.loader}, {cfg.xmx}")
+        if has_all_args:
+            print(f"  Using: MC {cfg.mc_version}, {cfg.loader}, {cfg.xmx}, HTTP {cfg.http_port}")
     else:
         # Interactive mode - only if TTY is available
         print("\nStep 1: Select Minecraft Version")
@@ -572,6 +571,7 @@ def main():
     setup_parser.add_argument('--http-port', type=int, default=None, help='HTTP port for dashboard')
     setup_parser.add_argument('--query-port', type=int, default=None, help='Game port')
     setup_parser.add_argument('--force', action='store_true', help='Force setup even if config exists')
+    setup_parser.add_argument('--yes', '-y', action='store_true', help='Skip all prompts, use defaults')
     
     # Install command (alias for setup, fully interactive)
     install_parser = subparsers.add_parser('install', help='Run interactive installation (same as setup)')

@@ -18,11 +18,22 @@ class NeoForgeLoader(LoaderBase):
         """Setup NeoForge server environment."""
         log_event("LOADER_NEOFORGE", f"Preparing {self.get_loader_display_name()} environment ({self.mc_version})")
         
+        # FORCE delete and recreate user_jvm_args.txt to ensure clean state
+        jvm_file = os.path.join(self.cwd, "user_jvm_args.txt")
+        if os.path.exists(jvm_file):
+            os.remove(jvm_file)
+        
         self._setup_jvm_args()
         self._setup_server_properties()
         self._setup_eula()
         
-        log_event("LOADER_NEOFORGE", "Environment ready (using @args files)")
+        # Verify file is clean
+        with open(jvm_file) as f:
+            content = f.read()
+        if 'echo' in content or 'Dashboard' in content:
+            log_event("ERROR", f"user_jvm_args.txt still corrupted after setup!")
+        
+        log_event("LOADER_NEOFORGE", "Environment ready")
     
     def _validate_jvm_args(self, jvm_file: str) -> bool:
         """Validate user_jvm_args.txt contains valid JVM args, not bash echo."""

@@ -1111,8 +1111,10 @@
             
             <!-- Server Mods Tab -->
             <div id="server-mods" class="tab-content active">
-                <div style="margin-bottom:10px;">
+                <div style="margin-bottom:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
                     <button class="success" onclick="openModSelector()" style="margin-right:8px;">+ Add</button>
+                    <input type="text" id="keyword-input" placeholder="furniture, windows, trees..." style="flex:1;min-width:150px;padding:8px 12px;border-radius:6px;border:1px solid #444;background:#1a1a2a;color:#fff;font-size:13px;">
+                    <button onclick="installByKeywords()" style="background:#00BCD4;color:white;padding:8px 16px;border-radius:4px;cursor:pointer;">🔎 Search & Install</button>
                     <button onclick="rescanMods()" style="background:#9b59b6;color:white;padding:8px 16px;border-radius:4px;cursor:pointer;">🔍 Rescan</button>
                     <button onclick="analyzeMods()" style="background:#673AB7;color:white;padding:8px 16px;border-radius:4px;cursor:pointer;margin-left:8px;">🔬 Analyze</button>
                     <button onclick="optimizeLoadOrder()" style="background:#009688;color:white;padding:8px 16px;border-radius:4px;cursor:pointer;margin-left:8px;">⚡ Optimize</button>
@@ -1121,6 +1123,7 @@
                     <button onclick="serverQuarantineSelected()" style="background:#e74c3c;color:white;padding:8px 16px;border-radius:4px;cursor:pointer;margin-left:8px;">Quarantine</button>
                     <button onclick="serverDeleteSelected()" style="background:#c82333;color:white;padding:8px 16px;border-radius:4px;cursor:pointer;margin-left:8px;">Delete</button>
                 </div>
+                <div id="keyword-status" style="display:none; padding:10px; margin-bottom:10px; border-radius:4px; background:#2a2a2a;"></div>
                 <div id="server-mods-list" style="max-height:150px; overflow-y:auto;">
                     <div class="loading"></div> Loading server mods...
                 </div>
@@ -1664,6 +1667,43 @@
                     showAlert(data.message || 'Rescan complete', 'success');
                     loadServerMods();
                 }).catch(err => showAlert('Error: ' + err, 'error'));
+            }
+            
+            function installByKeywords() {
+                const input = document.getElementById('keyword-input');
+                const status = document.getElementById('keyword-status');
+                const keywords = input.value.split(',').map(k => k.trim()).filter(k => k);
+                
+                if (!keywords.length) {
+                    showAlert('Enter keywords (e.g., furniture, windows)', 'error');
+                    return;
+                }
+                
+                status.style.display = 'block';
+                status.innerHTML = `<span class="loading"></span> Searching and installing mods for: ${keywords.join(', ')}...`;
+                status.style.background = '#2a2a2a';
+                
+                fetch('/api/mods/install-by-keywords', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({keywords: keywords, resolve_deps: true})
+                }).then(r => r.json()).then(data => {
+                    if (data.success) {
+                        status.innerHTML = `✓ Installed: ${data.installed?.join(', ') || 'none'}`;
+                        status.style.background = '#1b3a1b';
+                        status.style.color = '#4caf50';
+                        showAlert(`Installed ${data.installed?.length || 0} mods for: ${keywords.join(', ')}`, 'success');
+                        loadServerMods();
+                    } else {
+                        status.innerHTML = `✗ Error: ${data.error}`;
+                        status.style.background = '#3a1b1b';
+                        status.style.color = '#f44336';
+                    }
+                }).catch(err => {
+                    status.innerHTML = `✗ Error: ${err}`;
+                    status.style.background = '#3a1b1b';
+                    status.style.color = '#f44336';
+                });
             }
             
             function analyzeMods() {

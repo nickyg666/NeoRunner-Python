@@ -1706,6 +1706,35 @@ def api_mods_install():
         return jsonify({"success": False, "error": str(e)}), 400
 
 
+@app.route("/api/mods/install-by-keywords", methods=["POST"])
+def api_mods_install_by_keywords():
+    """Install mods by keywords."""
+    try:
+        data = request.json
+        keywords = data.get("keywords", [])
+        resolve_deps = data.get("resolve_deps", True)
+        
+        if not keywords:
+            return jsonify({"success": False, "error": "No keywords specified"}), 400
+        
+        cfg = load_cfg()
+        from .mod_manager import ModManager
+        cfg_dict = {'loader': cfg.loader, 'mc_version': cfg.mc_version, 'mods_dir': cfg.mods_dir}
+        mm = ModManager(cfg_dict, cwd=str(CWD))
+        
+        result = mm.install_by_keywords(keywords, resolve_deps=resolve_deps)
+        
+        return jsonify({
+            "success": True,
+            "keywords": keywords,
+            "installed": result.get("installed", []),
+            "failed": result.get("failed", []),
+            "status": result.get("status", "error")
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
 @app.route("/api/quarantine/<mod_id>", methods=["DELETE"])
 def api_delete_quarantined_mod(mod_id):
     """Delete a quarantined mod permanently."""

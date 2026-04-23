@@ -24,9 +24,30 @@ class ForgeLoader(LoaderBase):
         
         log_event("LOADER_FORGE", "Environment ready")
     
+    def _validate_jvm_args(self, jvm_file: str) -> bool:
+        """Validate user_jvm_args.txt contains valid JVM args, not bash echo."""
+        if not os.path.exists(jvm_file):
+            return False
+        try:
+            with open(jvm_file, 'r') as f:
+                content = f.read()
+            if 'echo ' in content or 'Dashboard' in content or '#!/bin/bash' in content:
+                log_event("WARN", f"user_jvm_args.txt corrupted (contains bash code), regenerating...")
+                return False
+            lines = [l.strip() for l in content.strip().split('\n') if l.strip()]
+            if not lines or not lines[0].startswith('-Xm'):
+                log_event("WARN", "user_jvm_args.txt invalid format, regenerating...")
+                return False
+            return True
+        except Exception:
+            return False
+    
     def _setup_jvm_args(self) -> None:
         """Create user_jvm_args.txt with memory and performance settings."""
         jvm_file = self.cwd / "user_jvm_args.txt" if isinstance(self.cwd, Path) else os.path.join(self.cwd, "user_jvm_args.txt")
+        
+        if os.path.exists(jvm_file) and not self._validate_jvm_args(jvm_file):
+            os.remove(jvm_file)
         
         xmx = _get_cfg_value(self.cfg, "xmx", "6G")
         xms = _get_cfg_value(self.cfg, "xms", "4G")

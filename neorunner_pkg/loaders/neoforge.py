@@ -130,18 +130,32 @@ class NeoForgeLoader(LoaderBase):
             with open(eula_file, 'w') as f:
                 f.write("eula=true\n")
     
-    def build_java_command(self) -> List[str]:
+def build_java_command(self) -> List[str]:
         """Build NeoForge launch command."""
         nf_ver = self._get_neoforge_version()
-        args_file = f"libraries/net/neoforged/neoforge/{nf_ver}/unix_args.txt"
         
-        # Create unix_args.txt if missing (NeoForge 26+ uses @libraries args)
-        if not os.path.exists(args_file):
-            with open(args_file, 'w') as f:
-                jar = f"libraries/net/neoforged/neoforge/{nf_ver}/neoforge-{nf_ver}-universal.jar"
-                f.write(f"-jar {jar}\n")
+        # Run NeoForge installer --install to set up all files (ALL versions)
+        log_event("LOADER_NEOFORGE", "Running installer to extract files...")
+        jar = f"libraries/net/neoforged/neoforge/{nf_ver}/neoforge-{nf_ver}-universal.jar"
         
+        try:
+            subprocess.run(
+                ["java", "-jar", jar, "--install", "."],
+                capture_output=True,
+                timeout=180,
+                cwd=str(self.cwd)
+            )
+        except Exception as e:
+            log_event("LOADER_NEOFORGE", f"Installer note: {e}")
+        
+        # Direct -jar launch (works after installer runs)
         java_cmd = [
+            "java",
+            "@user_jvm_args.txt",
+            f"-jar {jar}",
+            "nogui"
+        ]
+        return java_cmd
             "java",
             "@user_jvm_args.txt",
             f"@{args_file}",

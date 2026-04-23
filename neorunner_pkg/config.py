@@ -128,9 +128,25 @@ def load_cfg() -> ServerConfig:
         return ServerConfig()
 
 
+def _validate_memory(val: str, default: str) -> str:
+    """Validate memory value, reject corrupted values."""
+    if val is None:
+        return default
+    val_str = str(val)
+    if "echo" in val_str.lower() or "dashboard" in val_str.lower() or "http" in val_str.lower():
+        return default
+    if not (val_str.endswith("G") or val_str.endswith("M")):
+        return default
+    return val_str
+
+
 def save_cfg(cfg: ServerConfig) -> None:
     """Save configuration to config.json and regenerate install scripts."""
     config_path = CWD / "config.json"
+    
+    # Validate memory values before saving - reject corrupted values
+    cfg.xmx = _validate_memory(cfg.xmx, "4G")
+    cfg.xms = _validate_memory(cfg.xms, "2G")
     
     with open(config_path, "w") as f:
         json.dump(cfg.to_dict(), f, indent=2)

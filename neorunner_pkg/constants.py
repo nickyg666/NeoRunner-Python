@@ -3,11 +3,20 @@
 import os
 from pathlib import Path
 
-# All paths relative to the installation directory (where neorunner is run from)
-# Fall back to package dir only if CWD doesn't exist
-_package_dir = Path(__file__).parent.parent.resolve()
-_actual_cwd = Path.cwd() if Path.cwd().exists() else _package_dir
-CWD = Path(os.environ.get('NEORUNNER_DIR', _actual_cwd))
+# All paths relative to the installation directory
+# Try: NEORUNNER_DIR env, then find dir with config.json, then CWD, then package dir
+def _find_cwd():
+    # Check env var first
+    if 'NEORUNNER_DIR' in os.environ:
+        return Path(os.environ['NEORUNNER_DIR'])
+    # Try to find config.json in current path or parents
+    for path in [Path.cwd(), Path(__file__).parent.parent.resolve()]:
+        if (path / "config.json").exists():
+            return path
+    # Default to where neorunner is run from
+    return Path.cwd()
+
+CWD = _find_cwd()
 
 MOD_LOADERS = ["neoforge", "forge", "fabric"]
 

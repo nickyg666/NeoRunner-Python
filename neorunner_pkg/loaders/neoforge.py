@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
@@ -18,22 +19,11 @@ class NeoForgeLoader(LoaderBase):
         """Setup NeoForge server environment."""
         log_event("LOADER_NEOFORGE", f"Preparing {self.get_loader_display_name()} environment ({self.mc_version})")
         
-        # FORCE delete and recreate user_jvm_args.txt to ensure clean state
-        jvm_file = os.path.join(self.cwd, "user_jvm_args.txt")
-        if os.path.exists(jvm_file):
-            os.remove(jvm_file)
-        
         self._setup_jvm_args()
         self._setup_server_properties()
         self._setup_eula()
         
-        # Verify file is clean
-        with open(jvm_file) as f:
-            content = f.read()
-        if 'echo' in content or 'Dashboard' in content:
-            log_event("ERROR", f"user_jvm_args.txt still corrupted after setup!")
-        
-        log_event("LOADER_NEOFORGE", "Environment ready")
+        log_event("LOADER_NEOFORGE", "Environment ready (using @args files)")
     
     def _validate_jvm_args(self, jvm_file: str) -> bool:
         """Validate user_jvm_args.txt contains valid JVM args, not bash echo."""
@@ -57,24 +47,29 @@ class NeoForgeLoader(LoaderBase):
     
     def _setup_jvm_args(self) -> None:
         """Create user_jvm_args.txt with memory and performance settings."""
-        # Use absolute string path - not Path object
-        cwd_str = str(self.cwd) if hasattr(self.cwd, '__fspath__') else str(self.cwd)
-        jvm_file = os.path.join(cwd_str, "user_jvm_args.txt")
+        jvm_file = self.cwd / "user_jvm_args.txt" if isinstance(self.cwd, Path) else os.path.join(self.cwd, "user_jvm_args.txt")
         
-        # ALWAYS remove and recreate - no time check
-        if os.path.exists(jvm_file):
+        # Validate existing file, regenerate if corrupted
+        if os.path.exists(jvm_file) and not self._validate_jvm_args(jvm_file):
             os.remove(jvm_file)
         
-        xmx = _get_cfg_value(self.cfg, "xmx", "4G")
-        xms = _get_cfg_value(self.cfg, "xms", "2G")
+        xmx = _get_cfg_value(self.cfg, "xmx", "6G")
+        xms = _get_cfg_value(self.cfg, "xms", "4G")
         
-        # Simple clean args - no fancy formatting
-        jvm_args = f"-Xmx{xmx}\n-Xms{xms}\n-XX:+UseG1GC\n-Djava.net.preferIPv4Stack=true\n"
-        
-        with open(jvm_file, 'w') as f:
-            f.write(jvm_args)
+        jvm_args = f"""-Xmx{xmx}
+-Xms{xms}
+-XX:+UseG1GC
+-XX:MaxGCPauseMillis=200
+-XX:+ParallelRefProcEnabled
+-XX:+UnlockExperimentalVMOptions
+-XX:+AlwaysPreTouch
+-XX:-OmitStackTraceInFastThrow
 -XX:+ExplicitGCInvokesConcurrent
 -Djava.net.preferIPv4Stack=true
+-Dusemtl=false
+-DdisableAsyncChunkLoading=true
+-Dneoforge.logging.debugNetwork=true
+-Dforge.logging.console.level=DEBUG
 """
         with open(jvm_file, 'w') as f:
             f.write(jvm_args)
@@ -139,16 +134,22 @@ class NeoForgeLoader(LoaderBase):
     def build_java_command(self) -> List[str]:
         """Build NeoForge launch command."""
         nf_ver = self._get_neoforge_version()
+        
+        # Run NeoForge installer --install to set up all files (ALL versions)
+        log_event("LOADER_NEOFORGE", "Running installer to extract files...")
         jar = f"libraries/net/neoforged/neoforge/{nf_ver}/neoforge-{nf_ver}-universal.jar"
         
-        # Direct -jar launch (works without installer for already-extracted jar)
-        java_cmd = [
-            "java",
-            "@user_jvm_args.txt",
-            f"-jar {jar}",
-            "nogui"
-        ]
-        return java_cmd
+        try:
+            subprocess.run(
+                ["java", "-jar", jar, "--install", "."],
+                capture_output=True,
+                timeout=180,
+                cwd=str(self.cwd)
+            )
+        except Exception as e:
+            log_event("LOADER_NEOFORGE", f"Installer note: {e}")
+        
+        # Direct -jar launch (works after installer runs)
         java_cmd = [
             "java",
             "@user_jvm_args.txt",

@@ -253,7 +253,11 @@ def cmd_setup(args):
     interactive = is_interactive and not has_args
     
     if args.mc_version:
-        cfg.mc_version = args.mc_version
+        if args.mc_version.lower() == "latest":
+            print("  Fetching latest Minecraft version...")
+            cfg.mc_version = get_latest_minecraft_version()
+        else:
+            cfg.mc_version = args.mc_version
     if args.loader:
         cfg.loader = args.loader
     if args.xmx:

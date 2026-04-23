@@ -175,14 +175,12 @@ fi
 echo -e "${GREEN}[8/8] Running NeoRunner installer...${NC}"
 echo "  Running server installer..."
 
-# Try neorunner install, fall back to neorunner setup
-if neorunner install 2>&1; then
-    echo "  ✓ Installation complete"
-elif neorunner setup 2>&1; then
-    echo "  ✓ Setup complete"
-else
-    echo -e "${YELLOW}  ⚠ Installation needs manual setup${NC}"
-fi
+# Auto-install with default settings (non-interactive when no TTY)
+# This fetches latest versions automatically
+neorunner install --mc-version latest --loader neoforge 2>&1 || {
+    echo "  ✗ Installation failed, trying with explicit defaults..."
+    neorunner install --mc-version 1.21.11 --loader neoforge --xmx 4G 2>&1 || true
+}
 
 echo ""
 echo -e "${GREEN}════════════════════════════════════════════════════════════${NC}"

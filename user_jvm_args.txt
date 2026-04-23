@@ -1,0 +1,14 @@
+-Xmx6G
+-Xms4G
+-XX:+UseG1GC
+-XX:MaxGCPauseMillis=200
+-XX:+ParallelRefProcEnabled
+-XX:+UnlockExperimentalVMOptions
+-XX:+AlwaysPreTouch
+-XX:-OmitStackTraceInFastThrow
+-XX:+ExplicitGCInvokesConcurrent
+-Djava.net.preferIPv4Stack=true
+-Dusemtl=false
+-DdisableAsyncChunkLoading=true
+-Dneoforge.logging.debugNetwork=true
+-Dforge.logging.console.level=DEBUG

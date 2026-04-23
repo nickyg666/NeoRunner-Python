@@ -2125,6 +2125,12 @@ def run_dashboard(host: str = "0.0.0.0", port: int = 8000, debug: bool = False):
     from waitress import serve
     import socket
     
+    # Ensure port is integer
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        port = 8000
+    
     def is_port_free(p: int) -> bool:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:

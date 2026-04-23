@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
@@ -134,22 +133,16 @@ class NeoForgeLoader(LoaderBase):
     def build_java_command(self) -> List[str]:
         """Build NeoForge launch command."""
         nf_ver = self._get_neoforge_version()
-        
-        # Run NeoForge installer --install to set up all files (ALL versions)
-        log_event("LOADER_NEOFORGE", "Running installer to extract files...")
         jar = f"libraries/net/neoforged/neoforge/{nf_ver}/neoforge-{nf_ver}-universal.jar"
         
-        try:
-            subprocess.run(
-                ["java", "-jar", jar, "--install", "."],
-                capture_output=True,
-                timeout=180,
-                cwd=str(self.cwd)
-            )
-        except Exception as e:
-            log_event("LOADER_NEOFORGE", f"Installer note: {e}")
-        
-        # Direct -jar launch (works after installer runs)
+        # Direct -jar launch (works without installer for already-extracted jar)
+        java_cmd = [
+            "java",
+            "@user_jvm_args.txt",
+            f"-jar {jar}",
+            "nogui"
+        ]
+        return java_cmd
         java_cmd = [
             "java",
             "@user_jvm_args.txt",

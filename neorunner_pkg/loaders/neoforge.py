@@ -193,6 +193,14 @@ class NeoForgeLoader(LoaderBase):
         if os.path.exists(lib_path):
             versions = [d for d in os.listdir(lib_path) if os.path.isdir(os.path.join(lib_path, d))]
             if versions:
+                # Pick version matching mc_version, or latest
+                mc_ver = self.mc_version if hasattr(self, 'mc_version') else ""
+                mc_major = mc_ver.split(".")[1] if "." in mc_ver else "21"
+                for v in sorted(versions, reverse=True):
+                    if v.startswith(f"{mc_major}."):
+                        jar_path = os.path.join(lib_path, v, f"neoforge-{v}-universal.jar")
+                        if os.path.exists(jar_path):
+                            return v
                 latest = sorted(versions)[-1]
                 jar_path = os.path.join(lib_path, latest, f"neoforge-{latest}-universal.jar")
                 if os.path.exists(jar_path):

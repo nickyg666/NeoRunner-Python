@@ -1,6 +1,6 @@
 """Network channel analyzer for detecting client/server mod mismatches."""
 
-from __future__ import annotations
+#
 
 import re
 from dataclasses import dataclass

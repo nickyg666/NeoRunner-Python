@@ -4,7 +4,7 @@ Interactive setup wizard for NeoRunner.
 Guides users through initial configuration and installation.
 """
 
-from __future__ import annotations
+#
 
 import os
 import sys

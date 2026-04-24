@@ -1,6 +1,6 @@
 """Mod browser for searching and installing mods from various sources."""
 
-from __future__ import annotations
+#
 
 import json
 import urllib.request

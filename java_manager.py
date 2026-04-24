@@ -3,7 +3,7 @@ Java version management for NeoRunner.
 Handles Java installation, version detection, and switching.
 """
 
-from __future__ import annotations
+#
 
 import os
 import re

@@ -1,6 +1,6 @@
 """Server management for NeoRunner with tmux-based process monitoring."""
 
-from __future__ import annotations
+#
 
 import subprocess
 import signal

@@ -3,7 +3,7 @@ Web dashboard for NeoRunner using Flask.
 Provides server management, mod management, world management, and configuration UI.
 """
 
-from __future__ import annotations
+#
 
 import os
 import json

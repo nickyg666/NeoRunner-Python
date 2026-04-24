@@ -3,7 +3,7 @@
 Uses ferium for mod management, with CurseForge scraper for mod_id resolution.
 """
 
-from __future__ import annotations
+#
 
 import os
 import re

@@ -3,7 +3,7 @@ WebSocket support for NeoRunner dashboard.
 Provides real-time log streaming and server status updates.
 """
 
-from __future__ import annotations
+#
 
 import os
 import json

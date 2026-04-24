@@ -3,7 +3,7 @@ World management for NeoRunner.
 Handles world scanning, switching, backup, and restore operations.
 """
 
-from __future__ import annotations
+#
 
 import os
 import json

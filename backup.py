@@ -3,7 +3,7 @@
 Handles world backups, scheduling, and restore operations.
 """
 
-from __future__ import annotations
+#
 
 import os
 import shutil

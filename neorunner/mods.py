@@ -1,6 +1,6 @@
 """Mod management for NeoRunner."""
 
-from __future__ import annotations
+#
 
 import zipfile
 import json

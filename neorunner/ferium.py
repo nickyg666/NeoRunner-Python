@@ -3,7 +3,7 @@ Ferium Manager - Handles mod downloads, profile setup, and scheduler integration
 Manages Modrinth and CurseForge mod updates with automatic scheduling.
 """
 
-from __future__ import annotations
+#
 
 import os
 import json

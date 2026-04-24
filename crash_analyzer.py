@@ -1,6 +1,6 @@
 """Crash log analyzer for diagnosing client-side issues."""
 
-from __future__ import annotations
+#
 
 import re
 from dataclasses import dataclass

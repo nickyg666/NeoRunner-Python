@@ -3,7 +3,7 @@ CLI for NeoRunner.
 Provides command-line interface for server management.
 """
 
-from __future__ import annotations
+#
 
 import os
 import sys

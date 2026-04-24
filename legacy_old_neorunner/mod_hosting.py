@@ -3,7 +3,7 @@ Mod hosting server with HTTP endpoints for mod distribution.
 Provides secure mod downloads with rate limiting and conditional zip creation.
 """
 
-from __future__ import annotations
+#
 
 import os
 import json

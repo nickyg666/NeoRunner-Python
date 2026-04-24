@@ -1,6 +1,6 @@
 """Log management for NeoRunner - retention, rotation, and cleanup."""
 
-from __future__ import annotations
+#
 
 import os
 import shutil

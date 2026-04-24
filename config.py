@@ -13,7 +13,7 @@ except ImportError:
     from constants import CWD, PARALLEL_PORTS, MOD_LOADERS
 
 
-@dataclass
+@dataclass(slots=True)
 class ServerConfig:
     """Main server configuration."""
     rcon_pass: str = "1"

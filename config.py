@@ -7,7 +7,10 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any
 
-from .constants import CWD, PARALLEL_PORTS, MOD_LOADERS
+try:
+    from .constants import CWD, PARALLEL_PORTS, MOD_LOADERS
+except ImportError:
+    from constants import CWD, PARALLEL_PORTS, MOD_LOADERS
 
 
 @dataclass

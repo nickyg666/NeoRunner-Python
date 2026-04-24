@@ -1,7 +1,5 @@
 """Configuration management for NeoRunner."""
 
-from __future__ import annotations
-
 import json
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -19,7 +17,7 @@ def _get_default_version() -> str:
         return "1.21.11"
 
 
-@dataclass
+@dataclass(slots=True)
 class ServerConfig:
     """Main server configuration."""
     rcon_pass: str = "1"

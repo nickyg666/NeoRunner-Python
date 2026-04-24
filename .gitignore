@@ -1,1 +1,43 @@
+# Java/Minecraft
 .java/
+*.jar
+world/
+libraries/
+crash-reports/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+*.egg-info/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# NeoRunner specific
+config.json
+server.properties
+user_jvm_args.txt
+eula.txt
+start_nro.sh
+neorunner_venv/
+.cache/
+run_*.sh
+server_*.sh
+*.bak
+*.orig
+
+# Secrets
+*.pem
+*.key
+credentials.json

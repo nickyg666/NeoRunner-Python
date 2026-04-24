@@ -82,6 +82,49 @@ class NeoForgeLoader(LoaderBase):
         sim_dist = _get_cfg_value(self.cfg, "simulation_distance", "8")
         max_tick = _get_cfg_value(self.cfg, "max_tick_time", "120000")
         
+        # Check for world regeneration needed
+        world_dir = self.cwd / "world" if isinstance(self.cwd, Path) else os.path.join(self.cwd, "world")
+        mc_ver = self.mc_version if hasattr(self, 'mc_version') else "1.21"
+        props_mc_ver = None
+        
+        if os.path.exists(props_file):
+            try:
+                with open(props_file) as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith("level-name="):
+                            props_mc_ver = line.split("=", 1)[1]
+            except Exception:
+                pass
+        
+        # Check version compatibility
+        old_world_marker = os.path.join(self.cwd, "world", "version" if isinstance(self.cwd, Path) else "world/version")
+        needs_regen = False
+        if os.path.exists(world_dir):
+            # Check if world version matches current MC version
+            version_file = os.path.join(self.cwd, "world", "version") if isinstance(self.cwd, Path) else os.path.join(self.cwd, "world/version")
+            if os.path.exists(version_file):
+                try:
+                    with open(version_file) as f:
+                        world_ver = f.read().strip()
+                    if world_ver != mc_ver:
+                        log_event("LOADER_NEOFORGE", f"World version mismatch: {world_ver} != {mc_ver}, regenerating...")
+                        needs_regen = True
+                except Exception:
+                    pass
+        
+        if needs_regen:
+            # Backup old world
+            import time
+            backup_name = f"world_old_{int(time.time())}"
+            backup_dir = self.cwd / backup_name if isinstance(self.cwd, Path) else os.path.join(self.cwd, backup_name)
+            try:
+                if os.path.exists(world_dir):
+                    os.rename(world_dir, str(backup_dir))
+                    log_event("LOADER_NEOFORGE", f"World backed up to {backup_name}")
+            except Exception as e:
+                log_event("LOADER_NEOFORGE", f"Failed to backup world: {e}")
+        
         properties = {
             "enable-rcon": "true",
             "rcon.password": _get_cfg_value(self.cfg, "rcon_pass", "changeme"),

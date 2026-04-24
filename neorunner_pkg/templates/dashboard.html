@@ -1661,6 +1661,84 @@
                 document.getElementById('mod-selector-modal').classList.remove('active');
             }
             
+            function openConvertModal() {
+                document.getElementById('convert-modal').classList.add('active');
+                document.getElementById('convert-input').style.display = 'block';
+                document.getElementById('convert-results').style.display = 'none';
+                document.getElementById('convert-filenames').value = '';
+            }
+            
+            function closeConvertModal() {
+                document.getElementById('convert-modal').classList.remove('active');
+            }
+            
+            function showConvertInput() {
+                document.getElementById('convert-input').style.display = 'block';
+                document.getElementById('convert-results').style.display = 'none';
+            }
+            
+            function runConversion() {
+                const filenamesText = document.getElementById('convert-filenames').value.trim();
+                if (!filenamesText) {
+                    showAlert('Enter mod filenames', 'error');
+                    return;
+                }
+                const filenames = filenamesText.split('\n').map(f => f.trim()).filter(f => f);
+                const sourceLoader = document.getElementById('convert-source-loader').value;
+                document.getElementById('convert-run-btn').disabled = true;
+                document.getElementById('convert-run-btn').textContent = 'Analyzing...';
+                fetch('/api/modpack/convert', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({filenames, source_loader: sourceLoader})
+                }).then(r => r.json()).then(data => {
+                    if (data.success) {
+                        document.getElementById('convert-input').style.display = 'none';
+                        document.getElementById('convert-results').style.display = 'block';
+                        document.getElementById('convert-summary').innerHTML = `<p>Converted: ${data.converted}, Failed: ${data.failed}</p>`;
+                        let html = '';
+                        for (const r of data.results) {
+                            html += `<div class="mod-result ${r.success ? 'success' : 'failed'}">${r.message}</div>`;
+                        }
+                        document.getElementById('convert-results-list').innerHTML = html;
+                    } else {
+                        showAlert(data.error || 'Conversion failed', 'error');
+                    }
+                    document.getElementById('convert-run-btn').disabled = false;
+                    document.getElementById('convert-run-btn').textContent = 'Analyze Modpack';
+                }).catch(err => {
+                    showAlert('Error: ' + err, 'error');
+                    document.getElementById('convert-run-btn').disabled = false;
+                    document.getElementById('convert-run-btn').textContent = 'Analyze Modpack';
+                });
+            }
+            
+            function installConvertedMods() {
+                const checkboxes = document.querySelectorAll('#convert-results-list input[type="checkbox"]:checked');
+                const modIds = Array.from(checkboxes).map(cb => cb.value);
+                if (!modIds.length) {
+                    showAlert('Select mods to install', 'error');
+                    return;
+                }
+                document.getElementById('convert-install-btn').disabled = true;
+                fetch('/api/modpack/install', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({mod_ids: modIds})
+                }).then(r => r.json()).then(data => {
+                    if (data.success) {
+                        showAlert('Installed ' + modIds.length + ' mods', 'success');
+                        closeConvertModal();
+                    } else {
+                        showAlert(data.error || 'Install failed', 'error');
+                    }
+                    document.getElementById('convert-install-btn').disabled = false;
+                }).catch(err => {
+                    showAlert('Error: ' + err, 'error');
+                    document.getElementById('convert-install-btn').disabled = false;
+                });
+            }
+            
             function rescanMods() {
                 showAlert('Rescanning mods...', 'info');
                 fetch('/api/rescan-mods', {method: 'POST'}).then(r => r.json()).then(data => {

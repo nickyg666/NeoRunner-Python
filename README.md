@@ -45,6 +45,184 @@ A comprehensive Python platform for managing self-hosted Minecraft modded server
 - **Backup Rotation**: Configurable backup retention
 - **Restore Functionality**: One-click world restore
 
+## Quick Start
+
+```bash
+# Install dependencies
+pip install -e .
+
+# Initialize configuration
+neorunner init --mc-version 1.21.11 --loader neoforge --xmx 4G
+
+# Run setup (install loader, create directories)
+neorunner setup
+
+# Start server with dashboard
+neorunner start
+```
+
+## Production Deployment (systemd)
+
+### Prerequisites
+
+1. Install NeoRunner:
+   ```bash
+   cd /home/host/neorunner
+   pip install -e .
+   ```
+
+2. Initialize the server:
+   ```bash
+   neorunner init --mc-version 1.21.11 --loader neoforge --xmx 6G
+   neorunner setup
+   ```
+
+3. Create a dedicated user (recommended for security):
+   ```bash
+   sudo useradd -r -s /bin/false mcserver
+   sudo chown -R mcserver:mcserver /home/host/neorunner
+   ```
+
+### Create systemd Service
+
+Create `/etc/systemd/system/neorunner.service`:
+
+```ini
+[Unit]
+Description=NeoRunner Minecraft Server
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=mcserver
+Group=mcserver
+WorkingDirectory=/home/host/neorunner
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=/home/host/neorunner"
+
+# Start server with dashboard
+ExecStart=/usr/local/bin/python -m neorunner_pkg.cli start
+
+# Restart on crash with cooldown
+Restart=on-failure
+RestartSec=30
+
+# Logging
+StandardOutput=append:/home/host/neorunner/systemd.log
+StandardError=append:/home/host/neorunner/systemd.log
+
+# Resource limits (adjust based on available memory)
+MemoryMax=8G
+MemoryHigh=6G
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Alternative: Separate Dashboard Service
+
+For better isolation, run dashboard and server separately:
+
+**`/etc/systemd/system/neorunner-dashboard.service`:**
+```ini
+[Unit]
+Description=NeoRunner Web Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=mcserver
+Group=mcserver
+WorkingDirectory=/home/host/neorunner
+ExecStart=/usr/local/bin/python -m neorunner_pkg.cli start --no-server
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**`/etc/systemd/system/neorunner-server.service`:**
+```ini
+[Unit]
+Description=NeoRunner Minecraft Server
+After=network.target
+PartOf=neorunner-dashboard.service
+
+[Service]
+Type=simple
+User=mcserver
+Group=mcserver
+WorkingDirectory=/home/host/neorunner
+ExecStart=/usr/local/bin/python -m neorunner_pkg.cli start --no-dashboard
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Enable and Start Services
+
+```bash
+# Reload systemd
+sudo systemctl daemon-reload
+
+# Enable on boot
+sudo systemctl enable neorunner.service
+
+# Start immediately
+sudo systemctl start neorunner.service
+
+# Check status
+sudo systemctl status neorunner.service
+
+# View logs
+sudo journalctl -u neorunner.service -f
+```
+
+### Useful Commands
+
+```bash
+# Stop server gracefully
+sudo systemctl stop neorunner.service
+
+# Restart server
+sudo systemctl restart neorunner.service
+
+# View recent logs
+sudo journalctl -u neorunner.service -n 50
+
+# Check if running
+systemctl is-active neorunner.service
+```
+
+### Security Considerations
+
+1. **Firewall Rules** - Open required ports:
+   ```bash
+   sudo firewall-cmd --permanent --add-port=25565/tcp  # Minecraft
+   sudo firewall-cmd --permanent --add-port=8000/tcp   # Dashboard
+   sudo firewall-cmd --reload
+   ```
+
+2. **Resource Limits** - Adjust MemoryMax in service file based on available RAM
+
+3. **Backup Strategy** - Add cron job for world backups:
+   ```bash
+   # /etc/cron.d/neorunner-backup
+   0 3 * * * mcserver /usr/bin/python /home/host/neorunner/neorunner_pkg/backup.py >> /home/host/neorunner/backup.log 2>&1
+   ```
+
+4. **Log Rotation** - Configure journald to prevent log bloat:
+   ```bash
+   # /etc/systemd/journald.conf
+   [Journal]
+   SystemMaxUse=500M
+   MaxRetentionSec=30day
+   ```
+
 ## Architecture
 
 ```
@@ -85,30 +263,6 @@ neorunner/
 ├── static/             # Static web assets
 ├── templates/          # HTML templates
 └── tests/              # Test suite
-```
-
-## Installation
-
-### Prerequisites
-- Python 3.11+
-- Java 21 (for NeoForge/Forge) or Java 17+ (for Fabric)
-- tmux
-- curl, rsync, unzip, zip
-
-### Quick Start
-
-```bash
-# Install dependencies
-pip install -e .
-
-# Initialize configuration
-neorunner init --mc-version 1.21.11 --loader neoforge --xmx 4G
-
-# Run setup (install loader, create directories)
-neorunner setup
-
-# Start server with dashboard
-neorunner start
 ```
 
 ## Configuration
@@ -205,6 +359,8 @@ neorunner curate
 neorunner check-updates
 ```
 
+## API Endpoints
+
 ### Dashboard API
 
 | Endpoint | Method | Description |
@@ -229,88 +385,6 @@ neorunner check-updates
 | `/download/<modname>` | Individual mod download |
 | `/download/install-mods.bat` | Windows install script |
 | `/download/install` | PowerShell install script |
-
-## Module Reference
-
-### Core
-
-- **`config.py`**: `ServerConfig` dataclass, `load_cfg()`, `save_cfg()`, `ensure_config()`, `validate_config()`
-- **`constants.py`**: `MOD_LOADERS`, `PARALLEL_PORTS`, `CWD`, `MAX_RESTART_ATTEMPTS`
-- **`server.py`**: `TmuxServer` class, `run_server()`, `stop_server()`, `restart_server()`, `send_command()`, `is_server_running()`, `get_events()`
-- **`cli.py`**: CLI entry point with argparse subcommands
-
-### Dashboard
-
-- **`dashboard.py`**: Flask app with all API endpoints, `run_dashboard()`
-- **`websocket.py`**: WebSocket support via socketio, `emit_event()`
-
-### Mod Management
-
-- **`mods.py`**: `classify_mod()`, `sort_mods_by_type()`, `preflight_mod_compatibility_check()`, `curate_mod_list()`, `ModInfo`
-- **`mod_browser.py`**: `ModBrowser`, `ModResult` for Modrinth/CurseForge search
-- **`mod_hosting.py`**: `run_mod_server()`, `create_mod_zip()`, `generate_bat_script()`
-- **`mod_modder.py`**: `ModModder`, `MixinConflictResolver` for mixin conflict resolution
-- **`mod_patcher.py`**: `ModPatcher`, `ModCompatibilityManager` for auto-patching
-- **`ferium.py`**: `FeriumManager`, `setup_ferium_wizard()` for Ferium integration
-
-### Diagnostics
-
-- **`self_heal.py`**: `preflight_dep_check()`, `quarantine_mod()`, `load_crash_history()`, dependency fetching
-- **`crash_analyzer.py`**: `CrashAnalyzer`, `CrashAnalysis` for crash log parsing
-- **`network_channel_analyzer.py`**: `NetworkChannelAnalyzer`, `ChannelMismatch` for mod mismatch detection
-- **`log_manager.py`**: `LogManager`, `run_log_cleanup()` for log rotation/retention
-
-### Infrastructure
-
-- **`installer.py`**: `setup()`, `install_loader()`, `install_neoforge()`, `install_forge()`, `install_fabric()`, `check_system_deps()`
-- **`worlds.py`**: `WorldManager`, `scan_worlds()`, `switch_world()`, `get_current_world()`
-- **`backup.py`**: `backup_world()`, `list_backups()`, `restore_backup()`, `cleanup_old_backups()`
-- **`java_manager.py`**: `JavaManager`, `JavaVersion`, `get_java_info()`
-- **`nbt_parser.py`**: `get_world_version()`, `parse_nbt()` for level.dat parsing
-- **`load_order.py`**: `restore_mod_names()`, `generate_load_order()`, `get_mod_load_order()`
-
-### Utilities
-
-- **`curseforge.py`**: `search_curseforge()`, `is_available()`, `PLAYWRIGHT_AVAILABLE`
-- **`modpack_converter.py`**: `ModpackConverter`, `create_curageforge_pack()`
-- **`log.py`**: `log_event()` for structured event logging
-- **`verify.py`**: Server verification utilities
-- **`mod_stripper.py`**: Strip client-only classes from server JARs
-
-### Loaders
-
-- **`loaders/__init__.py`**: `get_loader()` factory function
-- **`loaders/neoforge.py`**: `NeoForgeLoader` - NeoForge-specific installation and commands
-- **`loaders/forge.py`**: `ForgeLoader` - Forge-specific installation and commands
-- **`loaders/fabric.py`**: `FabricLoader` - Fabric-specific installation and commands
-
-## Roadmap
-
-### Planned Features
-
-- [ ] **GUI Setup Wizard**: Web-based initial configuration
-- [ ] **Modpack Import**: Import from CurseForge/modrinth modpacks
-- [ ] **Player Management**: Whitelist, ban list, permissions
-- [ ] **Scheduled Tasks**: Cron-like task scheduling
-- [ ] **Metrics/Stats**: Player activity, mod usage stats
-- [ ] **Plugin Support**: Extensible plugin system
-- [ ] **Cluster Support**: Multiple server instances
-
-### In Progress
-
-- [x] Basic server management
-- [x] Web dashboard
-- [x] Mod management (Modrinth/CurseForge)
-- [x] Client synchronization
-- [x] Crash recovery
-- [x] Log management
-- [x] Mixin conflict resolution
-
-### Known Limitations
-
-- **Filename-based load order**: Not all launchers respect mod filename prefixes; proper dependency declarations in mods.toml/fabric.mod.json are more reliable
-- **CurseForge scraping**: Uses Selenium which requires Firefox; API key is faster
-- **RCON player list**: Basic parsing; may not work with all server configurations
 
 ## Troubleshooting
 
@@ -339,6 +413,31 @@ neorunner check-updates
 1. Check port is not in use: `lsof -i :8000`
 2. Verify Flask is running: `ps aux | grep flask`
 3. Check dashboard logs
+
+### Production Issues
+
+**Service fails to start:**
+```bash
+# Check detailed logs
+sudo journalctl -u neorunner.service -xe
+
+# Verify Python path
+sudo -u mcserver python -c "from neorunner_pkg import cli; print('OK')"
+
+# Check port availability
+sudo lsof -i :8000
+sudo lsof -i :25565
+```
+
+**Out of memory errors:**
+- Increase `xmx` in config.json
+- Adjust `MemoryMax` in systemd service
+- Check for memory leaks in mods
+
+**Performance issues:**
+- Enable crash recovery with lower restart limits for testing
+- Monitor with `/api/status` endpoint
+- Check live.log for bottlenecks
 
 ## Development
 

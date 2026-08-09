@@ -20,7 +20,7 @@ NEORUNNER_HOME = Path(__file__).parent.resolve()
 os.chdir(NEORUNNER_HOME)
 sys.path.insert(0, str(NEORUNNER_HOME))
 
-from neorunner import load_cfg, save_cfg, ServerConfig, log_event
+from . import load_cfg, save_cfg, ServerConfig, log_event
 from neorunner.constants import CWD
 
 
@@ -73,16 +73,29 @@ def get_package_install_commands():
         "java_package": ""
     }
     
+    # Determine required Java version from config MC version (or latest)
+    java_req = 21
+    try:
+        from .version import get_java_version_for_mc
+        try:
+            mc_ver = load_cfg().mc_version
+        except Exception:
+            mc_ver = None
+        if mc_ver:
+            java_req = int(get_java_version_for_mc(mc_ver))
+    except Exception:
+        pass
+    
     # Detect package manager and Java package
     if shutil.which("apt-get"):
         commands["packages"]["apt-get"] = "sudo apt-get update && sudo apt-get install -y tmux curl rsync unzip zip"
-        commands["java_package"] = "openjdk-21-jre-headless"
-        commands["install_java"] = "sudo apt-get install -y openjdk-21-jre-headless"
+        commands["java_package"] = f"openjdk-{java_req}-jre-headless"
+        commands["install_java"] = f"sudo apt-get install -y openjdk-{java_req}-jre-headless || sudo apt-get install -y default-jre"
     
     elif shutil.which("dnf"):
         commands["packages"]["dnf"] = "sudo dnf install -y tmux curl rsync unzip zip"
-        commands["java_package"] = "java-21-openjdk-headless"
-        commands["install_java"] = "sudo dnf install -y java-21-openjdk-headless"
+        commands["java_package"] = f"java-{java_req}-openjdk-headless"
+        commands["install_java"] = f"sudo dnf install -y java-{java_req}-openjdk-headless"
     
     elif shutil.which("yum"):
         # Amazon Linux 2 and older RHEL/CentOS
@@ -92,24 +105,24 @@ def get_package_install_commands():
             with open("/etc/os-release") as f:
                 content = f.read()
                 if "amzn" in content.lower():
-                    commands["java_package"] = "java-21-amazon-corretto"
-                    commands["install_java"] = "sudo amazon-linux-extras install java-openjdk21 -y || sudo yum install -y java-21-amazon-corretto"
+                    commands["java_package"] = f"java-{java_req}-amazon-corretto"
+                    commands["install_java"] = f"sudo amazon-linux-extras install java-openjdk{java_req} -y || sudo yum install -y java-{java_req}-openjdk"
                 else:
-                    commands["java_package"] = "java-21-openjdk"
-                    commands["install_java"] = "sudo yum install -y java-21-openjdk"
+                    commands["java_package"] = f"java-{java_req}-openjdk"
+                    commands["install_java"] = f"sudo yum install -y java-{java_req}-openjdk"
         else:
-            commands["java_package"] = "java-21-openjdk"
-            commands["install_java"] = "sudo yum install -y java-21-openjdk"
+            commands["java_package"] = f"java-{java_req}-openjdk"
+            commands["install_java"] = f"sudo yum install -y java-{java_req}-openjdk"
     
     elif shutil.which("pacman"):
         commands["packages"]["pacman"] = "sudo pacman -Sy --noconfirm tmux curl rsync unzip zip"
-        commands["java_package"] = "jre21-openjdk-headless"
-        commands["install_java"] = "sudo pacman -S --noconfirm jre21-openjdk-headless"
+        commands["java_package"] = f"jre{java_req}-openjdk-headless"
+        commands["install_java"] = f"sudo pacman -S --noconfirm jre{java_req}-openjdk-headless"
     
     elif shutil.which("zypper"):
         commands["packages"]["zypper"] = "sudo zypper install -y tmux curl rsync unzip zip"
-        commands["java_package"] = "java-21-openjdk"
-        commands["install_java"] = "sudo zypper install -y java-21-openjdk"
+        commands["java_package"] = f"java-{java_req}-openjdk"
+        commands["install_java"] = f"sudo zypper install -y java-{java_req}-openjdk"
     
     return commands
 
@@ -185,11 +198,19 @@ def check_java_compatibility():
         version_match = re.search(r'version "?(\d+)', output)
         if version_match:
             version = int(version_match.group(1))
-            if version >= 21:
-                print(f"✓ Java {version} detected (compatible)")
+            java_req = 21
+            try:
+                from .version import get_java_version_for_mc
+                mc_ver = load_cfg().mc_version
+                if mc_ver:
+                    java_req = int(get_java_version_for_mc(mc_ver))
+            except Exception:
+                pass
+            if version >= java_req:
+                print(f"✓ Java {version} detected (compatible, requires Java {java_req}+)")
                 return True
             else:
-                print(f"⚠ Java {version} detected (requires Java 21+)")
+                print(f"⚠ Java {version} detected (requires Java {java_req}+)")
                 return False
     except:
         print("✗ Java not found")
@@ -274,7 +295,7 @@ def main():
     
     # Check Java
     if not check_java_compatibility():
-        print("\n⚠ Java 21+ is required but not found")
+        print("\n⚠ A compatible Java version is required but not found")
         commands = get_package_install_commands()
         if "install_java" in commands:
             response = input("Install Java? [Y/n]: ").strip().lower()

@@ -1,2 +1,0 @@
-[console_scripts]
-neorunner = neorunner_pkg.cli:main

@@ -351,5 +351,5 @@ def get_java_info() -> Dict[str, Any]:
             for j in manager.installations
         ],
         "best_java": manager.get_best_java().path if manager.get_best_java() else None,
-        "min_version": JavaManager.MIN_VERSION,
+        "min_version": manager.MIN_VERSION,
     }

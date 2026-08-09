@@ -28,6 +28,14 @@ class CrashAnalyzer:
     """Analyze crash logs to identify issues and recommend fixes."""
     
     # Error patterns
+    # Java class file major version -> Java release number
+    # (e.g. "Class version 69 required" means the mod was built for Java 25)
+    CLASS_FILE_VERSION_TO_JAVA = {
+        52: 8, 53: 9, 54: 10, 55: 11, 56: 12, 57: 13, 58: 14, 59: 15, 60: 16,
+        61: 17, 62: 18, 63: 19, 64: 20, 65: 21, 66: 22, 67: 23, 68: 24, 69: 25,
+        70: 26,
+    }
+
     JAVA_VERSION_PATTERNS = [
         r"Class version (\d+) required",
         r"UnsupportedClassVersionError",
@@ -117,6 +125,14 @@ class CrashAnalyzer:
             if match:
                 # Extract required Java version
                 required_java = match.group(1) if match.groups() else "unknown"
+                
+                # Convert class file versions (e.g. 69) to Java release numbers (e.g. 25)
+                if str(required_java).isdigit():
+                    cfv = int(required_java)
+                    if cfv >= 45 and cfv <= 52:
+                        required_java = "8"
+                    else:
+                        required_java = str(self.CLASS_FILE_VERSION_TO_JAVA.get(cfv, cfv))
                 
                 # Try to find which mod requires this
                 culprit = self._extract_mod_from_context(log_text, match.start())

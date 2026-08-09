@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 
-from constants import CWD
+from .constants import CWD
 
 # Configure the rotating file handler for production
 LOG_FILE = CWD / "logs" / "neorunner.log"

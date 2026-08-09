@@ -16,7 +16,7 @@ from typing import Optional, Dict, Any
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from neorunner import load_cfg, save_cfg, ServerConfig
+from . import load_cfg, save_cfg, ServerConfig
 from neorunner.constants import CWD
 from neorunner.log import log_event
 
@@ -133,7 +133,16 @@ def install_system_deps() -> bool:
     if not available:
         print_error("No supported package manager found")
         print("Please install the following manually:")
-        print("  - Java 21 (openjdk-21-jre-headless)")
+        java_req = 21
+        try:
+            from .version import get_java_version_for_mc
+            from .config import load_cfg
+            mc_ver = load_cfg().mc_version
+            if mc_ver:
+                java_req = int(get_java_version_for_mc(mc_ver))
+        except Exception:
+            pass
+        print(f"  - Java {java_req} (openjdk-{java_req}-jre-headless)")
         print("  - tmux, curl, rsync, unzip, zip")
         return False
     
@@ -144,10 +153,19 @@ def install_system_deps() -> bool:
     
     # Check if Java is installed
     if not shutil.which("java"):
+        java_req = 21
+        try:
+            from .version import get_java_version_for_mc
+            from .config import load_cfg
+            mc_ver = load_cfg().mc_version
+            if mc_ver:
+                java_req = int(get_java_version_for_mc(mc_ver))
+        except Exception:
+            pass
         if pkg_name in ["apt", "dnf", "yum"]:
-            packages.append("openjdk-21-jre-headless")
+            packages.append(f"openjdk-{java_req}-jre-headless")
         elif pkg_name == "pacman":
-            packages.append("jre21-openjdk-headless")
+            packages.append(f"jre{java_req}-openjdk-headless")
     
     print(f"Installing: {', '.join(packages)}")
     

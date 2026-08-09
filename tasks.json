@@ -1,0 +1,8 @@
+{
+  "queue": [
+    "Find and fix any broken imports or errors in the neorunner codebase",
+    "Check world version detection and fix to show actual Minecraft version from level.dat",
+    "Verify all dashboard endpoints return proper JSON responses"
+  ],
+  "completed": []
+}

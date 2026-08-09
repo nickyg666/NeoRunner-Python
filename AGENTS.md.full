@@ -1,0 +1,63 @@
+# AGENTS.md - NeoRunner Implementation Plan
+
+## Overview
+This is the canonical knowledge base for the NeoRunner project - Minecraft modded server manager.
+
+## Dynamic Version System
+ALL Minecraft version references must use the version module:
+
+
+## Phase 1: Crash Log Analyzer (Client-Side Analysis)
+Analyzes CLIENT crash logs to identify issues and auto-fetch missing mods.
+
+| Error Type | Detection Pattern | Server Has Mod? | Action |
+|-----------|-------------------|-----------------|--------|
+| Missing Dependency | requires mod X | NO | Fetch X → clientonly/ |
+| Missing Dependency | requires mod X | YES (diff version) | Resync |
+| Client-Only Mod | net.minecraft.client.* | - | Flag |
+| Java Version | Class version 65 | - | Warn |
+
+## Phase 2: Network Channel Logging (Server-Side)
+- Always-on monitoring every 5 seconds
+- Parse logs for: Unknown custom packet identifier, Channel not registered
+
+## Phase 3: Log Management
+Config in config.json:
+
+
+## Phase 4: Comprehensive Testing
+25 tests implemented:
+- test_config.py: 8 tests
+- test_crash_analyzer.py: 7 tests
+- test_log_management.py: 4 tests
+- test_network_channels.py: 6 tests
+
+## Current Setup (192.168.0.150)
+- Python 3.14.4 (system), Python 3.12 (recommended for venv)
+- NeoForge 26.1.2.22-beta
+- MC 1.21.11
+- Dashboard: port 8000 (Python 3.12)
+- OpenCode: port 8003
+- Minecraft: port 1234
+
+## Known Issues Fixed
+1. Python 3.14 dataclass bug → add  to config.py
+2. Relative import issues → use importlib.util.spec_from_file_location() with module.__package__ = ''
+3. IP detection 127.x → skip 169.254 too
+4. World version unknown → parse level.dat properly
+
+## Services
+- neorunner start --no-dashboard (uses Python 3.12)
+- start_dashboard.py (direct module loader)
+- ~/.local/share/uv/python/cpython-3.12-linux-x86_64-gnu/bin/python3.12
+
+## OpenCode Setup
+- Location: ~/.opencode/bin/opencode
+- Web: opencode web --port 8003 --hostname 0.0.0.0
+- Model: minimax/MiniMax-M2.5
+- oh-my-openagent bridge installed
+
+## SSH Access
+- host@192.168.0.150
+- Password: 1
+- SSH key: ~/.ssh/id_ed25519

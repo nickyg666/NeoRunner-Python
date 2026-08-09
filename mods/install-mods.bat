@@ -2,7 +2,7 @@
 REM install-mods.bat - NeoRunner Client Mod Sync Script
 setlocal enabledelayedexpansion
 
-set "SERVER_HOST=localhost"
+set "SERVER_HOST=192.168.0.150"
 set "SERVER_PORT=8000"
 
 if "%SERVER_HOST%"=="" set "SERVER_HOST=localhost"

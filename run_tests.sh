@@ -3,7 +3,7 @@
 
 set -e
 
- cd /development/neorunner
+ cd /home/host/neorunner
 
 echo "=== NeoRunner Test Suite ==="
 echo ""
@@ -47,7 +47,7 @@ echo "[4/5] Testing loader JVM args..."
 # Test NeoForge
 python3 << 'PYEOF'
 import os, sys, shutil
-sys.path.insert(0, '/development/neorunner')
+sys.path.insert(0, '/home/host/neorunner')
 from neorunner_pkg.loaders.neoforge import NeoForgeLoader
 from neorunner_pkg.config import ServerConfig
 
@@ -84,7 +84,7 @@ echo ""
 echo "[5/5] Testing Java commands..."
 python3 << 'PYEOF'
 import os, sys, shutil
-sys.path.insert(0, '/development/neorunner')
+sys.path.insert(0, '/home/host/neorunner')
 from neorunner_pkg.loaders import get_loader
 from neorunner_pkg.config import ServerConfig
 

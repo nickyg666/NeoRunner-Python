@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 from functools import wraps
 
-from flask import Flask, render_template, jsonify, request, send_file, Response
+from flask import Flask, render_template, jsonify, request, send_file, Response, redirect, url_for
 
 from .config import ServerConfig, load_cfg, save_cfg
 from .constants import CWD
@@ -371,6 +371,13 @@ def get_client_mods() -> List[Dict[str, Any]]:
 # API Routes
 # ═══════════════════════════════════════════════════════════════════════════════
 
+@app.route("/admin")
+@app.route("/admin/")
+def admin_index():
+    """Alias for the dashboard (IP:8000/admin)."""
+    return redirect(url_for("dashboard"))
+
+
 @app.route("/")
 def dashboard():
     """Main dashboard page."""
@@ -538,6 +545,40 @@ def api_remove_mod(mod_name):
             return jsonify({"success": True, "message": f"Removed {mod_name}"})
         else:
             return jsonify({"success": False, "error": "Mod not found"}), 404
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+@app.route("/api/mods/upload", methods=["POST"])
+def api_upload_mod():
+    """Upload a mod JAR file."""
+    try:
+        if 'file' not in request.files:
+            return jsonify({"success": False, "error": "No file uploaded"}), 400
+        
+        file = request.files['file']
+        if not file.filename or not file.filename.endswith('.jar'):
+            return jsonify({"success": False, "error": "Only .jar files allowed"}), 400
+        
+        cfg = load_cfg()
+        mods_dir = CWD / cfg.mods_dir
+        mods_dir.mkdir(exist_ok=True)
+        
+        filename = file.filename
+        save_path = mods_dir / filename
+        
+        # Don't overwrite existing
+        if save_path.exists():
+            return jsonify({"success": False, "error": f"Mod {filename} already exists"}), 400
+        
+        file.save(save_path)
+        log_event("MOD_UPLOAD", f"Uploaded mod: {filename}")
+        
+        return jsonify({
+            "success": True, 
+            "message": f"Uploaded {filename}",
+            "mod": filename
+        })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 400
 
@@ -1300,14 +1341,28 @@ def api_blacklist():
 
 @app.route("/api/blacklist", methods=["POST"])
 def api_update_blacklist():
-    """Update blacklist."""
+    """Update blacklist/patterns/whitelist."""
     try:
         data = request.json
-        blacklist_file = CWD / "config" / "mod_blacklist.json"
-        blacklist_file.parent.mkdir(parents=True, exist_ok=True)
+        config_dir = CWD / "config"
+        config_dir.mkdir(parents=True, exist_ok=True)
         
-        with open(blacklist_file, "w") as f:
-            json.dump(data, f, indent=2)
+        if "whitelist" in data:
+            whitelist_file = config_dir / "mod_whitelist.json"
+            with open(whitelist_file, "w") as f:
+                json.dump(data["whitelist"], f, indent=2)
+        
+        blacklist_data = {
+            "mods": data.get("mods", []),
+            "patterns": data.get("patterns", []),
+        }
+        if "whitelist" not in data:
+            blacklist_file = config_dir / "mod_blacklist.json"
+            with open(blacklist_file, "w") as f:
+                json.dump(data, f, indent=2)
+        else:
+            with open(config_dir / "mod_blacklist.json", "w") as f:
+                json.dump(blacklist_data, f, indent=2)
         
         return jsonify({"success": True})
     except Exception as e:
@@ -1407,7 +1462,9 @@ def api_loaders_install():
         loader = data.get("loader", "neoforge")
         mc_version = data.get("mc_version", None)
         if not mc_version:
-            mc_version = get_latest_minecraft_version()
+            # Preserve existing config version
+            cfg = load_cfg()
+            mc_version = cfg.mc_version if cfg.mc_version else get_latest_minecraft_version()
         
         from .installer import install_loader
         cfg = load_cfg()
@@ -1429,8 +1486,12 @@ def api_loaders_switch():
         data = request.json
         loader = data.get("loader", "neoforge")
         mc_version = data.get("mc_version", None)
+        
+        # Only fetch dynamic version if explicitly requested
         if not mc_version:
-            mc_version = get_latest_minecraft_version()
+            # Try to preserve existing config version, only default if truly missing
+            cfg = load_cfg()
+            mc_version = cfg.mc_version if cfg.mc_version else get_latest_minecraft_version()
         
         cfg = load_cfg()
         cfg.loader = loader
@@ -1678,7 +1739,7 @@ def api_mods_versions(mod_id):
 
 @app.route("/api/mods/install", methods=["POST"])
 def api_mods_install():
-    """Install one or more mods."""
+    """Install one or more mods (by id/slug/name)."""
     try:
         data = request.json
         mods = data.get("mods", [])
@@ -1686,18 +1747,27 @@ def api_mods_install():
         if not mods:
             return jsonify({"success": False, "error": "No mods specified"}), 400
         
-        from .mod_browser import ModInstaller
-        installer = ModInstaller()
-        results = installer.install_multiple(mods)
+        cfg = load_cfg()
+        from .mod_manager import ModManager
+        cfg_dict = {'loader': cfg.loader, 'mc_version': cfg.mc_version, 'mods_dir': cfg.mods_dir}
+        mm = ModManager(cfg_dict, cwd=str(CWD))
         
-        successful = sum(1 for success, _ in results if success)
-        failed = len(results) - successful
+        keywords = []
+        for m in mods:
+            mid = (m.get("mod_id") or m.get("id") or m.get("slug") or m.get("name") or "").strip()
+            if mid and mid not in keywords:
+                keywords.append(mid)
+        
+        if not keywords:
+            return jsonify({"success": False, "error": "No valid mod identifiers supplied"}), 400
+        
+        result = mm.install_by_keywords(keywords, resolve_deps=True)
         
         return jsonify({
             "success": True,
-            "installed": successful,
-            "failed": failed,
-            "results": [{"success": s, "message": m} for s, m in results]
+            "installed": result.get("installed", []),
+            "failed": result.get("failed", []),
+            "status": result.get("status", "error")
         })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 400
@@ -1829,10 +1899,55 @@ def api_modpack_convert():
         failed = len(results) - successful
         
         return jsonify({
-            "success": True,
+"success": True,
             "converted": successful,
             "failed": failed,
-            "results": [{"success": s, "message": m} for s, m in results]
+            "results": [{"success": s, "message": m, "file": filename} for s, m, filename in zip([r[0] for r in results], [r[1] for r in results], filenames)]
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+@app.route("/api/modpack/install", methods=["POST"])
+def api_modpack_install():
+    """Install converted modpack mods into the server mods folder."""
+    try:
+        data = request.json
+        mod_ids = data.get("mod_ids", [])
+        
+        if not mod_ids:
+            return jsonify({"success": False, "error": "No mods selected"}), 400
+        
+        cfg = load_cfg()
+        from .mod_manager import ModManager
+        from .modpack_converter import ModpackConverter
+        cfg_dict = {'loader': cfg.loader, 'mc_version': cfg.mc_version, 'mods_dir': cfg.mods_dir}
+        mm = ModManager(cfg_dict, cwd=str(CWD))
+        converter = ModpackConverter()
+        
+        slugs = []
+        for mid in mod_ids:
+            info = converter.parse_mod_filename(mid)
+            slug = (info.get("mod_id") or mid).strip().lower()
+            if slug and slug not in slugs:
+                slugs.append(slug)
+        
+        if not slugs:
+            return jsonify({"success": False, "error": "Could not determine mod identifiers"}), 400
+        
+        result = mm.install_by_keywords(slugs, resolve_deps=True)
+        
+        installed = result.get("installed", [])
+        failed = result.get("failed", [])
+        
+        if installed and not failed:
+            log_event("MODPACK_CONVERT", f"Installed {len(installed)} mods from converted modpack")
+        
+        return jsonify({
+            "success": True,
+            "installed": installed,
+            "failed": failed,
+            "message": f"Installed {len(installed)} mods" + (f", {len(failed)} failed" if failed else "")
         })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 400
@@ -1914,9 +2029,9 @@ def api_java_install_command():
         from .java_manager import JavaManager
         manager = JavaManager()
         
-        command = manager.get_install_command()
+        command = manager.get_install_command(manager.MIN_VERSION)
         
-        return jsonify({"success": True, "command": command})
+        return jsonify({"success": True, "command": command, "min_version": manager.MIN_VERSION})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 400
 
@@ -1954,26 +2069,31 @@ def api_setup_install_prereqs():
     try:
         import shutil
         
+        from .version import get_java_version_for_mc, get_latest_minecraft_version
+        cfg = load_cfg()
+        mc_ver = getattr(cfg, "mc_version", None) or get_latest_minecraft_version()
+        java_req = int(get_java_version_for_mc(mc_ver))
+        
         commands = []
         
         # Detect package manager
         if shutil.which("apt-get"):
             commands.append("sudo apt-get update && sudo apt-get install -y tmux curl rsync unzip zip")
-            commands.append("sudo apt-get install -y openjdk-21-jre-headless || sudo apt-get install -y default-jre")
+            commands.append(f"sudo apt-get install -y openjdk-{java_req}-jre-headless || sudo apt-get install -y default-jre")
         elif shutil.which("dnf"):
-            commands.append("sudo dnf install -y tmux curl rsync unzip zip java-21-openjdk-headless")
+            commands.append(f"sudo dnf install -y tmux curl rsync unzip zip java-{java_req}-openjdk-headless")
         elif shutil.which("yum"):
             # Check for Amazon Linux
             if os.path.exists("/etc/os-release"):
                 with open("/etc/os-release") as f:
                     if "amzn" in f.read():
-                        commands.append("sudo amazon-linux-extras install java-openjdk21 -y || sudo yum install -y java-21-amazon-corretto")
+                        commands.append(f"sudo amazon-linux-extras install java-openjdk{java_req} -y || sudo yum install -y java-{java_req}-openjdk")
                     else:
-                        commands.append("sudo yum install -y tmux curl rsync unzip zip java-21-openjdk")
+                        commands.append(f"sudo yum install -y tmux curl rsync unzip zip java-{java_req}-openjdk")
             else:
-                commands.append("sudo yum install -y tmux curl rsync unzip zip java-21-openjdk")
+                commands.append(f"sudo yum install -y tmux curl rsync unzip zip java-{java_req}-openjdk")
         elif shutil.which("pacman"):
-            commands.append("sudo pacman -Sy --noconfirm tmux curl rsync unzip zip jre21-openjdk-headless")
+            commands.append(f"sudo pacman -Sy --noconfirm tmux curl rsync unzip zip jre{java_req}-openjdk-headless")
         
         # Execute commands
         for cmd in commands:

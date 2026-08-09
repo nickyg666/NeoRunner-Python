@@ -152,7 +152,7 @@ def _get_server_hostname(cfg: ServerConfig) -> str:
 # Global state for download tracking
 _last_request_time = 0
 _download_lock = threading.Lock()
-_zip_creation_lock = threading.Lock()
+_zip_creation_lock = threading.RLock()
 _last_zip_time: Optional[float] = None
 
 
@@ -710,12 +710,6 @@ if ($missingCount -gt 0) {
             $downloaded = $missingCount
             Write-Host "    Downloaded $downloaded mods" -ForegroundColor Green
         }
-    } catch {
-        Write-Host "    ERROR: Failed to download: $_" -ForegroundColor Red
-    }
-} else {
-    Write-Host "    All mods up to date!" -ForegroundColor Green
-}
     } catch {
         Write-Host "    ERROR: Failed to download: $_" -ForegroundColor Red
     }

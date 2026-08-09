@@ -71,7 +71,7 @@ def analyze_mod(jar_path: Path) -> ModAnalysis:
             for name in names:
                 if name.endswith('.class'):
                     for pattern in FATAL_FILE_PATTERNS:
-                        if pattern.replace("/", ".") in name:
+                        if pattern in name or pattern.replace("/", ".") in name:
                             result.client_files.append(name)
                             result.has_client_classes = True
                             break
@@ -139,7 +139,7 @@ def strip_client_classes(jar_path: Path, backup: bool = True) -> bool:
                     if item.filename.endswith('.class'):
                         is_client = False
                         for pattern in FATAL_FILE_PATTERNS:
-                            if pattern.replace("/", ".") in item.filename:
+                            if pattern in item.filename or pattern.replace("/", ".") in item.filename:
                                 is_client = True
                                 break
                         if is_client:
@@ -216,6 +216,7 @@ def patch_mixin_config(jar_path: Path) -> bool:
                                 
                                 if modified:
                                     text = json.dumps(data, indent=2)
+                                    content = text.encode('utf-8')
                                     patches_applied += 1
                             except json.JSONDecodeError:
                                 # Not valid JSON, skip

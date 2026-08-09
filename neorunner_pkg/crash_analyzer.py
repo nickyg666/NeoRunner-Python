@@ -313,7 +313,7 @@ class CrashAnalyzer:
         # Common patterns: modname.jar, modId=, "modId": "modname"
         
         # Pattern 1: JAR filename
-        jar_match = re.search(r"([a-zA-Z0-9_-]+)\.jar", context, re.IGNORECASE)
+        jar_match = re.search(r"([a-zA-Z][a-zA-Z0-9_-]*)(?:[-_]\d[\d.]*)?\.jar", context, re.IGNORECASE)
         if jar_match:
             return jar_match.group(1).lower()
         

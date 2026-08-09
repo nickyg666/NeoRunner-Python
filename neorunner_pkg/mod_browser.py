@@ -185,11 +185,11 @@ class ModBrowser:
             # Find all mod entries in the search results
             # Pattern: data-index="X" with mod-name and mod-slug
             mod_pattern = r'data-index="\d+"\s+data-mod-id="(\d+)"\s+data-project-id="(\d+)"'
-            matches = re.findall(mod_pattern, response.text)
+            matches = re.findall(mod_pattern, html)
             
             # Also extract names and slugs from links
             name_pattern = r'<a[^>]+href="/minecraft/mc-mods/([^"]+)"[^>]*>\s*<span[^>]*>([^<]+)</span>'
-            name_matches = re.findall(name_pattern, response.text)
+            name_matches = re.findall(name_pattern, html)
             
             # Create a mapping of slug -> info
             mod_info = {}
@@ -215,7 +215,7 @@ class ModBrowser:
                 # Fallback: try to find any mod links on the page
                 link_pattern = r'/minecraft/mc-mods/([a-zA-Z0-9_-]+)'
                 seen = set()
-                for match in re.finditer(link_pattern, response.text):
+                for match in re.finditer(link_pattern, html):
                     slug = match.group(1)
                     if slug not in seen and len(results) < limit:
                         seen.add(slug)

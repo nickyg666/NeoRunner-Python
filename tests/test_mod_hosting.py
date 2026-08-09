@@ -135,3 +135,140 @@ class TestGetServerIP:
         
         # May be None if no network, but shouldn't raise
         assert ip is None or isinstance(ip, str)
+
+
+class TestModHostingManifestFunctions:
+    """Test manifest and zip generation."""
+
+    def test_update_manifest_includes_clientonly(self, tmp_path, monkeypatch):
+        """Manifest includes server + clientonly mods with types."""
+        from neorunner_pkg.mod_hosting import update_manifest
+        from neorunner_pkg.config import ServerConfig
+
+        mods_dir = tmp_path / "mods"
+        clientonly = tmp_path / "clientonly"
+        mods_dir.mkdir()
+        clientonly.mkdir()
+        (mods_dir / "servermod.jar").write_bytes(b"x")
+        (mods_dir / "servermod.server.jar").write_bytes(b"x")  # excluded
+        (clientonly / "clientmod.jar").write_bytes(b"x")
+
+        cfg = ServerConfig(clientonly_dir=str(clientonly))
+        assert update_manifest(mods_dir, cfg) is True
+
+        import json
+        data = json.loads((mods_dir / "manifest.json").read_text())
+        files = {f["path"]: f["type"] for f in data["files"]}
+        assert files["servermod.jar"] == "server"
+        assert files["clientmod.jar"] == "clientonly"
+        assert "servermod.server.jar" not in files
+
+    def test_update_manifest_relative_clientonly(self, tmp_path, monkeypatch):
+        """Relative clientonly dir resolved against CWD."""
+        from neorunner_pkg.mod_hosting import update_manifest
+        from neorunner_pkg.config import ServerConfig
+
+        mods_dir = tmp_path / "mods"
+        clientonly = tmp_path / "clientonly"
+        mods_dir.mkdir()
+        clientonly.mkdir()
+        (clientonly / "relmod.jar").write_bytes(b"x")
+
+        monkeypatch.setattr("neorunner_pkg.mod_hosting.CWD", tmp_path)
+        cfg = ServerConfig(clientonly_dir="clientonly")
+        assert update_manifest(mods_dir, cfg) is True
+
+        import json
+        data = json.loads((mods_dir / "manifest.json").read_text())
+        assert any(f["path"] == "relmod.jar" for f in data["files"])
+
+    def test_create_mod_zip(self, tmp_path):
+        """create_mod_zip bundles mods and clientonly."""
+        from neorunner_pkg.mod_hosting import create_mod_zip
+        from neorunner_pkg.config import ServerConfig
+
+        mods_dir = tmp_path / "mods"
+        clientonly = tmp_path / "clientonly"
+        mods_dir.mkdir()
+        clientonly.mkdir()
+        (mods_dir / "a.jar").write_bytes(b"a")
+        (clientonly / "b.jar").write_bytes(b"b")
+
+        cfg = ServerConfig(clientonly_dir=str(clientonly))
+        zip_path = create_mod_zip(mods_dir, cfg)
+        assert zip_path is not None
+        assert zip_path.name == "mods_latest.zip"
+
+        import zipfile
+        with zipfile.ZipFile(zip_path) as zf:
+            names = set(zf.namelist())
+        assert {"a.jar", "b.jar"} <= names
+
+    def test_create_mod_zip_error_returns_none(self, tmp_path, monkeypatch):
+        """Error during zip creation returns None."""
+        from neorunner_pkg.mod_hosting import create_mod_zip
+
+        monkeypatch.setattr(
+            "neorunner_pkg.mod_hosting.update_manifest",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+        assert create_mod_zip(tmp_path / "mods") is None
+
+    def test_conditional_create_mod_zip_throttle(self, tmp_path, monkeypatch):
+        """Zip not recreated within 5 minutes."""
+        from neorunner_pkg.mod_hosting import conditional_create_mod_zip
+        import neorunner_pkg.mod_hosting as mh
+        import time
+
+        mods_dir = tmp_path / "mods"
+        mods_dir.mkdir()
+        (mods_dir / "a.jar").write_bytes(b"a")
+
+        # recent creation -> throttled (returns None, no zip made)
+        monkeypatch.setattr(mh, "_last_zip_time", time.time() - 10)
+        assert conditional_create_mod_zip(mods_dir) is None
+
+        # stale creation -> creates zip
+        monkeypatch.setattr(mh, "_last_zip_time", time.time() - 600)
+        assert conditional_create_mod_zip(mods_dir) is not None
+
+    def test_generate_powershell_script(self):
+        """PowerShell script contains manifest download URL."""
+        from neorunner_pkg.mod_hosting import generate_powershell_script
+        from neorunner_pkg.config import ServerConfig
+
+        cfg = ServerConfig(http_port=8000)
+        script = generate_powershell_script(cfg)
+        assert "/download/manifest" in script
+        assert "Expand-Archive" in script
+        # ensure no duplicated block (regression)
+        assert script.count("All mods up to date!") == 1
+
+    def test_generate_bash_script(self):
+        """Bash script contains manifest URL."""
+        from neorunner_pkg.mod_hosting import generate_bash_script
+        from neorunner_pkg.config import ServerConfig
+
+        cfg = ServerConfig(http_port=8000)
+        script = generate_bash_script(cfg)
+        assert "/download/manifest" in script
+        assert "curl" in script
+
+    def test_get_server_ip_config_override(self, monkeypatch):
+        """Config server_ip is used when set."""
+        from neorunner_pkg.mod_hosting import get_server_ip
+
+        class FakeCfg:
+            server_ip = "203.0.113.5"
+
+        monkeypatch.setattr("neorunner_pkg.config.load_cfg", lambda: FakeCfg())
+        assert get_server_ip() == "203.0.113.5"
+
+    def test_get_server_ip_fallback(self, monkeypatch):
+        """Falls back to local IP detection."""
+        from neorunner_pkg.mod_hosting import get_server_ip
+
+        monkeypatch.setattr("neorunner_pkg.config.load_cfg", lambda: None)
+        monkeypatch.setattr(
+            "neorunner_pkg.mod_hosting._get_local_ip", lambda: "192.168.1.10")
+        assert get_server_ip() == "192.168.1.10"

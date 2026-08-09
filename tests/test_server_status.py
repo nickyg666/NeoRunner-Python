@@ -21,9 +21,9 @@ class TestServerStatusFunctions:
     
     def test_is_server_running_returns_bool(self):
         """is_server_running returns boolean."""
-        from neorunner import server
+        from neorunner_pkg import server
         
-        with patch('neorunner.server.subprocess.run') as mock_run:
+        with patch('neorunner_pkg.server.subprocess.run') as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stdout="")
             result = server.is_server_running()
             
@@ -89,9 +89,9 @@ class TestServerStatusCheck:
     
     def test_status_check_with_mock(self):
         """Status check works with mocking."""
-        from neorunner import server
+        from neorunner_pkg import server
         
-        with patch('neorunner.server.subprocess.run') as mock_run:
+        with patch('neorunner_pkg.server.subprocess.run') as mock_run:
             # Return code 0 means running
             mock_run.return_value = MagicMock(returncode=0, stdout="minecraft server")
             

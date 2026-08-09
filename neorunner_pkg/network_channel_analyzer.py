@@ -26,7 +26,7 @@ class NetworkChannelAnalyzer:
     # Patterns for detecting channel issues
     CHANNEL_MISMATCH_PATTERNS = [
         # Unknown custom packet identifier
-        r"Unknown custom packet identifier: ([a-zA-Z0-9_.]+)",
+        r"Unknown custom packet identifier: ([a-zA-Z0-9_.:]+)",
         r"Unknown custom packet identifier \(channel: ([a-zA-Z0-9_.]+)\)",
         
         # Channel not registered

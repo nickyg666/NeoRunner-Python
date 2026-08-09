@@ -1082,6 +1082,115 @@ def api_worlds_backup():
         return jsonify({"success": False, "error": str(e)}), 400
 
 
+@app.route("/api/worlds/delete", methods=["POST"])
+def api_worlds_delete():
+    """Delete a world folder (moves to worlds_trash/, recoverable)."""
+    try:
+        data = request.json
+        world_name = data.get("world", "")
+        confirm = data.get("confirm", False)
+
+        if not world_name:
+            return jsonify({"success": False, "error": "No world name provided"}), 400
+        if not confirm:
+            return jsonify({"success": False, "error": "Confirmation required"}), 400
+
+        props = parse_server_properties()
+        current = props.get("level-name", "world")
+        if world_name == current:
+            return jsonify({"success": False, "error": f"Cannot delete the active world '{current}'. Switch worlds first."}), 400
+
+        world_path = CWD / world_name
+        if not world_path.exists():
+            return jsonify({"success": False, "error": "World not found"}), 404
+
+        import shutil
+        trash_dir = CWD / "worlds_trash"
+        trash_dir.mkdir(exist_ok=True)
+        dest = trash_dir / world_name
+        if dest.exists():
+            shutil.rmtree(str(dest))
+        shutil.move(str(world_path), str(dest))
+        log_event("WORLD_DELETE", f"Moved world '{world_name}' to worlds_trash/")
+        return jsonify({"success": True, "message": f"World '{world_name}' moved to worlds_trash/ (recoverable)"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+@app.route("/api/worlds/archives")
+def api_worlds_archives():
+    """List archived/trashed worlds (version-specific holding areas)."""
+    try:
+        archived = []
+        for root_name in ("worlds_archive", "worlds_trash"):
+            root = CWD / root_name
+            if not root.exists():
+                continue
+            if root_name == "worlds_archive":
+                for version_dir in sorted(root.iterdir()):
+                    if not version_dir.is_dir():
+                        continue
+                    for world_dir in sorted(version_dir.iterdir()):
+                        if world_dir.is_dir():
+                            archived.append({
+                                "name": world_dir.name,
+                                "location": root_name,
+                                "mc_version": version_dir.name.replace("mc-", ""),
+                                "path": str(world_dir)
+                            })
+            else:
+                for world_dir in sorted(root.iterdir()):
+                    if world_dir.is_dir():
+                        archived.append({
+                            "name": world_dir.name,
+                            "location": root_name,
+                            "mc_version": None,
+                            "path": str(world_dir)
+                        })
+        return jsonify({"archived": archived})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+@app.route("/api/worlds/restore", methods=["POST"])
+def api_worlds_restore():
+    """Restore an archived/trashed world back to the main directory."""
+    try:
+        data = request.json
+        world_name = data.get("world", "")
+        location = data.get("location", "worlds_trash")
+        if not world_name:
+            return jsonify({"success": False, "error": "No world name provided"}), 400
+
+        import shutil
+        root = CWD / location
+        if not root.exists():
+            return jsonify({"success": False, "error": "Archive location not found"}), 404
+
+        if location == "worlds_archive":
+            src = None
+            for version_dir in root.iterdir():
+                candidate = version_dir / world_name
+                if candidate.exists() and candidate.is_dir():
+                    src = candidate
+                    break
+            if src is None:
+                return jsonify({"success": False, "error": "Archived world not found"}), 404
+        else:
+            src = root / world_name
+            if not src.exists():
+                return jsonify({"success": False, "error": "Trashed world not found"}), 404
+
+        dest = CWD / world_name
+        if dest.exists():
+            return jsonify({"success": False, "error": f"World '{world_name}' already exists in main folder"}), 400
+        shutil.move(str(src), str(dest))
+        log_event("WORLD_RESTORE", f"Restored world '{world_name}' from {location}")
+        return jsonify({"success": True, "message": f"World '{world_name}' restored to main folder"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
 @app.route("/api/mods/analyze")
 def api_mods_analyze():
     """Analyze mods for mixin conflicts."""
@@ -1454,6 +1563,80 @@ def api_loaders_snapshots():
         return jsonify({"success": False, "error": str(e)}), 400
 
 
+@app.route("/api/loaders/restore", methods=["POST"])
+def api_loaders_restore():
+    """Restore a pre-switch snapshot (config, mods, worlds)."""
+    try:
+        data = request.json
+        snapshot_name = data.get("snapshot", "")
+        if not snapshot_name or ".." in snapshot_name or "/" in snapshot_name:
+            return jsonify({"success": False, "error": "Invalid snapshot name"}), 400
+        
+        import tarfile
+        snapshot_path = CWD / "snapshots" / snapshot_name
+        if not snapshot_path.exists():
+            return jsonify({"success": False, "error": "Snapshot not found"}), 404
+        
+        # Extract over the current installation (config, server.properties, mods, worlds)
+        with tarfile.open(str(snapshot_path), "r:gz") as tar:
+            for member in tar.getmembers():
+                # Prevent path traversal
+                clean = member.name.lstrip("./")
+                if ".." in clean:
+                    continue
+                member.name = clean
+            tar.extractall(str(CWD), filter="data")
+        
+        log_event("LOADER_RESTORE", f"Restored snapshot {snapshot_name}")
+        return jsonify({"success": True, "message": f"Snapshot '{snapshot_name}' restored. Restart required."})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+@app.route("/api/loaders/restore-mods", methods=["POST"])
+def api_loaders_restore_mods():
+    """Restore archived loader mods back to the mods folder."""
+    try:
+        data = request.json
+        loader = data.get("loader", "")
+        version = data.get("version", "")
+        mc_version = data.get("mc_version", "")
+        
+        if not loader or not version or not mc_version:
+            return jsonify({"success": False, "error": "loader, version, mc_version required"}), 400
+        
+        import shutil
+        src = CWD / "loader_archive" / loader / version / mc_version
+        if not src.exists():
+            return jsonify({"success": False, "error": "Archive not found"}), 404
+        
+        cfg = load_cfg()
+        mods_dir = CWD / cfg.mods_dir
+        mods_dir.mkdir(parents=True, exist_ok=True)
+        
+        restored = 0
+        for f in src.glob("*.jar"):
+            dest = mods_dir / f.name
+            if not dest.exists():
+                shutil.move(str(f), str(dest))
+                restored += 1
+        
+        co_src = src / "clientonly"
+        if co_src.exists():
+            co_dest = mods_dir / "clientonly"
+            co_dest.mkdir(exist_ok=True)
+            for f in co_src.glob("*.jar"):
+                dest = co_dest / f.name
+                if not dest.exists():
+                    shutil.move(str(f), str(dest))
+                    restored += 1
+        
+        log_event("LOADER_RESTORE", f"Restored {restored} mods from {loader}/{version}/{mc_version}")
+        return jsonify({"success": True, "message": f"Restored {restored} mods to mods folder"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
 @app.route("/api/loaders/install", methods=["POST"])
 def api_loaders_install():
     """Install a new loader."""
@@ -1481,24 +1664,163 @@ def api_loaders_install():
 
 @app.route("/api/loaders/switch", methods=["POST"])
 def api_loaders_switch():
-    """Switch to a different loader."""
+    """Switch to a different loader.
+
+    Safety flow:
+    1. Stop the server if running
+    2. Snapshot current state (config + mods + worlds) into snapshots/
+    3. Archive current loader's mods into loader_archive/<loader>/<ver>/<mc>/
+    4. Archive worlds incompatible with the target MC version into worlds_archive/
+    5. Clear mods folder for the new loader
+    6. Update config and install the new loader
+    """
     try:
         data = request.json
         loader = data.get("loader", "neoforge")
         mc_version = data.get("mc_version", None)
+        keep_mods = data.get("keep_mods", False)
         
-        # Only fetch dynamic version if explicitly requested
+        if loader not in ("neoforge", "forge", "fabric"):
+            return jsonify({"success": False, "error": f"Unknown loader: {loader}"}), 400
+        
         if not mc_version:
-            # Try to preserve existing config version, only default if truly missing
             cfg = load_cfg()
             mc_version = cfg.mc_version if cfg.mc_version else get_latest_minecraft_version()
         
+        import shutil
+        import tarfile
+        
         cfg = load_cfg()
+        old_loader = cfg.loader
+        old_mc = cfg.mc_version
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # 1. Stop the server if running
+        try:
+            from .server import is_server_running, stop_server
+            if is_server_running():
+                stop_server()
+                time.sleep(2)
+        except Exception:
+            pass
+        
+        # 2. Snapshot current state
+        snapshot_dir = CWD / "snapshots"
+        snapshot_dir.mkdir(exist_ok=True)
+        snapshot_path = snapshot_dir / f"pre_{loader}_switch_{timestamp}.tar.gz"
+        
+        def _collect_snapshot_items():
+            items = []
+            if (CWD / "config.json").exists():
+                items.append("config.json")
+            if (CWD / "server.properties").exists():
+                items.append("server.properties")
+            mods_dir = CWD / cfg.mods_dir
+            if mods_dir.exists():
+                items.append(cfg.mods_dir)
+            for world in scan_worlds():
+                w = world.get("name")
+                if w and (CWD / w).is_dir():
+                    items.append(w)
+            return items
+        
+        snapshot_ok = False
+        try:
+            with tarfile.open(str(snapshot_path), "w:gz") as tar:
+                for item in _collect_snapshot_items():
+                    tar.add(str(CWD / item), arcname=item)
+            snapshot_ok = True
+        except Exception as e:
+            log_event("LOADER_SWITCH", f"Snapshot failed (continuing): {e}")
+        
+        # 3. Archive current loader's mods
+        mods_dir = CWD / cfg.mods_dir
+        archived_mods = 0
+        if mods_dir.exists() and not keep_mods:
+            archive_dir = CWD / "loader_archive" / old_loader / old_mc / mc_version
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                for f in mods_dir.iterdir():
+                    if f.is_file() and f.suffix == ".jar":
+                        dest = archive_dir / f.name
+                        if not dest.exists():
+                            shutil.move(str(f), str(dest))
+                            archived_mods += 1
+                # also archive clientonly mods
+                clientonly_dir = mods_dir / "clientonly"
+                if clientonly_dir.exists():
+                    co_archive = archive_dir / "clientonly"
+                    co_archive.mkdir(exist_ok=True)
+                    for f in clientonly_dir.iterdir():
+                        if f.is_file() and f.suffix == ".jar":
+                            dest = co_archive / f.name
+                            if not dest.exists():
+                                shutil.move(str(f), str(dest))
+                                archived_mods += 1
+            except Exception as e:
+                log_event("LOADER_SWITCH", f"Mod archive error: {e}")
+        
+        # 4. Archive worlds incompatible with target MC version
+        archived_worlds = 0
+        if old_mc and old_mc != mc_version:
+            try:
+                from .nbt_parser import get_world_version
+                archive_dir = CWD / "worlds_archive" / f"mc-{old_mc}"
+                for world in scan_worlds():
+                    w = world.get("name")
+                    if not w:
+                        continue
+                    level_dat = CWD / w / "level.dat"
+                    if not level_dat.exists():
+                        continue
+                    try:
+                        info = get_world_version(str(level_dat))
+                        world_ver = info.get("version")
+                    except Exception:
+                        world_ver = None
+                    # only archive if we know the version differs (safe move)
+                    if world_ver and world_ver != mc_version:
+                        archive_dir.mkdir(parents=True, exist_ok=True)
+                        dest = archive_dir / w
+                        if not dest.exists():
+                            shutil.move(str(CWD / w), str(dest))
+                            archived_worlds += 1
+            except Exception as e:
+                log_event("LOADER_SWITCH", f"World archive error: {e}")
+        
+        # 5. Update config
         cfg.loader = loader
         cfg.mc_version = mc_version
         save_cfg(cfg)
         
-        return jsonify({"success": True, "message": f"Switched to {loader} {mc_version}"})
+        # 6. Install the new loader
+        install_ok = True
+        try:
+            from .installer import install_loader
+            install_ok = install_loader(cfg)
+        except Exception as e:
+            install_ok = False
+            log_event("LOADER_SWITCH", f"Installer error: {e}")
+        
+        parts = [f"Switched to {loader} {mc_version}"]
+        if snapshot_ok:
+            parts.append(f"snapshot: {snapshot_path.name}")
+        if archived_mods:
+            parts.append(f"{archived_mods} mods archived")
+        if archived_worlds:
+            parts.append(f"{archived_worlds} incompatible worlds archived")
+        if not install_ok:
+            parts.append("(loader install deferred - run again or install manually)")
+        
+        return jsonify({
+            "success": True,
+            "message": " | ".join(parts),
+            "snapshot": snapshot_path.name if snapshot_ok else None,
+            "archived_mods": archived_mods,
+            "archived_worlds": archived_worlds,
+            "install_ok": install_ok,
+        })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 400
 

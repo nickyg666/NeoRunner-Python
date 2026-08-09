@@ -1031,6 +1031,282 @@
         .loader-worlds-list .world-row.disabled {
             opacity: 0.4;
         }
+            body.theme-chrome {
+            background: linear-gradient(180deg, #3a3a3a 0%, #1a1a1a 50%, #2a2a2a 100%) !important;
+            min-height: 100vh;
+        }
+        body.theme-chrome .container {
+            background: transparent !important;
+        }
+        body.theme-chrome header {
+            background: linear-gradient(180deg, #5a5a5a, #3a3a3a) !important;
+            border-bottom: 3px solid #c0c0c0 !important;
+            box-shadow: 0 4px 20px rgba(192,192,192,0.3) !important;
+        }
+        body.theme-chrome header h1 {
+            color: #f5f5f5 !important;
+            text-shadow: 0 0 15px rgba(255,255,255,0.6), 0 2px 4px #000 !important;
+            letter-spacing: 2px !important;
+        }
+        body.theme-chrome header p {
+            color: #b0b0b0 !important;
+        }
+        body.theme-chrome .card {
+            background: linear-gradient(145deg, rgba(70,70,70,0.95), rgba(45,45,45,0.95)) !important;
+            border: 2px solid #909090 !important;
+            box-shadow: 8px 8px 16px rgba(0,0,0,0.5), -4px -4px 12px rgba(150,150,150,0.1), inset 0 0 20px rgba(200,200,200,0.05) !important;
+            border-radius: 12px !important;
+        }
+        body.theme-chrome h2, body.theme-chrome .stat-value, body.theme-chrome label {
+            color: #e8e8e8 !important;
+        }
+        body.theme-chrome .stat-label {
+            color: #909090 !important;
+        }
+        body.theme-chrome button {
+            background: linear-gradient(145deg, #606060, #454545) !important;
+            border: 2px solid #808080 !important;
+            color: #f0f0f0 !important;
+            box-shadow: 4px 4px 8px rgba(0,0,0,0.4), -2px -2px 6px rgba(120,120,120,0.2) !important;
+        }
+        body.theme-chrome button:hover:not(:disabled) {
+            background: linear-gradient(145deg, #757575, #555555) !important;
+            box-shadow: 0 0 20px rgba(200,200,200,0.5), inset 0 0 10px rgba(255,255,255,0.1) !important;
+        }
+        body.theme-chrome button.success {
+            background: linear-gradient(145deg, #2e7d32, #1b5e20) !important;
+            border-color: #4caf50 !important;
+        }
+        body.theme-chrome button.danger {
+            background: linear-gradient(145deg, #c62828, #b71c1c) !important;
+            border-color: #ef5350 !important;
+        }
+        body.theme-chrome input, body.theme-chrome select, body.theme-chrome textarea {
+            background: linear-gradient(145deg, #2a2a2a, #1a1a1a) !important;
+            border: 2px solid #606060 !important;
+            color: #f0f0f0 !important;
+            box-shadow: inset 3px 3px 6px rgba(0,0,0,0.4) !important;
+        }
+        body.theme-chrome .tab-button {
+            background: #3a3a3a !important;
+            border-color: #606060 !important;
+            color: #b0b0b0 !important;
+        }
+        body.theme-chrome .tab-button.active {
+            background: linear-gradient(145deg, #505050, #404040) !important;
+            border-color: #c0c0c0 !important;
+            color: #fff !important;
+        }
+        body.theme-chrome .modal-overlay {
+            background: rgba(0,0,0,0.85) !important;
+        }
+        body.theme-chrome .modal {
+            background: linear-gradient(145deg, #404040, #2a2a2a) !important;
+            border: 2px solid #909090 !important;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.8) !important;
+        }
+        body.theme-chrome .alert-success { background: #1b5e20 !important; border-color: #4caf50 !important; }
+        body.theme-chrome .alert-error { background: #b71c1c !important; border-color: #ef5350 !important; }
+
+        /* Theme: Minecraft - Earthy brown/stone look */
+        body.theme-minecraft {
+            background: linear-gradient(180deg, #4a3020 0%, #2a1810 50%, #3a2515 100%) !important;
+            min-height: 100vh;
+        }
+        body.theme-minecraft .container { background: transparent !important; }
+        body.theme-minecraft header {
+            background: linear-gradient(180deg, #6d4c41, #4e342e) !important;
+            border-bottom: 5px solid #8d6e63 !important;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.6) !important;
+        }
+        body.theme-minecraft header h1 {
+            color: #d7ccc8 !important;
+            text-shadow: 3px 3px 0 #3e2723, 0 0 10px rgba(141,110,99,0.5) !important;
+        }
+        body.theme-minecraft header p { color: #a1887f !important; }
+        body.theme-minecraft .card {
+            background: linear-gradient(145deg, rgba(62,39,35,0.98), rgba(46,30,27,0.98)) !important;
+            border: 4px solid #5d4037 !important;
+            box-shadow: 6px 6px 12px rgba(0,0,0,0.6), inset 0 0 25px rgba(141,110,99,0.2) !important;
+            border-radius: 8px !important;
+        }
+        body.theme-minecraft h2 { color: #bcaaa4 !important; text-shadow: 1px 1px 0 #1a0f0a !important; }
+        body.theme-minecraft .stat-value, body.theme-minecraft label { color: #d7ccc8 !important; }
+        body.theme-minecraft .stat-label { color: #8d6e63 !important; }
+        body.theme-minecraft button {
+            background: linear-gradient(180deg, #6d4c41, #4e342e) !important;
+            border: 3px solid #8d6e63 !important;
+            color: #efebe9 !important;
+            box-shadow: 4px 4px 0 #3e2723 !important;
+            font-family: 'Minecraft', 'Segoe UI', sans-serif !important;
+        }
+        body.theme-minecraft button:hover:not(:disabled) {
+            background: linear-gradient(180deg, #8d6e63, #6d4c41) !important;
+            transform: translate(1px, 1px);
+            box-shadow: 3px 3px 0 #3e2723 !important;
+        }
+        body.theme-minecraft button.success { border-color: #66bb6a !important; }
+        body.theme-minecraft button.danger { border-color: #ef5350 !important; }
+        body.theme-minecraft input, body.theme-minecraft select {
+            background: #2d1a0f !important;
+            border: 3px solid #5d4037 !important;
+            color: #d7ccc8 !important;
+            font-family: 'Minecraft', 'Segoe UI', sans-serif !important;
+        }
+        body.theme-minecraft .tab-button {
+            background: #3e2723 !important;
+            border: 3px solid #5d4037 !important;
+            color: #a1887f !important;
+        }
+        body.theme-minecraft .tab-button.active {
+            background: #4e342e !important;
+            border-color: #8d6e63 !important;
+            color: #fff !important;
+        }
+        body.theme-minecraft .modal-overlay { background: rgba(0,0,0,0.9) !important; }
+        body.theme-minecraft .modal {
+            background: linear-gradient(145deg, #4e342e, #3e2723) !important;
+            border: 4px solid #8d6e63 !important;
+        }
+
+        /* Theme: Cyberpunk - Neon pink/cyan */
+        body.theme-cyberpunk {
+            background: linear-gradient(180deg, #0a0015 0%, #150030 50%, #0d0020 100%) !important;
+            min-height: 100vh;
+        }
+        body.theme-cyberpunk .container { background: transparent !important; }
+        body.theme-cyberpunk header {
+            background: linear-gradient(180deg, #2d0040, #1a0025) !important;
+            border-bottom: 3px solid #ff00ff !important;
+            box-shadow: 0 0 30px rgba(255,0,255,0.4), 0 4px 20px rgba(0,0,0,0.5) !important;
+        }
+        body.theme-cyberpunk header h1 {
+            color: #ff00ff !important;
+            text-shadow: 0 0 20px #ff00ff, 0 0 40px #ff00ff, 0 2px 4px #000 !important;
+            animation: cyberGlow 2s ease-in-out infinite alternate !important;
+        }
+        @keyframes cyberGlow { from { text-shadow: 0 0 20px #ff00ff, 0 0 40px #ff00ff; } to { text-shadow: 0 0 30px #ff00ff, 0 0 60px #ff00ff, 0 0 80px #00ffff; } }
+        body.theme-cyberpunk header p { color: #00ffff !important; text-shadow: 0 0 10px #00ffff !important; }
+        body.theme-cyberpunk .card {
+            background: linear-gradient(145deg, rgba(25,0,45,0.95), rgba(15,0,30,0.95)) !important;
+            border: 2px solid #ff00ff !important;
+            box-shadow: 0 0 35px rgba(255,0,255,0.35), inset 0 0 50px rgba(255,0,255,0.08) !important;
+            border-radius: 4px !important;
+        }
+        body.theme-cyberpunk h2 {
+            color: #ff00ff !important;
+            text-shadow: 0 0 15px #ff00ff !important;
+        }
+        body.theme-cyberpunk .stat-value, body.theme-cyberpunk label {
+            color: #00ffff !important;
+            text-shadow: 0 0 12px #00ffff !important;
+        }
+        body.theme-cyberpunk .stat-label { color: #ff00ff !important; }
+        body.theme-cyberpunk button {
+            background: linear-gradient(135deg, rgba(255,0,255,0.25), rgba(0,255,255,0.15)) !important;
+            border: 2px solid #ff00ff !important;
+            color: #00ffff !important;
+            text-shadow: 0 0 8px #00ffff !important;
+            box-shadow: 0 0 15px rgba(255,0,255,0.3), inset 0 0 20px rgba(0,255,255,0.05) !important;
+        }
+        body.theme-cyberpunk button:hover:not(:disabled) {
+            background: linear-gradient(135deg, rgba(255,0,255,0.5), rgba(0,255,255,0.35)) !important;
+            box-shadow: 0 0 35px rgba(255,0,255,0.6), 0 0 50px rgba(0,255,255,0.3) !important;
+            animation: cyberPulse 0.5s ease-in-out infinite !important;
+        }
+        @keyframes cyberPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.02); } }
+        body.theme-cyberpunk button.success { border-color: #00ff88 !important; color: #00ff88 !important; }
+        body.theme-cyberpunk button.danger { border-color: #ff0044 !important; color: #ff0044 !important; }
+        body.theme-cyberpunk input, body.theme-cyberpunk select, body.theme-cyberpunk textarea {
+            background: rgba(5,0,15,0.9) !important;
+            border: 2px solid #ff00ff !important;
+            color: #00ffff !important;
+            box-shadow: inset 0 0 15px rgba(255,0,255,0.2), 0 0 10px rgba(0,255,255,0.2) !important;
+        }
+        body.theme-cyberpunk .tab-button {
+            background: rgba(20,0,40,0.8) !important;
+            border: 2px solid #ff00ff !important;
+            color: #ff00ff !important;
+        }
+        body.theme-cyberpunk .tab-button.active {
+            background: linear-gradient(135deg, rgba(255,0,255,0.4), rgba(0,255,255,0.2)) !important;
+            border-color: #00ffff !important;
+            color: #00ffff !important;
+            box-shadow: 0 0 20px rgba(0,255,255,0.5) !important;
+        }
+        body.theme-cyberpunk .modal-overlay { background: rgba(0,0,0,0.92) !important; }
+        body.theme-cyberpunk .modal {
+            background: linear-gradient(145deg, rgba(20,0,45,0.98), rgba(10,0,25,0.98)) !important;
+            border: 3px solid #ff00ff !important;
+            box-shadow: 0 0 50px rgba(255,0,255,0.5), 0 25px 80px rgba(0,0,0,0.8) !important;
+        }
+
+        /* Theme: Mario Style - Blue sky/green ground */
+        body.theme-mario {
+            background: linear-gradient(180deg, #5c94fc 0%, #4a7adb 25%, #3d5afe 40%, #4caf50 60%, #388e3c 80%, #2e7d32 100%) !important;
+            background-attachment: fixed !important;
+            min-height: 100vh;
+        }
+        body.theme-mario .container { background: transparent !important; }
+        body.theme-mario header {
+            background: linear-gradient(180deg, #e70012, #b5000a) !important;
+            border-bottom: 5px solid #ffcc00 !important;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.5) !important;
+        }
+        body.theme-mario header h1 {
+            color: #ffcc00 !important;
+            text-shadow: 3px 3px 0 #000, -2px -2px 0 #0033cc, 0 0 20px rgba(255,204,0,0.5) !important;
+            font-weight: 900 !important;
+            letter-spacing: 1px !important;
+        }
+        body.theme-mario header p { color: #fff !important; text-shadow: 1px 1px 0 #000 !important; }
+        body.theme-mario .card {
+            background: linear-gradient(180deg, rgba(30,80,150,0.95), rgba(20,60,130,0.95)) !important;
+            border: 5px solid #ffcc00 !important;
+            box-shadow: 8px 8px 0 rgba(0,0,0,0.4), inset 0 0 30px rgba(255,204,0,0.15) !important;
+            border-radius: 12px !important;
+        }
+        body.theme-mario h2 { color: #fff !important; text-shadow: 2px 2px 0 #000 !important; }
+        body.theme-mario .stat-value { color: #7fff00 !important; text-shadow: 1px 1px 0 #000 !important; }
+        body.theme-mario .stat-label { color: #ffcc00 !important; text-shadow: 1px 1px 0 #000 !important; }
+        body.theme-mario label { color: #fff !important; text-shadow: 1px 1px 0 #000 !important; }
+        body.theme-mario button {
+            background: linear-gradient(180deg, #e70012, #b5000a) !important;
+            border: 4px solid #fff !important;
+            color: #fff !important;
+            font-weight: 900 !important;
+            text-shadow: 1px 1px 0 #000 !important;
+            box-shadow: 4px 4px 0 #000 !important;
+            font-size: 14px !important;
+        }
+        body.theme-mario button:hover:not(:disabled) {
+            background: linear-gradient(180deg, #ff3333, #e70012) !important;
+            transform: translate(2px, 2px);
+            box-shadow: 2px 2px 0 #000 !important;
+        }
+        body.theme-mario button.success { background: linear-gradient(180deg, #4caf50, #2e7d32) !important; }
+        body.theme-mario button.danger { background: linear-gradient(180deg, #ff5722, #e64a19) !important; }
+        body.theme-mario input, body.theme-mario select, body.theme-mario textarea {
+            background: #1a3a6e !important;
+            border: 3px solid #ffcc00 !important;
+            color: #fff !important;
+            box-shadow: 3px 3px 0 #000 !important;
+        }
+        body.theme-mario .tab-button {
+            background: #1565c0 !important;
+            border: 3px solid #fff !important;
+            color: #fff !important;
+            font-weight: bold !important;
+        }
+        body.theme-mario .tab-button.active {
+            background: #e70012 !important;
+            border-color: #ffcc00 !important;
+        }
+        body.theme-mario .modal-overlay { background: rgba(0,0,0,0.85) !important; }
+        body.theme-mario .modal {
+            background: linear-gradient(180deg, #1976d2, #1565c0) !important;
+            border: 5px solid #ffcc00 !important;
+
     </style>
 </head>
 <body>
@@ -1038,6 +1314,16 @@
         <header>
             <h1>🎮 NeoRunner - Minecraft Server Dashboard</h1>
             <p>Manage your modded server with ease | <strong>Ports:</strong> Game: <span id="game-port">-</span> | Query: <span id="query-port">-</span> | RCON: <span id="rcon-port">-</span> | HTTP: <span id="http-port">-</span></p>
+            <div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <label style="margin:0;font-size:13px;">🎨 Theme:</label>
+                <select id="theme-selector" onchange="applyTheme(this.value)" style="padding:6px 10px;border-radius:4px;background:#1a1a2a;color:#fff;border:1px solid #444;font-size:12px;width:auto;">
+                    <option value="futuristic">Futuristic (Default)</option>
+                    <option value="chrome">Chrome</option>
+                    <option value="minecraft">Minecraft</option>
+                    <option value="cyberpunk">Cyberpunk</option>
+                    <option value="mario">Mario Style</option>
+                </select>
+            </div>
         </header>
         
         <div id="alerts"></div>
@@ -1074,6 +1360,24 @@
                 <div style="display:flex;gap:8px;align-items:center;">
                     <input type="text" id="broadcast-input" placeholder="Broadcast message to players..." style="flex:1;padding:8px 12px;border-radius:6px;border:1px solid #444;background:#1a1a2a;color:#fff;font-size:13px;">
                     <button onclick="sendBroadcast()" style="background:#EF5350;color:white;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px;">📢</button>
+                </div>
+                <br>
+                <div style="background:#1e1e2e;border:1px solid #444;border-radius:8px;padding:12px;">
+                    <h3 style="margin:0 0 8px;font-size:14px;color:#00BCD4;">🔄 Loader & MC Version Quick Switch</h3>
+                    <p style="color:#888;font-size:12px;margin:0 0 8px;">Switch loader / Minecraft version. Creates a snapshot and archives current mods + incompatible worlds.</p>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                        <select id="qa-loader" style="flex:1;min-width:110px;padding:8px 12px;border-radius:6px;border:1px solid #2196F3;background:#1a1a2a;color:#fff;font-size:13px;">
+                            <option value="neoforge">NeoForge</option>
+                            <option value="forge">Forge</option>
+                            <option value="fabric">Fabric</option>
+                        </select>
+                        <input type="text" id="qa-mc-version" placeholder="MC version (e.g. 1.21.11)" style="flex:1;min-width:130px;padding:8px 12px;border-radius:6px;border:1px solid #4CAF50;background:#1a1a2a;color:#fff;font-size:13px;">
+                    </div>
+                    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
+                        <button onclick="quickSwitchLoaderQa()" style="background:#e74c3c;color:white;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px;flex:1;">⚡ Switch</button>
+                        <button onclick="quickRestoreSnapshot()" style="background:#673AB7;color:white;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px;">♻ Restore Snapshot</button>
+                    </div>
+                    <div id="qa-snapshot-list" style="margin-top:8px;max-height:120px;overflow-y:auto;font-size:12px;color:#888;">Loading snapshots...</div>
                 </div>
                 <br>
                 <div style="background:#1e1e2e;border:1px solid #444;border-radius:8px;padding:12px;">
@@ -1633,6 +1937,25 @@
                 document.getElementById(tabId).classList.add('active');
                 event.target.classList.add('active');
             }
+
+            // Theme management
+            function applyTheme(theme) {
+                document.body.classList.remove('theme-chrome', 'theme-minecraft', 'theme-cyberpunk', 'theme-mario');
+                if (theme !== 'futuristic') {
+                    document.body.classList.add('theme-' + theme);
+                }
+                localStorage.setItem('neorunner-theme', theme);
+                showAlert('Theme: ' + theme, 'success');
+            }
+
+            function loadTheme() {
+                const saved = localStorage.getItem('neorunner-theme') || 'futuristic';
+                const selector = document.getElementById('theme-selector');
+                if (selector) selector.value = saved;
+                if (saved !== 'futuristic') {
+                    document.body.classList.add('theme-' + saved);
+                }
+            }
             
             function showAlert(msg, type) {
                 const alertsDiv = document.getElementById('alerts');
@@ -1982,16 +2305,35 @@
                 
                 let html = '<div style="background:rgba(26,26,46,0.6);padding:12px;border-radius:4px;border:1px solid rgba(0,240,255,0.15);">';
                 snapshots.forEach(snap => {
-                    const worldIcon = snap.has_world ? '🌍' : '📁';
-                    const worldText = snap.has_world ? ' (world included)' : '';
-                    html += `<div style="padding:8px;border-bottom:1px solid rgba(0,240,255,0.15);">
-                        <strong>${worldIcon} ${snap.name}</strong>
-                        <span style="color:#888;font-size:12px;">${snap.loader} ${snap.mc_version}</span>
-                        <span style="color:#2196F3;font-size:12px;margin-left:8px;">${snap.mod_count} mods${worldText}</span>
+                    const sizeText = snap.size_mb ? ` (${snap.size_mb} MB)` : '';
+                    const createdText = snap.created ? new Date(snap.created * 1000).toLocaleString() : '';
+                    html += `<div style="padding:8px;border-bottom:1px solid rgba(0,240,255,0.15);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                        <strong>📦 ${snap.name}</strong>
+                        <span style="color:#888;font-size:12px;">${sizeText}${createdText ? ' | ' + createdText : ''}</span>
+                        <button onclick="restoreLoaderSnapshot('${snap.name}')" style="background:#673AB7;color:white;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:12px;">♻ Restore</button>
                     </div>`;
                 });
                 html += '</div>';
                 container.innerHTML = html;
+            }
+            
+            function restoreLoaderSnapshot(snapshotName) {
+                if (!confirm(`Restore snapshot "${snapshotName}"?\n\nThis will REPLACE the current config, server.properties, mods folder and worlds with the contents of the snapshot.`)) return;
+                fetch('/api/loaders/restore', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({snapshot: snapshotName})
+                }).then(r => r.json()).then(data => {
+                    if (data.success) {
+                        showAlert(data.message || 'Snapshot restored', 'success');
+                        loadLoaders();
+                        loadWorlds();
+                        loadConfig();
+                        refreshStatus();
+                    } else {
+                        showAlert('Error: ' + (data.error || 'Restore failed'), 'error');
+                    }
+                }).catch(err => showAlert('Error: ' + err, 'error'));
             }
             
             function updateLoaderStatus(data) {
@@ -2053,8 +2395,11 @@
                     });
                     const data = await resp.json();
                     if (data.success) {
-                        showAlert(data.message, 'success');
+                        let msg = data.message || 'Switched!';
+                        if (data.install_ok === false) msg += ' ⚠️ Installer failed';
+                        showAlert(msg, 'success');
                         loadLoaders();
+                        loadWorlds();
                         refreshStatus();
                     } else {
                         showAlert(data.error || 'Failed to switch', 'error');
@@ -2062,6 +2407,73 @@
                 } catch(e) {
                     showAlert('Error: ' + e.message, 'error');
                 }
+            }
+
+            function quickSwitchLoaderQa() {
+                const loader = document.getElementById('qa-loader')?.value || 'neoforge';
+                const mcVersion = document.getElementById('qa-mc-version')?.value?.trim() || '';
+                if (!mcVersion) {
+                    showAlert('Enter a target MC version', 'error');
+                    return;
+                }
+                quickSwitchLoaderFull(loader, mcVersion);
+            }
+
+            async function quickSwitchLoaderFull(loaderName, mcVersion) {
+                if (!confirm(`Switch to ${loaderName} for MC ${mcVersion}?\n\nThis will snapshot config+mods+worlds, archive current mods and incompatible worlds, then install ${loaderName} ${mcVersion}.`)) return;
+                try {
+                    showAlert(`Switching to ${loaderName} ${mcVersion}...`, 'info');
+                    const resp = await fetch('/api/loaders/switch', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({loader: loaderName, mc_version: mcVersion})
+                    });
+                    const data = await resp.json();
+                    if (data.success) {
+                        let msg = `Switched to ${loaderName} ${mcVersion}!`;
+                        if (data.snapshot) msg += `\nSnapshot: ${data.snapshot}`;
+                        if (data.archived_mods) msg += `\nArchived: ${data.archived_mods} mods`;
+                        if (data.archived_worlds) msg += `\nArchived: ${data.archived_worlds} worlds`;
+                        if (data.install_ok === false) msg += '\n⚠️ Installer failed (see server log)';
+                        showAlert(msg, 'success');
+                        loadLoaders();
+                        loadWorlds();
+                        refreshStatus();
+                    } else {
+                        showAlert(data.error || 'Switch failed', 'error');
+                    }
+                } catch(e) {
+                    showAlert('Error: ' + e.message, 'error');
+                }
+            }
+
+            function quickRestoreSnapshot() {
+                const container = document.getElementById('qa-snapshot-list');
+                if (!container) return;
+                const links = container.querySelectorAll('[data-snapshot]');
+                if (!links.length) {
+                    showAlert('No snapshots available to restore', 'error');
+                    return;
+                }
+                const names = Array.from(links).map(l => l.dataset.snapshot);
+                const picked = prompt('Enter snapshot name to restore:\n\n' + names.join('\n'));
+                if (!picked) return;
+                restoreLoaderSnapshot(picked);
+            }
+
+            function loadQaSnapshots() {
+                fetch('/api/loaders/snapshots').then(r => r.json()).then(data => {
+                    const container = document.getElementById('qa-snapshot-list');
+                    if (!container) return;
+                    const snapshots = data.snapshots || [];
+                    if (!snapshots.length) {
+                        container.innerHTML = 'No snapshots yet.';
+                        return;
+                    }
+                    container.innerHTML = snapshots.slice(-5).map(s =>
+                        `<div style="padding:2px 0;"><a href="javascript:void(0)" data-snapshot="${s.name}" onclick="restoreLoaderSnapshot('${s.name}')" style="color:#9575CD;text-decoration:none;">♻ ${s.name}${s.size_mb ? ' (' + s.size_mb + ' MB)' : ''}</a></div>`
+                    ).join('');
+                }).catch(() => {});
             }
             
             function updateLoaderArchives(archives) {
@@ -2075,14 +2487,32 @@
                 
                 let html = '<div style="background:rgba(26,26,46,0.6);padding:12px;border-radius:4px;border:1px solid rgba(0,240,255,0.15);">';
                 archives.forEach(archive => {
-                    html += `<div style="padding:8px;border-bottom:1px solid rgba(0,240,255,0.15);">
+                    html += `<div style="padding:8px;border-bottom:1px solid rgba(0,240,255,0.15);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                         <strong style="text-transform:capitalize;">${archive.loader}</strong> ${archive.version || ''}
                         <span style="color:#888;font-size:12px;">(${archive.mc_version})</span>
                         <span style="color:#2196F3;font-size:12px;margin-left:8px;">${archive.mod_count} mods</span>
+                        <button onclick="restoreArchivedMods('${archive.loader}', '${archive.version}', '${archive.mc_version}')" style="background:#4CAF50;color:white;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:12px;">↩ Restore</button>
                     </div>`;
                 });
                 html += '</div>';
                 container.innerHTML = html;
+            }
+            
+            function restoreArchivedMods(loader, version, mcVersion) {
+                if (!confirm(`Restore ${loader} ${version} mods (MC ${mcVersion}) back to the mods folder?`)) return;
+                fetch('/api/loaders/restore-mods', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({loader: loader, version: version, mc_version: mcVersion})
+                }).then(r => r.json()).then(data => {
+                    if (data.success) {
+                        showAlert(data.message || 'Mods restored', 'success');
+                        loadLoaders();
+                        loadServerMods();
+                    } else {
+                        showAlert('Error: ' + (data.error || 'Restore failed'), 'error');
+                    }
+                }).catch(err => showAlert('Error: ' + err, 'error'));
             }
             
             function installLoader() {
@@ -2128,7 +2558,7 @@
                     worldWarning += `\n\n⚠️ NOTE: ${warningWorlds.length} world(s) have minor version mismatch:\n• ${warningWorlds.join('\n• ')}\nThese may have minor issues but should work.`;
                 }
                 
-                let confirmMsg = `Switch to ${loader} for MC ${mcVersion}?\n\nThis will:\n1. Create backup snapshot at {current_loader}{current_mc}/ (mods + world)\n2. Archive current mods\n3. Restore any mods found for ${loader} ${mcVersion}${worldWarning}\n\nProceed?`;
+                let confirmMsg = `Switch to ${loader} for MC ${mcVersion}?\n\nThis will:\n1. Create backup snapshot (config + mods + worlds)\n2. Archive current mods (loader_archive/)\n3. Archive incompatible worlds (worlds_archive/)\n4. Install ${loader} ${mcVersion}${worldWarning}\n\nProceed?`;
                 
                 if (!confirm(confirmMsg)) return;
                 showAlert(`Switching to ${loader}${mcVersion}...`, 'info');
@@ -2139,21 +2569,16 @@
                     body: JSON.stringify({loader: loader, mc_version: mcVersion})
                 }).then(r => r.json()).then(data => {
                     if (data.success) {
-                        const backup = data.backup || {};
-                        const archive = data.archive || {};
-                        const restore = data.restore || {};
-                        const backupMods = (backup.mods || 0) + (backup.clientonly || 0);
-                        const archiveMods = (archive.mods || 0) + (archive.clientonly || 0);
-                        const restoreMods = (restore.restored?.mods || 0) + (restore.restored?.clientonly || 0);
-                        
-                        let msg = `Switched to ${loader}${mcVersion}!\n`;
-                        msg += `Backup: ${backupMods} mods, world=${backup.world || false}\n`;
-                        msg += `Archived: ${archiveMods} mods\n`;
-                        msg += `Restored: ${restoreMods} mods`;
+                        let msg = `Switched to ${loader} ${mcVersion}!\n`;
+                        if (data.snapshot) msg += `Snapshot: ${data.snapshot}\n`;
+                        if (data.archived_mods) msg += `Archived: ${data.archived_mods} mods\n`;
+                        if (data.archived_worlds) msg += `Archived: ${data.archived_worlds} incompatible worlds\n`;
+                        if (data.install_ok === false) msg += '⚠️ Installer failed (see server log)';
                         
                         showAlert(msg, 'success');
                         loadLoaders();
                         loadWorlds();
+                        refreshStatus();
                     } else {
                         showAlert(data.error || 'Switch failed', 'error');
                     }
@@ -2273,8 +2698,11 @@
                             ${isIncompatible ? '⚠️ Switch' : 'Switch'}
                         </button>`;
                     
+                    const delBtn = isCurrent ? '' : 
+                        `<button onclick="deleteWorld('${w.name}')" style="background:#8b0000;color:white;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;margin-left:8px;font-size:12px;" title="Move world to worlds_trash/ (recoverable)">🗑 Delete</button>`;
+                    
                     return `<div class="world-item ${isIncompatible ? 'incompatible' : ''}" style="padding:8px;border-bottom:1px solid rgba(0,240,255,0.15);">
-                        <span class="world-name" style="font-weight:${isCurrent ? 'bold' : 'normal'};">${w.name}</span> ${mcBadge} ${compatBadge} ${size} ${activeBadge} ${btn}
+                        <span class="world-name" style="font-weight:${isCurrent ? 'bold' : 'normal'};">${w.name}</span> ${mcBadge} ${compatBadge} ${size} ${activeBadge} ${btn} ${delBtn}
                         <button onclick="backupWorld('${w.name}')" style="background:#795548;color:white;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;margin-left:8px;font-size:12px;" title="Create a tar.gz backup of this world">💾 Backup</button>
                     </div>`;
                 }).join('');
@@ -2283,9 +2711,68 @@
                     <p style="color:#888;margin-bottom:10px;">Current world: <strong>${current}</strong> | ${worlds.length} world(s) found</p>
                     <div style="background:rgba(26,26,46,0.6);border-radius:4px;border:1px solid rgba(0,240,255,0.15);">${worldList}</div>
                     <p style="color:#888;font-size:11px;margin-top:8px;">World changes take effect on next server restart. <strong style="color:#e74c3c;">Red worlds are incompatible</strong> - switching may cause chunk corruption or data loss.</p>
+                    <h3 style="margin-top:16px;color:#FF9800;border-bottom:1px solid rgba(0,240,255,0.15);padding-bottom:6px;font-size:13px;">🗄 Archived / Trashed Worlds</h3>
+                    <div id="archived-worlds-list"><p style="color:#666;font-size:12px;">Loading...</p></div>
                 `;
                 
                 if (dedicated) dedicated.innerHTML = worldHtml;
+                loadArchivedWorlds();
+            }
+            
+            function loadArchivedWorlds() {
+                fetch('/api/worlds/archives').then(r => r.json()).then(data => {
+                    const container = document.getElementById('archived-worlds-list');
+                    if (!container) return;
+                    const archived = data.archived || [];
+                    if (!archived.length) {
+                        container.innerHTML = '<p style="color:#666;font-size:12px;">No archived or trashed worlds.</p>';
+                        return;
+                    }
+                    let html = '<div style="background:rgba(26,26,46,0.6);border-radius:4px;border:1px solid rgba(0,240,255,0.15);">';
+                    archived.forEach(a => {
+                        const loc = a.location === 'worlds_archive' ? 'Archived' : 'Trashed';
+                        const mcTag = a.mc_version ? `<span style="color:#888;font-size:11px;">(MC ${a.mc_version})</span>` : '';
+                        html += `<div style="padding:8px;border-bottom:1px solid rgba(0,240,255,0.15);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                            <span>${loc === 'Archived' ? '📦' : '🗑'} <strong>${a.name}</strong> ${mcTag}</span>
+                            <span style="color:#888;font-size:11px;">${loc}</span>
+                            <button onclick="restoreArchivedWorld('${a.name}', '${a.location}')" style="background:#4CAF50;color:white;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:12px;">↩ Restore</button>
+                        </div>`;
+                    });
+                    html += '</div>';
+                    container.innerHTML = html;
+                }).catch(() => {});
+            }
+            
+            function deleteWorld(worldName) {
+                if (!confirm(`Delete world "${worldName}"?\n\nIt will be moved to worlds_trash/ (recoverable, not permanently deleted).`)) return;
+                fetch('/api/worlds/delete', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({world: worldName, confirm: true})
+                }).then(r => r.json()).then(data => {
+                    if (data.success) {
+                        showAlert(data.message, 'success');
+                        loadWorlds();
+                    } else {
+                        showAlert('Error: ' + data.error, 'error');
+                    }
+                }).catch(err => showAlert('Error: ' + err, 'error'));
+            }
+            
+            function restoreArchivedWorld(worldName, location) {
+                if (!confirm(`Restore world "${worldName}" back to the server directory?`)) return;
+                fetch('/api/worlds/restore', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({world: worldName, location: location})
+                }).then(r => r.json()).then(data => {
+                    if (data.success) {
+                        showAlert(data.message, 'success');
+                        loadWorlds();
+                    } else {
+                        showAlert('Error: ' + data.error, 'error');
+                    }
+                }).catch(err => showAlert('Error: ' + err, 'error'));
             }
             
             function switchWorld(worldName, worldMcVersion, serverMcVersion, compatStatus) {
@@ -2711,6 +3198,9 @@
                 loadEvents();
                 loadWorlds();
                 loadLoaders();
+                loadTheme();
+                loadArchivedWorlds();
+                loadQaSnapshots();
                 
                 // First-visit check: show mod selector if never loaded AND config allows it
                 if (!localStorage.getItem('neorunner-mods-loaded')) {

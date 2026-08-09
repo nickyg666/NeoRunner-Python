@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from neorunner.server import stop_server, restart_server, is_server_running
+from neorunner_pkg.server import stop_server, restart_server, is_server_running
 
 
 class TestServerAPI:
@@ -15,8 +15,8 @@ class TestServerAPI:
     
     def test_stop_server_without_instance(self):
         """stop_server works without _server_instance (dashboard process)."""
-        with patch('neorunner.server.subprocess.run') as mock_run:
-            with patch('neorunner.server.load_cfg') as mock_cfg:
+        with patch('neorunner_pkg.server.subprocess.run') as mock_run:
+            with patch('neorunner_pkg.server.load_cfg') as mock_cfg:
                 mock_cfg.return_value.mc_version = "1.21.11"
                 mock_cfg.return_value.loader = "neoforge"
                 mock_cfg.return_value.tmux_socket = "/tmp/test"
@@ -30,7 +30,7 @@ class TestServerAPI:
     
     def test_is_server_running_check(self):
         """is_server_running returns bool."""
-        with patch('neorunner.server.subprocess.run') as mock_run:
+        with patch('neorunner_pkg.server.subprocess.run') as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stdout="")
             
             result = is_server_running()
@@ -39,7 +39,7 @@ class TestServerAPI:
     
     def test_stop_server_with_instance(self):
         """stop_server uses instance when available."""
-        with patch('neorunner.server._server_instance') as mock_instance:
+        with patch('neorunner_pkg.server._server_instance') as mock_instance:
             mock_instance.stop.return_value = True
             
             result = stop_server()
@@ -52,12 +52,12 @@ class TestDashboardImports:
     
     def test_dashboard_imports(self):
         """Dashboard can be imported."""
-        from neorunner.dashboard import app
+        from neorunner_pkg.dashboard import app
         assert app is not None
     
     def test_config_imports(self):
         """Config functions work."""
-        from neorunner.config import load_cfg, save_cfg, ensure_config, validate_config, ServerConfig
+        from neorunner_pkg.config import load_cfg, save_cfg, ensure_config, validate_config, ServerConfig
         cfg = ServerConfig()
         cfg = ensure_config(cfg)  # Fill defaults
         valid, errors = validate_config(cfg, fail_on_error=False)
@@ -65,7 +65,7 @@ class TestDashboardImports:
     
     def test_server_imports(self):
         """Server functions can be imported."""
-        from neorunner.server import (
+        from neorunner_pkg.server import (
             run_server, stop_server, restart_server,
             send_command, is_server_running, get_server, get_events
         )
@@ -102,10 +102,10 @@ class TestManifest:
     
     def test_create_mod_zip_function_exists(self):
         """create_mod_zip function exists."""
-        from neorunner.mod_hosting import create_mod_zip
+        from neorunner_pkg.mod_hosting import create_mod_zip
         assert callable(create_mod_zip)
     
     def test_conditional_create_mod_zip_exists(self):
         """conditional_create_mod_zip function exists."""
-        from neorunner.mod_hosting import conditional_create_mod_zip
+        from neorunner_pkg.mod_hosting import conditional_create_mod_zip
         assert callable(conditional_create_mod_zip)

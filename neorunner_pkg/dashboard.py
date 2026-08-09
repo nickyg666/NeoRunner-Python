@@ -35,6 +35,37 @@ app = Flask(__name__, template_folder=str(template_dir), static_folder=str(stati
 DASHBOARD_PORT = None
 app.secret_key = os.urandom(24)
 
+# Basic auth for the admin dashboard (client download routes stay open).
+ADMIN_USER = os.environ.get("NEORUNNER_ADMIN_USER", "mc")
+ADMIN_PASS = os.environ.get("NEORUNNER_ADMIN_PASS", "123")
+AUTH_EXEMPT_PREFIXES = ("/download/", "/static/", "/favicon.ico", "/socket.io")
+
+
+def _check_auth(user: str, password: str) -> bool:
+    """Return True if the supplied credentials are valid."""
+    return user == ADMIN_USER and password == ADMIN_PASS
+
+
+@app.before_request
+def require_basic_auth():
+    """Protect the admin dashboard with HTTP Basic Auth.
+
+    Client-facing routes (/download/*, websocket, static assets) are kept
+    open so the installer JAR and download scripts keep working unauthenticated.
+    """
+    if request.method == "OPTIONS":
+        return None
+    if any(request.path.startswith(prefix) or request.path == prefix for prefix in AUTH_EXEMPT_PREFIXES):
+        return None
+    auth = request.authorization
+    if not auth or not _check_auth(auth.username, auth.password):
+        return Response(
+            "NeoRunner admin requires authentication",
+            401,
+            {"WWW-Authenticate": 'Basic realm="NeoRunner Admin"'},
+        )
+    return None
+
 
 class DashboardState:
     """Shared state for dashboard."""
@@ -607,6 +638,137 @@ def api_upload_mod():
             "message": f"Uploaded {filename}",
             "mod": filename
         })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+MODPACK_UPLOAD_DIR = CWD / "modpacks"
+
+
+def _modpack_list() -> List[Dict[str, Any]]:
+    """List uploaded modpack zips with metadata."""
+    MODPACK_UPLOAD_DIR.mkdir(exist_ok=True)
+    packs = []
+    for f in sorted(MODPACK_UPLOAD_DIR.glob("*.zip"), key=lambda p: p.stat().st_mtime, reverse=True):
+        packs.append({
+            "filename": f.name,
+            "size": f.stat().st_size,
+            "mtime": datetime.fromtimestamp(f.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+        })
+    return packs
+
+
+@app.route("/api/modpacks", methods=["GET"])
+def api_modpacks():
+    """List uploaded modpack zips."""
+    try:
+        return jsonify({"success": True, "packs": _modpack_list()})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+@app.route("/api/modpack/upload", methods=["POST"])
+def api_upload_modpack():
+    """Upload a CurseForge-format modpack zip."""
+    try:
+        if "file" not in request.files:
+            return jsonify({"success": False, "error": "No file uploaded"}), 400
+        file = request.files["file"]
+        if not file.filename or not file.filename.endswith(".zip"):
+            return jsonify({"success": False, "error": "Only .zip modpack files allowed"}), 400
+
+        MODPACK_UPLOAD_DIR.mkdir(exist_ok=True)
+        filename = Path(file.filename).name
+        save_path = MODPACK_UPLOAD_DIR / filename
+        if save_path.exists():
+            save_path.unlink()
+        file.save(save_path)
+
+        # Validate it smells like a CurseForge pack before accepting.
+        from .modpack_installer import parse_manifest
+        manifest, files = parse_manifest(save_path)
+        log_event(
+            "MODPACK_UPLOAD",
+            f"Uploaded modpack: {filename} ({len(files)} files, MC {manifest.get('minecraft', {}).get('version', '?')})",
+        )
+        return jsonify({
+            "success": True,
+            "message": f"Uploaded {filename}",
+            "filename": filename,
+            "manifest": {
+                "name": manifest.get("name"),
+                "version": manifest.get("version"),
+                "mc_version": manifest.get("minecraft", {}).get("version"),
+                "mod_count": len(files),
+            },
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": f"Invalid modpack zip: {e}"}), 400
+
+
+@app.route("/api/modpack/install", methods=["POST"])
+def api_install_modpack():
+    """Install an uploaded modpack zip (downloads mods, applies overrides)."""
+    try:
+        data = request.json or {}
+        filename = Path(data.get("filename", "")).name
+        if not filename or not filename.endswith(".zip"):
+            return jsonify({"success": False, "error": "No modpack specified"}), 400
+
+        zip_path = MODPACK_UPLOAD_DIR / filename
+        if not zip_path.exists():
+            return jsonify({"success": False, "error": f"Modpack {filename} not found"}), 404
+
+        cfg = load_cfg()
+        mods_dir = CWD / cfg.mods_dir
+
+        from .modpack_installer import install_curseforge_pack
+        result = install_curseforge_pack(
+            zip_path,
+            mods_dir,
+            overrides_dir=CWD,
+        )
+        log_event(
+            "MODPACK_INSTALL",
+            f"Installed {filename}: {result.installed} mods, {result.failed} failed, overrides applied",
+        )
+        return jsonify({
+            "success": result.failed == 0,
+            "message": (
+                f"Installed {result.installed}/{result.total} mods, "
+                f"{result.failed} failed, overrides applied"
+            ),
+            "result": {
+                "pack": result.pack_name,
+                "pack_version": result.pack_version,
+                "mc_version": result.mc_version,
+                "loader": result.loader,
+                "installed": result.installed,
+                "failed": result.failed,
+                "skipped": result.skipped,
+                "total": result.total,
+                "errors": result.errors,
+                "files": result.files,
+            },
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+@app.route("/api/modpack/delete", methods=["POST"])
+def api_delete_modpack():
+    """Delete an uploaded modpack zip."""
+    try:
+        data = request.json or {}
+        filename = Path(data.get("filename", "")).name
+        if not filename or not filename.endswith(".zip"):
+            return jsonify({"success": False, "error": "No modpack specified"}), 400
+        zip_path = MODPACK_UPLOAD_DIR / filename
+        if not zip_path.exists():
+            return jsonify({"success": False, "error": f"Modpack {filename} not found"}), 404
+        zip_path.unlink()
+        log_event("MODPACK_DELETE", f"Deleted modpack: {filename}")
+        return jsonify({"success": True, "message": f"Deleted {filename}"})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 400
 
@@ -1955,6 +2117,15 @@ def api_loaders_switch():
         return jsonify({"success": False, "error": str(e)}), 400
 
 
+def _download_link(cfg: ServerConfig) -> str:
+    """Public download URL shown to clients (installer JAR)."""
+    from .mod_hosting import _get_server_hostname, _get_local_ip
+    host = _get_server_hostname(cfg)
+    if not host or host == "127.0.0.1":
+        return f"http://{_get_local_ip()}:{cfg.http_port}"
+    return f"https://{host}"
+
+
 @app.route("/api/broadcast-mods", methods=["POST"])
 def api_broadcast_mods():
     """Broadcast mod update to players."""
@@ -1962,10 +2133,36 @@ def api_broadcast_mods():
         cfg = load_cfg()
         from .server import send_command
         
-        cmd = "say Mod update available! Download from the server dashboard."
+        link = _download_link(cfg)
+        cmd = f"say Mod update available! Download from {link}/download/installer.jar"
         send_command(cmd)
         
         return jsonify({"success": True, "message": "Broadcast sent"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+@app.route("/api/kick", methods=["POST"])
+def api_kick():
+    """Kick a player from the server with a download-link message."""
+    try:
+        data = request.json or {}
+        player = (data.get("player") or "").strip()
+        if not player:
+            return jsonify({"success": False, "error": "No player specified"}), 400
+        
+        cfg = load_cfg()
+        from .server import send_command
+        
+        reason = (data.get("reason") or "").strip()
+        if not reason:
+            reason = f"Rejoining with missing/mismatched mods? Download from {_download_link(cfg)}/download/installer.jar"
+        elif "{link}" in reason:
+            reason = reason.replace("{link}", f"{_download_link(cfg)}/download/installer.jar")
+        
+        ok = send_command(f"kick {player} {reason}")
+        log_event("PLAYER_KICK", f"Kicked {player}: {reason}")
+        return jsonify({"success": ok, "message": f"Kick sent to {player}"})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 400
 

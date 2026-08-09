@@ -5,7 +5,7 @@ A comprehensive Python module for managing NeoForge, Forge, and Fabric servers
 with automated mod management, web dashboard, and crash recovery.
 """
 
-__version__ = "2.2.0"
+__version__ = "2.3.1"
 __author__ = "Nickyg666"
 __license__ = "MIT"
 
@@ -137,6 +137,16 @@ from .mod_browser import (
 from .modpack_converter import (
     ModpackConverter,
     create_curseforge_pack,
+)
+
+# CurseForge modpack installer
+from .modpack_installer import (
+    InstallResult,
+    install_curseforge_pack,
+    parse_manifest,
+    resolve_file_name,
+    download_cf_mod,
+    extract_overrides,
 )
 
 # Java manager

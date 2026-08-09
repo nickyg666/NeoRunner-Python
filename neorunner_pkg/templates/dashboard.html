@@ -1362,6 +1362,11 @@
                     <button onclick="sendBroadcast()" style="background:#EF5350;color:white;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px;">📢</button>
                 </div>
                 <br>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <input type="text" id="kick-input" placeholder="Kick player (message auto-adds download link)..." style="flex:1;padding:8px 12px;border-radius:6px;border:1px solid #444;background:#1a1a2a;color:#fff;font-size:13px;">
+                    <button onclick="kickPlayer()" style="background:#D32F2F;color:white;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px;">🥾</button>
+                </div>
+                <br>
                 <div style="background:#1e1e2e;border:1px solid #444;border-radius:8px;padding:12px;">
                     <h3 style="margin:0 0 8px;font-size:14px;color:#00BCD4;">🔄 Loader & MC Version Quick Switch</h3>
                     <p style="color:#888;font-size:12px;margin:0 0 8px;">Switch loader / Minecraft version. Creates a snapshot and archives current mods + incompatible worlds.</p>
@@ -1392,6 +1397,16 @@
                         </label>
                     </div>
                     <div id="crash-log-results" style="margin-top:10px;font-size:12px;"></div>
+                </div>
+                <br>
+                <div style="background:#1e1e2e;border:1px solid #444;border-radius:8px;padding:12px;">
+                    <h3 style="margin:0 0 8px;font-size:14px;color:#FFA726;">🗂️ Modpack Installer (CurseForge .zip)</h3>
+                    <p style="color:#888;font-size:12px;margin:0 0 8px;">Upload a CurseForge modpack export. Mods are downloaded from the CF CDN and overrides/ (configs) are applied.</p>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                        <input type="file" id="modpack-file-input" accept=".zip" style="flex:1;min-width:180px;color:#fff;font-size:12px;">
+                        <button onclick="uploadModpack()" style="background:#FFA726;color:#111;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">⬆ Upload</button>
+                    </div>
+                    <div id="modpack-list" style="margin-top:10px;font-size:12px;color:#888;">No modpacks uploaded yet.</div>
                 </div>
             </div>
         </div>
@@ -2033,6 +2048,7 @@
             function refreshMods() {
                 loadServerMods();
                 loadClientMods();
+                loadModpacks();
             }
             
             function loadConfig() {
@@ -3565,6 +3581,89 @@
                         if (data.success && data.issues) out.textContent = 'Uploaded and analyzed: ' + data.issues.length + ' issue(s) found.';
                     }).catch(err => showAlert('Error: ' + err, 'error'))
                     .finally(() => { btn.disabled = false; btn.textContent = 'Analyze'; });
+            }
+
+            function kickPlayer() {
+                const input = document.getElementById('kick-input');
+                const player = input.value.trim();
+                if (!player) { showAlert('Enter a player name to kick', 'warning'); return; }
+                if (!confirm('Kick "' + player + '"? Message will include the download link.')) return;
+                fetch('/api/kick', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({player})
+                }).then(r => r.json()).then(data => {
+                    showAlert(data.message || data.error || 'Kick sent', data.success ? 'success' : 'error');
+                    input.value = '';
+                }).catch(err => showAlert('Error: ' + err, 'error'));
+            }
+
+            function uploadModpack() {
+                const fileInput = document.getElementById('modpack-file-input');
+                if (!fileInput.files.length) { showAlert('Choose a .zip modpack file first', 'warning'); return; }
+                const formData = new FormData();
+                formData.append('file', fileInput.files[0]);
+                fetch('/api/modpack/upload', {method: 'POST', body: formData})
+                    .then(r => r.json()).then(data => {
+                        if (data.success) {
+                            showAlert('Uploaded ' + data.filename + ' — installing...', 'success');
+                            return installModpack(data.filename);
+                        }
+                        showAlert(data.error || 'Upload failed', 'error');
+                    }).catch(err => showAlert('Error: ' + err, 'error'));
+            }
+
+            function installModpack(filename) {
+                return fetch('/api/modpack/install', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({filename})
+                }).then(r => r.json()).then(data => {
+                    if (data.success) {
+                        showAlert(data.message, 'success');
+                    } else {
+                        showAlert((data.error || data.message || 'Install failed') + ' — see result log for details.', 'error');
+                    }
+                    const el = document.getElementById('modpack-list');
+                    if (data.result) {
+                        const r = data.result;
+                        let html = `<div style="border:1px solid #555;border-radius:6px;padding:8px;margin-top:6px;">`;
+                        html += `<b>${r.pack} v${r.pack_version}</b> — MC ${r.mc_version}, ${r.loader || '?'}<br>`;
+                        html += `Installed: <span style="color:#4CAF50">${r.installed}</span> / ${r.total} (${r.failed} failed)<br>`;
+                        (r.errors || []).slice(0, 5).forEach(e => { html += `<span style="color:#E57373">⚠ ${e}</span><br>`; });
+                        html += `</div>`;
+                        el.innerHTML = html;
+                    }
+                    loadModpacks();
+                });
+            }
+
+            function loadModpacks() {
+                fetch('/api/modpacks').then(r => r.json()).then(data => {
+                    const el = document.getElementById('modpack-list');
+                    if (!data.success) return;
+                    if (!data.packs.length) { el.innerHTML = 'No modpacks uploaded yet.'; return; }
+                    el.innerHTML = data.packs.map(p =>
+                        `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;border:1px solid #333;border-radius:6px;padding:6px 8px;margin-top:6px;">
+                            <span title="${p.filename}">${p.filename.replace(/\.zip$/, '')}</span>
+                            <span style="display:flex;gap:6px;">
+                                <button onclick="installModpack('${p.filename}')" style="background:#FFA726;color:#111;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;">Install</button>
+                                <button onclick="deleteModpack('${p.filename}')" style="background:#D32F2F;color:#fff;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;">🗑</button>
+                            </span>
+                        </div>`).join('');
+                }).catch(() => {});
+            }
+
+            function deleteModpack(filename) {
+                if (!confirm('Delete uploaded modpack ' + filename + '?')) return;
+                fetch('/api/modpack/delete', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({filename})
+                }).then(r => r.json()).then(data => {
+                    showAlert(data.message || data.error, data.success ? 'success' : 'error');
+                    loadModpacks();
+                }).catch(err => showAlert('Error: ' + err, 'error'));
             }
         </script>
 </body>

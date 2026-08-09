@@ -22,6 +22,7 @@ from pathlib import Path
 
 from .config import ServerConfig, load_cfg
 from .constants import CWD
+from .mod_hosting import _get_local_ip
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +35,17 @@ def build_installer_properties(cfg: ServerConfig, base_url: str = None, host: st
     """Compose the installer.properties content embedded in the JAR."""
     if not base_url:
         if not host:
-            host = getattr(cfg, "hostname", "") or "127.0.0.1"
+            host = getattr(cfg, "hostname", "") or ""
         if not http_port:
             http_port = int(getattr(cfg, "http_port", 8000) or 8000)
-        base_url = f"http://{host}:{http_port}"
+        if host:
+            base_url = f"https://{host}"
+        else:
+            base_url = f"http://{_get_local_ip()}:{http_port}"
     if not server_address:
+        src_host = host or _get_local_ip()
         mc_port = int(getattr(cfg, "mc_port", 25565) or 25565)
-        server_address = f"{host}:{mc_port}" if mc_port != 25565 else host
+        server_address = f"{src_host}:{mc_port}" if mc_port != 25565 else src_host
 
     loader_version = ""
     try:

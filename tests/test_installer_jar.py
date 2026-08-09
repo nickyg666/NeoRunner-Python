@@ -53,3 +53,18 @@ class TestInstallerProperties:
         props = build_installer_properties(_cfg(loader="fabric"))
         for key in ("baseUrl", "serverAddress", "loader", "mcVersion", "loaderVersion"):
             assert f"{key}=" in props
+
+    def test_hostname_uses_https_base_url(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("neorunner_pkg.installer_jar.CWD", tmp_path)
+        props = build_installer_properties(_cfg(hostname="mc.w8.mom"))
+        assert "baseUrl=https://mc.w8.mom" in props
+        assert "serverAddress=mc.w8.mom:1234" in props
+
+    def test_no_hostname_falls_back_to_lan_http(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("neorunner_pkg.installer_jar.CWD", tmp_path)
+        monkeypatch.setattr(
+            "neorunner_pkg.installer_jar._get_local_ip", lambda: "192.168.0.50"
+        )
+        props = build_installer_properties(_cfg(hostname=""))
+        assert "baseUrl=http://192.168.0.50:8000" in props
+        assert "serverAddress=192.168.0.50:1234" in props

@@ -163,11 +163,41 @@ def get_latest_for_loader(loader: str = "neoforge") -> Optional[str]:
 
 
 def get_java_version_for_mc(mc_version: str) -> str:
-    """Get required Java version for MC."""
-    if mc_version.startswith("1.21"):
-        return "21"
-    elif mc_version.startswith("1.20"):
+    """Get required Java version for MC.
+
+    Handles both the classic scheme (1.x) and the year-based scheme (26.x+).
+    - 26.x and newer year-based releases require Java 25
+    - 1.21.x / 1.20.5+ require Java 21
+    - 1.18.x - 1.20.4 require Java 17
+    - 1.17.x requires Java 16
+    """
+    ver = (mc_version or "").strip()
+    parts = ver.split(".")
+    if not parts:
         return "17"
+
+    # Year-based versioning (25.x, 26.x, ...) - requires Java 25
+    major = int(parts[0]) if parts[0].isdigit() else 0
+    if major >= 25:
+        return "25"
+
+    if ver.startswith("1.21"):
+        return "21"
+
+    # 1.20.5 and 1.20.6 require Java 21
+    if ver.startswith("1.20") and len(parts) >= 3:
+        try:
+            if int(parts[2]) >= 5:
+                return "21"
+        except ValueError:
+            pass
+
+    if ver.startswith("1.20"):
+        return "17"
+    if ver.startswith("1.19") or ver.startswith("1.18"):
+        return "17"
+    if ver.startswith("1.17"):
+        return "16"
     return "17"
 
 

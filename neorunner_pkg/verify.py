@@ -7,7 +7,7 @@ import sys
 import os
 from pathlib import Path
 
-NEORUNNER_HOME = str(Path(__file__).parent.resolve())
+NEORUNNER_HOME = str(Path(__file__).parent.parent.resolve())
 os.chdir(NEORUNNER_HOME)
 sys.path.insert(0, NEORUNNER_HOME)
 
@@ -19,10 +19,7 @@ print()
 # Check 1: Module imports
 print("1. Checking module imports...")
 try:
-    from neorunner import (
-        load_cfg, ServerConfig, run_server, 
-        is_server_running, dashboard_app
-    )
+    from neorunner_pkg import load_cfg
     print("   ✅ Core modules import successfully")
 except Exception as e:
     print(f"   ❌ Import error: {e}")

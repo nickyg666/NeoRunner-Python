@@ -4,7 +4,7 @@ This module provides functionality to search and download mods from CurseForge
 when the official API is not available (Cloudflare protection).
 """
 
-from __future__ import annotations
+#
 
 import os
 import re

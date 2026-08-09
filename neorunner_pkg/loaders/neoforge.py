@@ -1,6 +1,6 @@
 """NeoForge modloader implementation."""
 
-from __future__ import annotations
+#
 
 import os
 import re
@@ -216,11 +216,11 @@ class NeoForgeLoader(LoaderBase):
                 except Exception as e:
                     log_event("LOADER_NEOFORGE", f"Installer note: {e}")
         
-        # Build command - prefer run.sh, fallback to server.jar or direct -jar
+        # Build command - prefer run.sh (properly configured), fallback to server.jar
         run_script = os.path.join(cwd_str, "run.sh")
         if os.path.exists(run_script):
-            # NeoForge 26.x with run.sh: java @user_jvm_args.txt @unix_args.txt nogui
-            java_cmd = ["java", "@user_jvm_args.txt", "-jar", "server.jar", "nogui"]
+            # Use run.sh script directly for NeoForge 26.x
+            java_cmd = ["./run.sh", "nogui"]
         elif os.path.exists(starter_jar):
             java_cmd = ["java", "@user_jvm_args.txt", "-jar", starter_jar, "nogui"]
         else:

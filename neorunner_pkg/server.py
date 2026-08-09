@@ -1,6 +1,6 @@
 """Server management for NeoRunner with tmux-based process monitoring."""
 
-from __future__ import annotations
+#
 
 import subprocess
 import signal
@@ -301,12 +301,13 @@ class TmuxServer:
                                                     java_ver_match = re.search(r'\[(\d+)', vr)
                                                     if java_ver_match:
                                                         required_java = int(java_ver_match.group(1))
-                                                        if installed_java > required_java:
-                                                            # Can't downgrade - quarantine
-                                                            log_event("SELF_HEAL", f"Java mismatch: {mod_file.name} requires Java {required_java} < {installed_java} - quarantining (cannot downgrade)")
-                                                            quarantine_mod(mods_dir, mod_file.name, f"Requires Java {required_java}, have {installed_java}")
-                                                        elif installed_java < required_java:
-                                                            log_event("SELF_HEAL", f"WARNING: {mod_file.name} requires Java {required_java} > {installed_java} - Java upgrade needed but may break other mods")
+                                                        if installed_java < required_java:
+                                                            # Mod needs a newer Java than installed - can't run, quarantine
+                                                            log_event("SELF_HEAL", f"Java mismatch: {mod_file.name} requires Java {required_java} > {installed_java} - quarantining (mod can't run on this Java)")
+                                                            quarantine_mod(mods_dir, mod_file.name, f"Requires Java {required_java}, server has Java {installed_java}")
+                                                        else:
+                                                            # Java is forward-compatible - newer than required is fine
+                                                            log_event("SELF_HEAL", f"OK: {mod_file.name} requires Java {required_java} <= {installed_java} (compatible)")
                     except Exception:
                         continue
             except Exception as e:

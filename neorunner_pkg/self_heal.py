@@ -3,7 +3,7 @@
 Uses ferium for mod management, with CurseForge scraper for mod_id resolution.
 """
 
-from __future__ import annotations
+#
 
 import os
 import re
@@ -355,14 +355,13 @@ def preflight_dep_check(cfg: Dict[str, Any]) -> Dict[str, Any]:
     # Handle Java version mismatches
     if java_version_mismatches:
         for mod_file, required_java in java_version_mismatches.items():
-            if installed_java_ver > required_java:
-                # Can't downgrade Java without breaking other mods - quarantine this mod
-                log_event("PREFLIGHT", f"Quarantining {mod_file}: requires Java {required_java} < {installed_java_ver} (downgrade would break other mods)")
-                quarantine_mod(mods_dir, mod_file, f"Requires Java {required_java}, have {installed_java_ver} (cannot downgrade)")
-            elif installed_java_ver < required_java:
-                # Need Java upgrade - may break other mods
-                log_event("PREFLIGHT", f"WARNING: {mod_file} requires Java {required_java} > {installed_java_ver} - Java update needed but may break compatibility")
-            # If equal, continue (compatible)
+            if installed_java_ver < required_java:
+                # Mod needs a newer Java than installed - it can't run, quarantine it
+                log_event("PREFLIGHT", f"Quarantining {mod_file}: requires Java {required_java} > {installed_java_ver} (server has Java {installed_java_ver})")
+                quarantine_mod(mods_dir, mod_file, f"Requires Java {required_java}, server has Java {installed_java_ver}")
+            else:
+                # Java is forward-compatible: newer than required is fine
+                log_event("PREFLIGHT", f"OK: {mod_file} requires Java {required_java} <= {installed_java_ver} (compatible)")
     
     # NOTE: Many mods are forward-compatible - skip strict MC version checking
     # The server will crash if there's an actual incompatibility, and crash detection will handle it

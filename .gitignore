@@ -41,3 +41,20 @@ server_*.sh
 *.pem
 *.key
 credentials.json
+
+# NeoRunner runtime
+logs/
+*.log.gz
+neorunner.egg-info/
+.cache/
+.crash_history.json
+.preflight_cache
+backups/
+config.json
+server.properties
+eula.txt
+banned-ips.json
+banned-players.json
+ops.json
+usercache.json
+whitelist.json

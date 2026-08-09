@@ -80,6 +80,34 @@ def parse_server_properties() -> Dict[str, str]:
     return props
 
 
+def write_server_properties(props: Dict[str, str]) -> None:
+    """Write server.properties, preserving existing keys and updating values."""
+    props_path = CWD / "server.properties"
+    updates = dict(props)
+    if props_path.exists():
+        lines = []
+        seen = set()
+        with open(props_path) as f:
+            for line in f:
+                if "=" in line and not line.startswith("#"):
+                    k = line.strip().split("=", 1)[0]
+                    if k in updates:
+                        lines.append(f"{k}={updates.pop(k)}\n")
+                        seen.add(k)
+                    else:
+                        lines.append(line)
+                else:
+                    lines.append(line)
+        for k, v in updates.items():
+            lines.append(f"{k}={v}\n")
+        with open(props_path, "w") as f:
+            f.writelines(lines)
+    else:
+        with open(props_path, "w") as f:
+            for k, v in updates.items():
+                f.write(f"{k}={v}\n")
+
+
 def scan_worlds() -> List[Dict[str, Any]]:
     """Scan for world folders (folders containing level.dat)."""
     cfg = load_cfg()
@@ -998,6 +1026,87 @@ def download_mods_zip():
         return f"Error: {e}", 500
 
 
+@app.route("/download/launcher.zip")
+def download_launcher_zip():
+    """Download the client launcher zip (mods + config + defaultconfigs)."""
+    try:
+        from .mod_hosting import build_launcher_zip_bytes
+        cfg = load_cfg()
+        buf = build_launcher_zip_bytes(cfg)
+        if buf is None:
+            return "Failed to build launcher zip", 500
+        return Response(
+            buf.getvalue(),
+            mimetype="application/zip",
+            headers={"Content-Disposition": f"attachment; filename=neorunner-launcher-{cfg.mc_version}.zip"}
+        )
+    except Exception as e:
+        return f"Error: {e}", 500
+
+
+@app.route("/download/curseforge.zip")
+def download_curseforge_zip():
+    """Download CurseForge/Overwolf-importable modpack zip."""
+    try:
+        from .public_site import _build_curseforge_zip
+        cfg = load_cfg()
+        buf = _build_curseforge_zip()
+        return Response(
+            buf.getvalue(),
+            mimetype="application/zip",
+            headers={"Content-Disposition": f"attachment; filename=neorunner-curseforge-{cfg.mc_version}.zip"}
+        )
+    except Exception as e:
+        return f"Error: {e}", 500
+
+
+@app.route("/download/installer.jar")
+def download_installer_jar():
+    """Download the self-contained Java client installer JAR."""
+    try:
+        from .installer_jar import build_installer_jar_bytes
+        cfg = load_cfg()
+        buf = build_installer_jar_bytes(cfg)
+        return Response(
+            buf.getvalue(),
+            mimetype="application/java-archive",
+            headers={"Content-Disposition": f"attachment; filename=neorunner-installer-{cfg.mc_version}.jar"}
+        )
+    except Exception as e:
+        return f"Error building installer jar: {e}", 500
+
+
+@app.route("/download/loader-installer.jar")
+def download_loader_installer():
+    """Serve the mod loader's client installer jar."""
+    try:
+        from pathlib import Path
+        cfg = load_cfg()
+        candidates = []
+        if cfg.loader == "neoforge":
+            lib = CWD / "libraries" / "net" / "neoforged" / "neoforge"
+            if lib.exists():
+                for v in sorted(lib.iterdir(), reverse=True):
+                    if v.is_dir():
+                        candidates.append(v / f"neoforge-{v.name}-installer.jar")
+            candidates.append(CWD / f"neoforge-{cfg.mc_version}-installer.jar")
+        elif cfg.loader == "forge":
+            candidates.append(CWD / f"forge-{cfg.mc_version}-installer.jar")
+        elif cfg.loader == "fabric":
+            candidates.append(CWD / "fabric-installer.jar")
+
+        for cand in candidates:
+            if cand.exists():
+                return Response(
+                    cand.read_bytes(),
+                    mimetype="application/java-archive",
+                    headers={"Content-Disposition": f"attachment; filename={cand.name}"}
+                )
+        return "No loader installer jar available on server", 404
+    except Exception as e:
+        return f"Error: {e}", 500
+
+
 @app.route("/api/worlds")
 def api_worlds():
     """Return list of available worlds."""
@@ -1097,22 +1206,43 @@ def api_worlds_delete():
 
         props = parse_server_properties()
         current = props.get("level-name", "world")
-        if world_name == current:
-            return jsonify({"success": False, "error": f"Cannot delete the active world '{current}'. Switch worlds first."}), 400
+        is_active = world_name == current
+        if is_active and not data.get("force_active", False):
+            return jsonify({"success": False, "error": f"Cannot delete the active world '{current}'. Use force_active to delete it and generate a fresh world."}), 400
 
         world_path = CWD / world_name
         if not world_path.exists():
             return jsonify({"success": False, "error": "World not found"}), 404
 
         import shutil
+        import time
+
+        # If deleting the active world, stop the server and reset level-name so
+        # a fresh world generates on next start.
+        server_stopped = False
+        if is_active:
+            try:
+                from .server import is_server_running, stop_server
+                if is_server_running():
+                    server_stopped = stop_server()
+                    time.sleep(2)
+            except Exception:
+                pass
+            props["level-name"] = "world"
+            write_server_properties(props)
+            log_event("WORLD_DELETE", f"Active world '{world_name}' deleted; level-name reset to 'world' (fresh world will generate)")
+
         trash_dir = CWD / "worlds_trash"
         trash_dir.mkdir(exist_ok=True)
         dest = trash_dir / world_name
         if dest.exists():
             shutil.rmtree(str(dest))
         shutil.move(str(world_path), str(dest))
+        msg = f"World '{world_name}' moved to worlds_trash/ (recoverable)"
+        if server_stopped:
+            msg += " | Server stopped - start it to generate a fresh world"
         log_event("WORLD_DELETE", f"Moved world '{world_name}' to worlds_trash/")
-        return jsonify({"success": True, "message": f"World '{world_name}' moved to worlds_trash/ (recoverable)"})
+        return jsonify({"success": True, "message": msg})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 400
 

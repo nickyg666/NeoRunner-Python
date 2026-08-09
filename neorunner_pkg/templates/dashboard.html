@@ -1411,9 +1411,24 @@
             <!-- Client Mod Sync Card -->
             <div class="card">
                 <h2>Client Mod Sync</h2>
-                <p style="color:#666; font-size:13px; margin-bottom:12px;">Download script to sync mods.</p>
-                <a href="/download/install-mods.bat" class="installer-btn installer-bat" download>
+                <p style="color:#666; font-size:13px; margin-bottom:12px;">Install the modpack on a client. Needs Java 8+.</p>
+                <a href="/download/installer.jar" class="installer-btn installer-bat" download style="background:#2ea043;border-color:#2ea043;">
+                    <span class="installer-icon">☕</span>
+                    <span class="installer-label">.jar</span>
+                    <span class="installer-desc">Installer (Win/Linux/Mac)</span>
+                </a>
+                <a href="/download/launcher.zip" class="installer-btn installer-bat" download style="background:#2196F3;border-color:#2196F3;">
                     <span class="installer-icon">📦</span>
+                    <span class="installer-label">.zip</span>
+                    <span class="installer-desc">Official launcher</span>
+                </a>
+                <a href="/download/curseforge.zip" class="installer-btn installer-bat" download style="background:#FF9800;border-color:#FF9800;">
+                    <span class="installer-icon">🟠</span>
+                    <span class="installer-label">.zip</span>
+                    <span class="installer-desc">CurseForge</span>
+                </a>
+                <a href="/download/install-mods.bat" class="installer-btn installer-bat" download>
+                    <span class="installer-icon">📜</span>
                     <span class="installer-label">.bat</span>
                     <span class="installer-desc">Windows</span>
                 </a>
@@ -2698,7 +2713,8 @@
                             ${isIncompatible ? '⚠️ Switch' : 'Switch'}
                         </button>`;
                     
-                    const delBtn = isCurrent ? '' : 
+                    const delBtn = isCurrent ? 
+                        `<button onclick="deleteWorld('${w.name}', true)" style="background:#8b0000;color:white;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;margin-left:8px;font-size:12px;" title="Move ACTIVE world to worlds_trash/ and generate a fresh one (server will stop)">🗑 Delete & Regenerate</button>` :
                         `<button onclick="deleteWorld('${w.name}')" style="background:#8b0000;color:white;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;margin-left:8px;font-size:12px;" title="Move world to worlds_trash/ (recoverable)">🗑 Delete</button>`;
                     
                     return `<div class="world-item ${isIncompatible ? 'incompatible' : ''}" style="padding:8px;border-bottom:1px solid rgba(0,240,255,0.15);">
@@ -2743,16 +2759,27 @@
                 }).catch(() => {});
             }
             
-            function deleteWorld(worldName) {
-                if (!confirm(`Delete world "${worldName}"?\n\nIt will be moved to worlds_trash/ (recoverable, not permanently deleted).`)) return;
+            function deleteWorld(worldName, isActive) {
+                let confirmMsg = `Delete world "${worldName}"?\n\nIt will be moved to worlds_trash/ (recoverable, not permanently deleted).`;
+                if (isActive) {
+                    confirmMsg = `⚠️ DELETE ACTIVE WORLD "${worldName}"?\n\nThis is the world currently in use!\n\nThis will:\n1. Stop the server\n2. Move the world to worlds_trash/ (recoverable)\n3. Reset level-name to "world"\n4. A fresh world generates on next server start\n\nProceed?`;
+                    if (!confirm(confirmMsg)) return;
+                    if (prompt('Type "DELETE" to confirm deleting the active world:') !== 'DELETE') {
+                        showAlert('World deletion cancelled.', 'info');
+                        return;
+                    }
+                } else {
+                    if (!confirm(confirmMsg)) return;
+                }
                 fetch('/api/worlds/delete', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({world: worldName, confirm: true})
+                    body: JSON.stringify({world: worldName, confirm: true, force_active: !!isActive})
                 }).then(r => r.json()).then(data => {
                     if (data.success) {
                         showAlert(data.message, 'success');
                         loadWorlds();
+                        refreshStatus();
                     } else {
                         showAlert('Error: ' + data.error, 'error');
                     }

@@ -620,6 +620,59 @@ def conditional_create_mod_zip(mods_dir: Path, cfg: Optional[ServerConfig] = Non
         return result
 
 
+def build_launcher_zip_bytes(cfg: Optional[ServerConfig] = None) -> Optional[io.BytesIO]:
+    """Build the client launcher zip: README + mods/ (server+clientonly jars) + config/ + defaultconfigs/.
+
+    This is the 'drop into .minecraft' pack. Returns in-memory bytes.
+    """
+    import io
+    if cfg is None:
+        cfg = load_cfg()
+
+    mods_dir = Path(cfg.mods_dir)
+    if not mods_dir.is_absolute():
+        mods_dir = CWD / mods_dir
+    clientonly_dir = Path(cfg.clientonly_dir)
+    if not clientonly_dir.is_absolute():
+        clientonly_dir = CWD / clientonly_dir
+
+    mc_version = getattr(cfg, 'mc_version', None) or '1.21.11'
+    loader = getattr(cfg, 'loader', 'neoforge') or 'neoforge'
+
+    readme = (
+        "NeoRunner modpack\n"
+        "=================\n\n"
+        "To install:\n"
+        "  1. Open your .minecraft folder (Windows: %appdata%\\.minecraft)\n"
+        "  2. Unzip the contents of this file INTO .minecraft so that the\n"
+        "     'mods' and 'config' folders land next to 'saves'.\n"
+        "  3. Launch Minecraft with the official launcher + " + loader + "\n"
+        "  4. Join the server!\n"
+    )
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("README.txt", readme)
+
+        for d in (mods_dir, clientonly_dir):
+            if d.exists():
+                for f in sorted(d.glob("*.jar")):
+                    if f.name.endswith(".server.jar"):
+                        continue
+                    zf.write(str(f), arcname=f"mods/{f.name}")
+
+        for folder in ("config", "defaultconfigs"):
+            path = CWD / folder
+            if path.exists():
+                for f in sorted(path.rglob("*")):
+                    if f.is_file():
+                        zf.write(str(f), arcname=f"{folder}/{f.relative_to(path)}")
+
+    buf.seek(0)
+    log_event("MOD_ZIP", f"Built launcher.zip for {loader} {mc_version}")
+    return buf
+
+
 def generate_powershell_script(cfg: ServerConfig) -> str:
     """Generate PowerShell install script for Windows."""
     hostname = _get_server_hostname(cfg)

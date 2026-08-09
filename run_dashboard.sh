@@ -76,6 +76,17 @@ done
 
 sleep 2
 
+# Start the Cloudflare tunnel (mc.w8.mom -> 127.0.0.1:8005) if not already running
+CLOUDFLARED_BIN="/usr/local/bin/cloudflared"
+CF_TUNNEL_ID="4fe0dec1-db59-444d-817a-64da790b604c"
+if [ -x "$CLOUDFLARED_BIN" ] && ! pgrep -f "cloudflared tunnel" > /dev/null 2>&1; then
+    nohup "$CLOUDFLARED_BIN" tunnel --config "$HOME/.cloudflared/config.yml" run "$CF_TUNNEL_ID" \
+        >> "$LOG_DIR/cloudflared.log" 2>&1 &
+    echo "Cloudflare Tunnel started."
+else
+    echo "Cloudflare Tunnel already running or unavailable."
+fi
+
 echo "Admin dashboard:  http://localhost:8000/admin"
 echo "Public site:      http://localhost:8005 (via Cloudflare Tunnel -> mc.w8.mom)"
 echo "PIDs stored in:   $LOG_DIR/dashboard.pid, $LOG_DIR/public_site.pid"

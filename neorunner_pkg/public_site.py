@@ -118,29 +118,10 @@ def _extra_folder_entries() -> list:
 
 
 def _build_launcher_zip() -> io.BytesIO:
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        readme = (
-            "NeoRunner modpack\n"
-            "=================\n\n"
-            "To install:\n"
-            "  1. Open your .minecraft folder (Windows: %appdata%\\.minecraft)\n"
-            "  2. Unzip the contents of this file INTO .minecraft so that the\n"
-            "     'mods' and 'config' folders land next to 'saves'.\n"
-            "  3. Launch Minecraft with the official launcher + {loader}\n"
-            "  4. Join the server at {addr}\n"
-        ).format(
-            loader=_server_info()["loader_label"],
-            addr=_server_info()["server_address"],
-        )
-        zf.writestr("README.txt", readme)
-        for arcname, path in _collect_jars():
-            zf.write(path, arcname=f"mods/{arcname}")
-        for folder, path in _extra_folder_entries():
-            for f in sorted(path.rglob("*")):
-                if f.is_file():
-                    zf.write(str(f), arcname=f"{folder}/{f.relative_to(path)}")
-    buf.seek(0)
+    from .mod_hosting import build_launcher_zip_bytes
+    buf = build_launcher_zip_bytes()
+    if buf is None:
+        return io.BytesIO()
     return buf
 
 
@@ -191,6 +172,7 @@ def index():
     launcher_url = "https://mc.w8.mom/download/launcher.zip"
     cf_url = "https://mc.w8.mom/download/curseforge.zip"
     bat_url = "https://mc.w8.mom/download/install-mods.bat"
+    jar_url = "https://mc.w8.mom/download/installer.jar"
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -233,6 +215,11 @@ def index():
   </div>
 
   <div class="card">
+    <a class="btn" href="{jar_url}" style="border-color:#2ea043;">
+      <span class="arrow">↗</span>
+      <span class="t">One-click installer (recommended) — Java</span>
+      <span class="d">Downloads the {info['loader_label']} installer + all mods &amp; config. Detects your .minecraft folder automatically (Windows/Linux/macOS) and asks for confirmation.</span>
+    </a>
     <a class="btn" href="{launcher_url}">
       <span class="arrow">↗</span>
       <span class="t">The official/minecraft launcher</span>
@@ -283,6 +270,54 @@ def download_curseforge_zip():
         buf, mimetype="application/zip", as_attachment=True,
         download_name=f"neorunner-curseforge-{_server_info()['mc_version']}.zip",
     )
+
+
+@app.route("/download/installer.jar")
+def download_installer_jar():
+    """Self-contained Java installer: detects .minecraft dir, installs loader + mods."""
+    try:
+        cfg = load_cfg()
+        from .installer_jar import build_installer_jar_bytes
+        info = _server_info()
+        server_addr = info.get("server_address") or "127.0.0.1"
+        buf = build_installer_jar_bytes(
+            cfg, base_url=f"https://{PUBLIC_HOST}", server_address=server_addr,
+        )
+        return send_file(
+            buf, mimetype="application/java-archive", as_attachment=True,
+            download_name=f"neorunner-installer-{cfg.mc_version}.jar",
+        )
+    except Exception as e:
+        logger.exception("installer jar build failed")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/download/loader-installer.jar")
+def download_loader_installer():
+    """Serve the mod loader's own client installer jar (NeoForge/Forge/Fabric)."""
+    try:
+        cfg = load_cfg()
+        candidates = []
+        if cfg.loader == "neoforge":
+            lib = CWD / "libraries" / "net" / "neoforged" / "neoforge"
+            if lib.exists():
+                for v in sorted(lib.iterdir(), reverse=True):
+                    if v.is_dir():
+                        candidates.append(v / f"neoforge-{v.name}-installer.jar")
+            candidates.append(CWD / f"neoforge-{cfg.mc_version}-installer.jar")
+        elif cfg.loader == "forge":
+            candidates.append(CWD / f"forge-{cfg.mc_version}-installer.jar")
+        elif cfg.loader == "fabric":
+            candidates.append(CWD / "fabric-installer.jar")
+
+        for cand in candidates:
+            if cand.exists():
+                return send_file(str(cand), mimetype="application/java-archive",
+                                 as_attachment=True, download_name=cand.name)
+
+        return jsonify({"success": False, "error": "No loader installer jar available on server"}), 404
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route("/download/manifest")

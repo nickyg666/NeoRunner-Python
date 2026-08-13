@@ -316,7 +316,12 @@ class TestNeoForgeCrashDetection:
         assert cmd[1] == "@user_jvm_args.txt"
 
     def test_world_version_mismatch_backs_up_world(self, tmp_path):
-        """World with mismatched version gets backed up."""
+        """A stray world/version file no longer triggers a destructive regen.
+
+        World version compatibility is handled by ``auto_move_incompatible_world``
+        (which reads level.dat), not by ``_setup_server_properties``. The loader
+        must leave the world untouched.
+        """
         cfg = ServerConfig()
         cfg.mc_version = "1.21.11"
         loader = NeoForgeLoader(cfg, tmp_path)
@@ -326,8 +331,8 @@ class TestNeoForgeCrashDetection:
         (tmp_path / "world" / "version").write_text("1.20.1")
         loader._setup_server_properties()
         backups = list(tmp_path.glob("world_old_*"))
-        assert len(backups) == 1
-        assert backups[0].is_dir()
+        assert len(backups) == 0
+        assert world_dir.is_dir()  # world left in place
 
     def test_jvm_args_corrupted_dashboard(self, tmp_path):
         """Dashboard/bash content triggers regeneration."""

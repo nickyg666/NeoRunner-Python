@@ -57,6 +57,44 @@ def _make_handshake_class() -> bytes:
     return b"\xca\xfe\xba\xbe" + struct.pack(">HH", 0, 61) + cp + body
 
 
+def _make_registry_class() -> bytes:
+    """Synthetic ``NetworkRegistry`` with a ``Component.translatable`` call site.
+
+    Constant pool: key string (String -> Utf8), a ``Component`` Class, and a
+    ``translatable`` InterfaceMethodref.  The body carries ``ldc #2; iconst_1;
+    anewarray; dup; iconst_0; invokestatic #8`` — the shape the registry surgery
+    targets (``ldc <key>`` followed by ``invokestatic translatable``).
+    """
+    utf8_key = b"multiplayer.disconnect.incompatible"
+    utf8_component = b"net/minecraft/network/chat/Component"
+    utf8_translatable = b"translatable"
+    utf8_desc = b"(Ljava/lang/String;[Ljava/lang/Object;)Lnet/minecraft/network/chat/MutableComponent;"
+
+    cp = struct.pack(">H", 9)  # indices 1..8
+    cp += b"\x01" + struct.pack(">H", len(utf8_key)) + utf8_key  # 1 Utf8 key
+    cp += b"\x08" + struct.pack(">H", 1)  # 2 String -> 1
+    cp += b"\x01" + struct.pack(">H", len(utf8_component)) + utf8_component  # 3 Utf8
+    cp += b"\x07" + struct.pack(">H", 3)  # 4 Class -> 3
+    cp += b"\x01" + struct.pack(">H", len(utf8_translatable)) + utf8_translatable  # 5 Utf8
+    cp += b"\x01" + struct.pack(">H", len(utf8_desc)) + utf8_desc  # 6 Utf8
+    cp += b"\x0C" + struct.pack(">H", 5) + struct.pack(">H", 6)  # 7 NameAndType -> (5, 6)
+    cp += b"\x0B" + struct.pack(">H", 4) + struct.pack(">H", 7)  # 8 InterfaceMethodref -> (4, 7)
+
+    header = struct.pack(">HHHHHH", 0x0021, 9, 0, 0, 0, 0)
+    block = bytes(
+        [
+            0x12, 0x02,  # ldc #2 (the incompatible key)
+            0x04,  # iconst_1
+            0xBD, 0x00, 0x02,  # anewarray #2
+            0x59,  # dup
+            0x03,  # iconst_0
+            0xB8, 0x00, 0x08,  # invokestatic #8 (translatable)
+        ]
+    )
+    body = header + block + b"\x00" * 8
+    return b"\xca\xfe\xba\xbe" + struct.pack(">HH", 0, 61) + cp + body
+
+
 class TestParseAndRebuild:
     def test_roundtrip_noop(self):
         data = _fake_class_bytes()
@@ -90,10 +128,11 @@ class TestPatchJar:
     def test_patch_and_restore_real_jar(self, tmp_path, monkeypatch):
         """Patch a copy of a jar-like archive with a NetworkRegistry class."""
         jar = tmp_path / "neoforge.jar"
-        fake_class = _fake_class_bytes()
+        fake_class = _make_registry_class()
         with zipfile.ZipFile(jar, "w") as z:
             z.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n\n")
             z.writestr("net/neoforged/neoforge/network/registration/NetworkRegistry.class", fake_class)
+            z.writestr("net/neoforged/neoforge/client/network/registration/ClientNetworkRegistry.class", _fake_class_bytes())
             z.writestr("README.txt", "hello")
 
         monkeypatch.setattr(jmp, "CWD", tmp_path.parent)
@@ -120,10 +159,11 @@ class TestPatchJar:
     def test_stale_link_repatch(self, tmp_path, monkeypatch):
         """Re-patching after a hostname change restores the backup and bakes the new link."""
         jar = tmp_path / "neoforge.jar"
-        fake_class = _fake_class_bytes()
+        fake_class = _make_registry_class()
         with zipfile.ZipFile(jar, "w") as z:
             z.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n\n")
             z.writestr("net/neoforged/neoforge/network/registration/NetworkRegistry.class", fake_class)
+            z.writestr("net/neoforged/neoforge/client/network/registration/ClientNetworkRegistry.class", _fake_class_bytes())
 
         monkeypatch.setattr(jmp, "CWD", tmp_path.parent)
         monkeypatch.setattr(jmp, "_find_universal_jars", lambda loader: [jar])
@@ -148,7 +188,7 @@ class TestPatchJar:
     def test_signed_jar_strips_signatures(self, tmp_path, monkeypatch):
         """Patching a signed jar drops .SF/.RSA files and sanitizes the manifest."""
         jar = tmp_path / "signed.jar"
-        fake_class = _fake_class_bytes()
+        fake_class = _make_registry_class()
         manifest = (
             "Manifest-Version: 1.0\r\n"
             "Created-By: 1.8.0 (Oracle Corporation)\r\n"
@@ -162,6 +202,7 @@ class TestPatchJar:
             z.writestr("META-INF/NEORUNNER.SF", "Signature-Version: 1.0\r\n")
             z.writestr("META-INF/NEORUNNER.RSA", b"\x30\x82fake-signature")
             z.writestr("net/neoforged/neoforge/network/registration/NetworkRegistry.class", fake_class)
+            z.writestr("net/neoforged/neoforge/client/network/registration/ClientNetworkRegistry.class", _fake_class_bytes())
 
         monkeypatch.setattr(jmp, "CWD", tmp_path.parent)
         monkeypatch.setattr(jmp, "load_cfg", lambda: ServerConfig(hostname="mc.w8.mom"))
@@ -211,6 +252,43 @@ class TestClickableInjection:
         assert major <= 65  # Java 21 or older so it loads everywhere NeoForge runs
         assert b"textWithLink" in data
         assert b"open_url" in data or b"OpenUrl" in data
+
+    def test_registry_inject_rewrites_call_site(self):
+        data = _make_registry_class()
+        out = jmp._inject_clickable_registry(data, self.LINK)
+        assert out is not None
+        # Text-only message + separate link constant + helper reference baked in.
+        assert b"Your client does not match the server's mods. Download the modpack: " in out
+        assert self.LINK.encode() in out
+        assert b"textWithLink" in out
+        assert b"multiplayer.disconnect.incompatible" not in out
+        entries, _ = jmp._parse_cp_entries(out)
+        assert len(entries) == 16  # 8 original + 8 appended
+
+    def test_registry_inject_returns_none_when_absent(self):
+        assert jmp._inject_clickable_registry(_fake_class_bytes(), self.LINK) is None
+
+    def test_patch_jar_injects_registry_clickable(self, tmp_path, monkeypatch):
+        """Patching a universal jar rewrites NetworkRegistry (helper stays cross-module)."""
+        jar = tmp_path / "neoforge-26.1.2.87-universal.jar"
+        with zipfile.ZipFile(jar, "w") as z:
+            z.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n\n")
+            z.writestr("net/neoforged/neoforge/network/registration/NetworkRegistry.class", _make_registry_class())
+
+        monkeypatch.setattr(jmp, "load_cfg", lambda: ServerConfig(hostname="mc.w8.mom"))
+        monkeypatch.setattr(jmp, "_download_link", lambda cfg: self.LINK)
+
+        assert jmp._patch_jar(jar, "neoforge") is True
+        assert jmp._jar_registry_clickable(jar) is True
+        with zipfile.ZipFile(jar) as z:
+            names = z.namelist()
+            # Helper class is NOT injected into the universal jar (split-package
+            # protection); NetworkRegistry references it cross-module.
+            assert "neorunner_client/ClickableMessage.class" not in names
+            data = z.read("net/neoforged/neoforge/network/registration/NetworkRegistry.class")
+        assert b"textWithLink" in data
+        # Idempotent: second patch reports no change.
+        assert jmp._patch_jar(jar, "neoforge") is False
 
     def test_patch_jar_injects_clickable(self, tmp_path, monkeypatch):
         """Patching a server-patched jar injects the helper and rewrites the call."""

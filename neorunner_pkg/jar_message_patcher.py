@@ -34,6 +34,10 @@ CLICKABLE_TEXT = "Your client does not match the server's mods. Download the mod
 # The class whose bytecode is rewritten to call the clickable-link helper.
 SERVER_HANDSHAKE_CLASS = "net/minecraft/server/network/ServerHandshakePacketListenerImpl.class"
 
+# The NeoForge class that disconnects a client whose *mods* don't match the
+# server (a mod channel-list mismatch), sent during the configuration phase.
+NETWORK_REGISTRY_CLASS = "net/neoforged/neoforge/network/registration/NetworkRegistry.class"
+
 # Translation keys / fallback strings that loaders send on a mod mismatch.
 # The ``key -> message`` entries replace the constant used as the component key.
 # The ``fallback -> message`` entries replace the raw fallback string sent via
@@ -419,6 +423,160 @@ def _inject_clickable(data: bytes, link: str, text: str = CLICKABLE_TEXT) -> byt
     return header + body
 
 
+def _find_translatable_methodref(entries: list) -> int | None:
+    """Return the constant-pool index of ``Component.translatable(String,Object[])``.
+
+    Scans NameAndType entries for ``translatable`` with the two-arg descriptor,
+    then locates the Methodref that references it.
+    """
+    nat_index = None
+    for i, (tag, info) in enumerate(entries):
+        if tag != 12:  # NameAndType
+            continue
+        name_idx, desc_idx = struct.unpack(">H", info[:2])[0], struct.unpack(">H", info[2:4])[0]
+        t_name, v_name = entries[name_idx - 1]
+        t_desc, v_desc = entries[desc_idx - 1]
+        if (
+            t_name == 1
+            and v_name == b"translatable"
+            and t_desc == 1
+            and v_desc.startswith(b"(Ljava/lang/String;[Ljava/lang/Object;)L")
+        ):
+            nat_index = i + 1
+            break
+    if nat_index is None:
+        return None
+    for i, (tag, info) in enumerate(entries):
+        if tag in (10, 11) and struct.unpack(">H", info[2:4])[0] == nat_index:
+            return i + 1
+    return None
+
+
+def _clickable_constant_pool(entries: list, text: str, link: str, key: bytes) -> tuple[list, int, int]:
+    """Rebuild a constant pool for a clickable-link call site.
+
+    Rewrites ``key`` to ``text`` (text-only, no URL) and appends the constants
+    needed to call ``ClickableMessage.textWithLink(String, String)`` plus the
+    URL string. Returns ``(out_entries, url_str_idx, mref_idx)``.
+    """
+    old_count = len(entries) + 1
+    cls_name_idx = old_count + 0
+    class_idx = old_count + 1
+    mname_idx = old_count + 2
+    desc_idx = old_count + 3
+    nat_idx = old_count + 4
+    mref_idx = old_count + 5
+    url_utf8_idx = old_count + 6
+    url_str_idx = old_count + 7
+
+    text_utf8 = text.encode("utf-8")
+    link_utf8 = link.encode("utf-8")
+
+    new_entries = [
+        (1, b"neorunner_client/ClickableMessage"),
+        (7, struct.pack(">H", cls_name_idx)),
+        (1, b"textWithLink"),
+        (1, b"(Ljava/lang/String;Ljava/lang/String;)Lnet/minecraft/network/chat/MutableComponent;"),
+        (12, struct.pack(">H", mname_idx) + struct.pack(">H", desc_idx)),
+        (10, struct.pack(">H", class_idx) + struct.pack(">H", nat_idx)),
+        (1, link_utf8),
+        (8, struct.pack(">H", url_utf8_idx)),
+    ]
+
+    out_entries = []
+    for tag, info in entries:
+        if tag == 1 and info == key:
+            info = text_utf8
+        out_entries.append((tag, info))
+    out_entries.extend(new_entries)
+    return out_entries, url_str_idx, mref_idx
+
+
+def _inject_clickable_registry(data: bytes, link: str, text: str = CLICKABLE_TEXT) -> bytes | None:
+    """Rewrite ``NetworkRegistry`` mod-mismatch disconnects to be clickable.
+
+    ``NetworkRegistry`` has several ``Component.translatable(key, args)`` call
+    sites (the mod channel-list negotiation failure plus the four "received a
+    modded payload" rejections).  Each loads ``multiplayer.disconnect.incompatible``
+    via ``ldc``/``ldc_w`` then builds the argument array and calls
+    ``Component.translatable``.  This finds every such site and rewrites the
+    block to ``ClickableMessage.textWithLink(text, url)``, preserving offsets
+    with NOP padding.
+
+    Returns the new class bytes, or ``None`` if no site was found (already
+    patched or an unexpected layout).
+    """
+    entries, body_start = _parse_cp_entries(data)
+    body = data[body_start:]
+    key = b"multiplayer.disconnect.incompatible"
+
+    translatable_idx = _find_translatable_methodref(entries)
+    if translatable_idx is None:
+        return None
+
+    # Find every `ldc/ldc_w <key>` followed (straight-line) by `invokestatic
+    # translatable_idx`.  The argument building in between uses getVersion()/
+    # String.formatted(), neither of which is the translatable call.
+    sites: list[tuple[int, int, int]] = []
+    i = 0
+    while i < len(body):
+        op = body[i]
+        if op == 0x12 and i + 2 <= len(body):  # ldc
+            operand = body[i + 1]
+            start = i
+            nxt = i + 2
+        elif op == 0x13 and i + 3 <= len(body):  # ldc_w
+            operand = struct.unpack(">H", body[i + 1 : i + 3])[0]
+            start = i
+            nxt = i + 3
+        else:
+            i += 1
+            continue
+        s = _cp_resolve_string(entries, operand)
+        if s is None or s.encode("utf-8") != key:
+            i = nxt
+            continue
+        end = None
+        j = nxt
+        limit = min(len(body) - 2, nxt + 256)
+        while j < limit:
+            if body[j] == 0xB8 and struct.unpack(">H", body[j + 1 : j + 3])[0] == translatable_idx:
+                end = j + 3
+                break
+            j += 1
+        if end is None:
+            i = nxt
+            continue
+        sites.append((start, end, operand))
+        i = end
+    if not sites:
+        return None
+
+    out_entries, url_str_idx, mref_idx = _clickable_constant_pool(entries, text, link, key)
+    cp_bytes = bytearray()
+    for tag, info in out_entries:
+        cp_bytes += _encode_cp_entry(tag, info)
+    new_cp_count = len(out_entries) + 1
+    header = data[:8] + struct.pack(">H", new_cp_count) + bytes(cp_bytes)
+
+    new_body = bytearray(body)
+    for start, end, operand in sites:
+        block = bytearray()
+        if operand <= 0xFF:
+            block += b"\x12" + bytes([operand])  # ldc text
+        else:
+            block += b"\x13" + struct.pack(">H", operand)  # ldc_w text
+        block += b"\x13" + struct.pack(">H", url_str_idx)  # ldc_w url
+        block += b"\xB8" + struct.pack(">H", mref_idx)  # invokestatic textWithLink
+        width = end - start
+        if len(block) > width:
+            raise ValueError("clickable replacement exceeds original block")
+        block += b"\x00" * (width - len(block))
+        new_body[start:end] = bytes(block)
+
+    return header + bytes(new_body)
+
+
 _URL_RE = None
 
 
@@ -464,6 +622,23 @@ def _jar_is_clickable(jar: Path) -> bool:
         return False
 
 
+def _jar_registry_clickable(jar: Path) -> bool:
+    """True if the jar's NetworkRegistry class calls the clickable-link helper.
+
+    The helper class itself lives in the server-patched jar (cross-module), so
+    only the ``textWithLink`` reference in NetworkRegistry is checked here.
+    """
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(jar) as z:
+            if NETWORK_REGISTRY_CLASS not in z.namelist():
+                return False
+            return b"textWithLink" in z.read(NETWORK_REGISTRY_CLASS)
+    except Exception:
+        return False
+
+
 def _patch_jar(jar: Path, loader: str) -> bool:
     """Patch a single universal jar in place. Returns True if anything changed."""
     import tempfile
@@ -475,18 +650,23 @@ def _patch_jar(jar: Path, loader: str) -> bool:
     # NeoForge's ``minecraft-server-patched`` jar sends the vanilla
     # ``multiplayer.disconnect.incompatible`` key from
     # ``ServerHandshakePacketListenerImpl``; we make its URL clickable there.
+    # The ``universal`` jar's ``NetworkRegistry`` sends the *mod-mismatch*
+    # variant of the same message and gets the same clickable treatment.
     with zipfile.ZipFile(jar, "r") as zin:
         names = zin.namelist()
         is_server_patched = SERVER_HANDSHAKE_CLASS in names
+        is_registry = NETWORK_REGISTRY_CLASS in names
     do_clickable = loader == "neoforge" and is_server_patched
+    do_registry = loader == "neoforge" and is_registry
 
     # Restore the pristine backup before re-patching if the jar already carries
     # a *different* link (hostname changed), or if it was string-patched before
     # the clickable feature existed and still needs the clickable upgrade.
     baked = _baked_link(jar)
-    clickable = _jar_is_clickable(jar)
+    clickable = _jar_is_clickable(jar) if do_clickable else True
+    registry_clickable = _jar_registry_clickable(jar) if do_registry else True
     stale = baked is not None and (
-        baked != link or (do_clickable and not clickable)
+        baked != link or (do_clickable and not clickable) or (do_registry and not registry_clickable)
     )
     if stale and backup.exists():
         shutil.copy2(backup, jar)
@@ -513,6 +693,13 @@ def _patch_jar(jar: Path, loader: str) -> bool:
             strip_jar_signatures(names, manifest_bytes) if signed else (names, manifest_bytes)
         )
         has_clickable = CLICKABLE_CLASS_NAME in names
+        # The ClickableMessage helper class lives in the *server-patched* jar
+        # (the "minecraft" JPMS module). NetworkRegistry, in the universal
+        # "neoforge" module, references it cross-module (neoforge requires +
+        # minecraft exports the package), so the helper must NOT also be
+        # injected into the universal jar -- Java rejects split packages.
+        hosts_helper = do_clickable
+        did_clickable = False
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
             for name in names:
@@ -520,24 +707,30 @@ def _patch_jar(jar: Path, loader: str) -> bool:
                     continue
                 data = zin.read(name)
                 out_data = None
+                did_surgery = False
                 if do_clickable and name == SERVER_HANDSHAKE_CLASS:
                     # Clickable-link bytecode surgery rewrites the same
                     # ``multiplayer.disconnect.incompatible`` key to the
                     # text-only message (plus a separate URL constant), so it
                     # must run on the pristine bytes, not the string-patched ones.
                     out_data = _inject_clickable(data, link)
-                else:
-                    # String replacement (loader keys -> modpack message).
-                    if any(k in data for k in mapping):
-                        patched = _parse_and_rebuild(data, mapping)
-                        if patched != data:
-                            out_data = patched
+                    did_surgery = out_data is not None
+                if out_data is None and do_registry and name == NETWORK_REGISTRY_CLASS:
+                    out_data = _inject_clickable_registry(data, link)
+                    did_surgery = out_data is not None
+                if out_data is None and any(k in data for k in mapping):
+                    # String replacement fallback (loader keys -> modpack message).
+                    patched = _parse_and_rebuild(data, mapping)
+                    if patched != data:
+                        out_data = patched
                 if out_data is not None:
                     out = tmp / name
                     out.parent.mkdir(parents=True, exist_ok=True)
                     out.write_bytes(out_data)
                     changed = True
-            if do_clickable and not has_clickable:
+                    if did_surgery:
+                        did_clickable = True
+            if hosts_helper and did_clickable and not has_clickable:
                 out = tmp / CLICKABLE_CLASS_NAME
                 out.parent.mkdir(parents=True, exist_ok=True)
                 out.write_bytes(clickable_message_class())
@@ -555,7 +748,7 @@ def _patch_jar(jar: Path, loader: str) -> bool:
                         zout.writestr(name, patched_path.read_bytes())
                     else:
                         zout.writestr(name, zin.read(name))
-                if do_clickable and not has_clickable:
+                if hosts_helper and did_clickable and not has_clickable:
                     zout.writestr(CLICKABLE_CLASS_NAME, clickable_message_class())
     shutil.move(str(jar) + ".tmp", jar)
     return changed
@@ -619,6 +812,7 @@ def loader_is_patched(loader: str | None = None) -> bool:
 
     has_string_marker = False
     clickable_ok = True
+    registry_ok = True
     for jar in jars:
         try:
             with zipfile.ZipFile(jar) as z:
@@ -629,6 +823,8 @@ def loader_is_patched(loader: str | None = None) -> bool:
                     if not _jar_is_clickable(jar):
                         clickable_ok = False
                     continue
+                if NETWORK_REGISTRY_CLASS in names and not _jar_registry_clickable(jar):
+                    registry_ok = False
                 for name in names:
                     if not name.endswith(".class"):
                         continue
@@ -638,7 +834,7 @@ def loader_is_patched(loader: str | None = None) -> bool:
         except Exception as e:
             log_event("WARN", f"Could not inspect {jar.name}: {e}")
             continue
-    return has_string_marker and clickable_ok
+    return has_string_marker and clickable_ok and registry_ok
 
 
 __all__ = [

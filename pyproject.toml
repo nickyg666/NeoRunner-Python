@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "neorunner"
-version = "2.4.0"
+version = "2.4.1"
 description = "Production-grade Minecraft server management with dashboard"
 authors = [{name = "NeoRunner Team"}]
 license = {text = "MIT"}

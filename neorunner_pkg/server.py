@@ -50,8 +50,9 @@ def _add_event(event_type: str, message: str) -> None:
 class TmuxServer:
     """Minecraft server running in tmux with full output capture."""
     
-    def __init__(self, cfg: ServerConfig):
+    def __init__(self, cfg: ServerConfig, run_preflight: bool = True):
         self.cfg = cfg
+        self.run_preflight = run_preflight
         self.loader = get_loader(cfg)
         self.tmux_session = "MC"
         self.tmux_socket = f"/tmp/tmux-{os.getuid()}/default"
@@ -128,7 +129,7 @@ class TmuxServer:
         except Exception:
             pass
         
-        if not skip_preflight:
+        if self.run_preflight and not skip_preflight:
             try:
                 log_event("DEBUG", "Starting preflight_dep_check...")
                 preflight_result = preflight_dep_check({
@@ -460,7 +461,7 @@ class TmuxServer:
                         from .constants import FORCE_CLIENT_ONLY_MODS
                         dep_lower = dep_name.lower()
                         target_dir = clientonly_dir if any(cm in dep_lower for cm in FORCE_CLIENT_ONLY_MODS) else mods_dir
-                        fetched = _fetch_dependency(
+                        fetched = self.run_preflight and _fetch_dependency(
                             dep_id=dep_name,
                             mc_version=self.cfg.mc_version,
                             loader_name=self.cfg.loader,
@@ -659,12 +660,14 @@ def wait_for_server(timeout: int = 60) -> bool:
     return False
 
 
-def run_server(cfg: ServerConfig | None = None, max_retries: int = 3) -> bool:
+def run_server(cfg: ServerConfig | None = None, max_retries: int = 3, run_preflight: bool = True) -> bool:
     """Start the Minecraft server.
     
     Args:
         cfg: Server configuration (optional, will load from config)
         max_retries: Maximum restart attempts
+        run_preflight: Run the dependency preflight (defaults True; the CLI
+            passes ``not args.no_preflight`` here).
         
     Returns:
         True if started successfully
@@ -674,7 +677,7 @@ def run_server(cfg: ServerConfig | None = None, max_retries: int = 3) -> bool:
     if cfg is None:
         cfg = load_cfg()
     
-    _server_instance = TmuxServer(cfg)
+    _server_instance = TmuxServer(cfg, run_preflight=run_preflight)
     for attempt in range(max_retries + 1):
         if _server_instance.start():
             return True

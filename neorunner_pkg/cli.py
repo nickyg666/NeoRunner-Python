@@ -275,7 +275,7 @@ def cmd_start(args):
                 preflight_thread.start()
             
             print("Starting Minecraft server...")
-            server_started = run_server(cfg)
+            server_started = run_server(cfg, run_preflight=not args.no_preflight)
             
             if not server_started:
                 print("Failed to start Minecraft server!")

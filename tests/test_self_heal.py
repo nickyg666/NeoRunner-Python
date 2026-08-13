@@ -81,3 +81,57 @@ class TestSelfHeal:
             
             assert history["mod1"] == 5
             assert history["mod2"] == 2
+
+
+class TestDependencyVerification:
+    """Post-fetch verification quarantines mods with missing required deps."""
+
+    def _make_mod_jar(self, path: Path, mod_id: str, required: list[str] | None = None) -> Path:
+        import zipfile
+        jar = path / f"{mod_id}-1.0.0.jar"
+        with zipfile.ZipFile(jar, "w") as z:
+            z.writestr("META-INF/neoforge.mods.toml", _build_toml(mod_id, required or []))
+        return jar
+
+    def test_required_deps_of(self, tmp_path):
+        from neorunner_pkg.self_heal import _required_deps_of
+        jar = self._make_mod_jar(tmp_path, "moda", ["dep1", "dep2"])
+        assert _required_deps_of(jar) == {"dep1", "dep2"}
+
+    def test_required_deps_of_ignores_optional(self, tmp_path):
+        from neorunner_pkg.self_heal import _required_deps_of
+        jar = tmp_path / "modb-1.0.0.jar"
+        import zipfile
+        toml = _build_toml("modb", ["dep1"]) + '[[dependencies.modb]]\nmodId="optdep"\ntype="optional"\nversionRange="[1.0,)"\n'
+        with zipfile.ZipFile(jar, "w") as z:
+            z.writestr("META-INF/neoforge.mods.toml", toml)
+        assert _required_deps_of(jar) == {"dep1"}
+
+    def test_quarantine_unsatisfiable(self, tmp_path, monkeypatch):
+        from neorunner_pkg.self_heal import preflight_dep_check
+        mods_dir = tmp_path / "mods"
+        clientonly_dir = tmp_path / "clientonly"
+        mods_dir.mkdir()
+        clientonly_dir.mkdir()
+        # moda requires dep1 which is missing -> should be quarantined.
+        self._make_mod_jar(mods_dir, "moda", ["dep1"])
+
+        monkeypatch.setattr("neorunner_pkg.self_heal.CWD", tmp_path)
+        monkeypatch.setattr("neorunner_pkg.self_heal._fetch_dependency", lambda *a, **k: False)
+        cfg = {"mc_version": "1.21.11", "loader": "neoforge", "mods_dir": "mods", "clientonly_dir": "clientonly"}
+        preflight_dep_check(cfg)
+
+        assert (mods_dir / "quarantine" / "moda-1.0.0.jar").exists()
+
+
+def _build_toml(mod_id: str, required: list[str]) -> str:
+    """Build a valid neoforge.mods.toml declaring the given required deps."""
+    lines = ["[[mods]]", f'modId="{mod_id}"', 'version="1.0.0"', 'displayName="Test"']
+    if required:
+        for r in required:
+            lines.append("")
+            lines.append(f"[[dependencies.{mod_id}]]")
+            lines.append(f'modId="{r}"')
+            lines.append('type="required"')
+            lines.append('versionRange="[1.0,)"')
+    return "\n".join(lines) + "\n"

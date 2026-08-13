@@ -161,6 +161,76 @@ def _cf_rate_limit() -> None:
     time.sleep(random.uniform(1.0, 2.5))
 
 
+def _collect_installed_mod_ids(scan_dirs: list[Path]) -> dict[str, str]:
+    """Return ``{mod_id: filename}`` for every mod jar under the given dirs."""
+    mod_ids: dict[str, str] = {}
+    for d in scan_dirs:
+        if not d.exists():
+            continue
+        for fn in d.glob("*.jar"):
+            try:
+                with zipfile.ZipFile(fn, "r") as zf:
+                    names = zf.namelist()
+                    if "META-INF/neoforge.mods.toml" in names or "META-INF/mods.toml" in names:
+                        toml_file = "META-INF/neoforge.mods.toml" if "META-INF/neoforge.mods.toml" in names else "META-INF/mods.toml"
+                        try:
+                            import tomllib
+                        except ImportError:
+                            import tomli as tomllib
+                        data = tomllib.loads(zf.read(toml_file).decode("utf-8", "replace"))
+                        for e in data.get("mods", []):
+                            mid = e.get("modId", "").lower()
+                            if mid:
+                                mod_ids[mid] = fn.name
+                    elif "fabric.mod.json" in names:
+                        data = json.loads(zf.read("fabric.mod.json").decode("utf-8", "replace"))
+                        mid = data.get("id", "").lower()
+                        if mid:
+                            mod_ids[mid] = fn.name
+            except Exception:
+                continue
+    return mod_ids
+
+
+def _required_deps_of(fn: Path) -> set[str]:
+    """Return the non-builtin *required* dependency mod IDs declared by a jar."""
+    req: set[str] = set()
+    try:
+        with zipfile.ZipFile(fn, "r") as zf:
+            names = zf.namelist()
+            toml_file = None
+            if "META-INF/neoforge.mods.toml" in names:
+                toml_file = "META-INF/neoforge.mods.toml"
+            elif "META-INF/mods.toml" in names:
+                toml_file = "META-INF/mods.toml"
+            if toml_file:
+                try:
+                    import tomllib
+                except ImportError:
+                    import tomli as tomllib
+                data = tomllib.loads(zf.read(toml_file).decode("utf-8", "replace"))
+                for dep_list in data.get("dependencies", {}).values():
+                    if not isinstance(dep_list, list):
+                        continue
+                    for dep in dep_list:
+                        if not isinstance(dep, dict):
+                            continue
+                        if dep.get("type", "required").lower() != "required":
+                            continue
+                        dep_id = dep.get("modId", "").lower()
+                        if dep_id and dep_id not in BUILTIN_MODS:
+                            req.add(dep_id)
+            elif "fabric.mod.json" in names:
+                data = json.loads(zf.read("fabric.mod.json").decode("utf-8", "replace"))
+                for dep_id in data.get("depends", {}):
+                    dep_l = dep_id.lower()
+                    if dep_l not in BUILTIN_MODS:
+                        req.add(dep_l)
+    except Exception:
+        pass
+    return req
+
+
 def preflight_dep_check(cfg: dict[str, Any]) -> dict[str, Any]:
     """Proactive pre-flight: scan all installed mod JARs for required dependencies,
     check if they're installed, and auto-fetch missing ones via ferium.
@@ -521,7 +591,17 @@ def preflight_dep_check(cfg: dict[str, Any]) -> dict[str, Any]:
             fetched = _fetch_dependency(dep_id, mc_version, loader_name, mods_dir, dependents=dependent_mods)
             if fetched:
                 result["fetched"] += 1
-    
+
+    # Verify no installed mod has an unsatisfiable *required* dependency. A
+    # fetched mod may itself depend on something that could not be fetched;
+    # leaving it in mods/ would crash the server on every boot. Quarantine it.
+    installed = _collect_installed_mod_ids([mods_dir, clientonly_dir])
+    for fn in list(mods_dir.glob("*.jar")):
+        missing = sorted(_required_deps_of(fn) - set(installed))
+        if missing:
+            quarantine_mod(mods_dir, fn.name, f"Missing required deps: {', '.join(missing)}")
+            result["quarantined"].append(fn.name)
+
     # Return missing deps for debugging
     result["missing_required"] = list(missing_required.keys())
     result["missing_optional"] = list(missing_optional.keys())

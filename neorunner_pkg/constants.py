@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 
+
 # All paths relative to the installation directory
 # Try: NEORUNNER_DIR env, then find dir with config.json, then CWD, then package dir
 def _find_cwd():
@@ -17,6 +18,10 @@ def _find_cwd():
     return Path.cwd()
 
 CWD = _find_cwd()
+
+# Default PID file written by the daemon so subcommands (e.g. ``neorunner users``)
+# can signal it to reload after a change.
+PID_FILE = CWD / ".neorunner.pid"
 
 MOD_LOADERS = ["neoforge", "forge", "fabric"]
 

@@ -1,17 +1,15 @@
 """Tests for log management."""
 
-import pytest
-import sys
 import os
+import sys
 import tempfile
 import time
 from pathlib import Path
-from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from neorunner_pkg.log_manager import LogManager
 from neorunner_pkg.config import ServerConfig
+from neorunner_pkg.log_manager import LogManager
 
 
 class TestLogManager:

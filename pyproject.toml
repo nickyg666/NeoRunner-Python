@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "neorunner"
-version = "2.3.1"
+version = "2.4.0"
 description = "Production-grade Minecraft server management with dashboard"
 authors = [{name = "NeoRunner Team"}]
 license = {text = "MIT"}
@@ -50,4 +50,22 @@ neorunner_pkg = [
     "templates/*.html",
     "client_installer/*.java",
     "static/*",
+]
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+# The following rules are intentionally disabled:
+# - BLE001: catch-all `except Exception` handlers are used throughout as a
+#   deliberate defensive pattern in this daemon (a crashed background task or
+#   failed network call must never take down the whole service).
+# - S110/S112: bare `try: ... except: pass/continue` follows the same principle
+#   (best-effort cleanup/logging that must never fail startup or loops).
+# These patterns were reviewed during the 2026 ruff cleanup; they are
+# functional intent, not accidental.
+ignore = [
+    "BLE001",
+    "S110",
+    "S112",
 ]

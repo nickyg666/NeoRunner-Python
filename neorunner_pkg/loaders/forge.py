@@ -1,15 +1,14 @@
 """Forge modloader implementation."""
 
-#
 
 import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
-from . import LoaderBase, _get_cfg_value
 from ..log import log_event
+from . import LoaderBase, _get_cfg_value
 
 
 class ForgeLoader(LoaderBase):
@@ -33,7 +32,7 @@ class ForgeLoader(LoaderBase):
             with open(jvm_file, 'r') as f:
                 content = f.read()
             if 'echo ' in content or 'Dashboard' in content or '#!/bin/bash' in content:
-                log_event("WARN", f"user_jvm_args.txt corrupted (contains bash code), regenerating...")
+                log_event("WARN", "user_jvm_args.txt corrupted (contains bash code), regenerating...")
                 return False
             lines = [l.strip() for l in content.strip().split('\n') if l.strip()]
             if not lines or not lines[0].startswith('-Xm'):
@@ -93,10 +92,9 @@ class ForgeLoader(LoaderBase):
                 with open(props_file, 'r') as f:
                     for line in f:
                         line = line.strip()
-                        if line and not line.startswith('#'):
-                            if '=' in line:
-                                k, v = line.split('=', 1)
-                                existing[k] = v
+                        if line and not line.startswith('#') and '=' in line:
+                            k, v = line.split('=', 1)
+                            existing[k] = v
             except Exception:
                 pass
             properties.update(existing)
@@ -112,7 +110,7 @@ class ForgeLoader(LoaderBase):
             with open(eula_file, 'w') as f:
                 f.write("eula=true\n")
     
-    def build_java_command(self) -> List[str]:
+    def build_java_command(self) -> list[str]:
         """Build Forge launch command."""
         # Run installer --install to set up files
         log_event("LOADER_FORGE", "Running installer to extract files...")
@@ -120,7 +118,7 @@ class ForgeLoader(LoaderBase):
         
         try:
             subprocess.run(
-                ["java", "-jar", str(jar_file), "--install", "."],
+                ["java", "-jar", str(jar_file), "--install", "."], check=False,
                 capture_output=True,
                 timeout=180,
                 cwd=str(self.cwd)
@@ -136,7 +134,7 @@ class ForgeLoader(LoaderBase):
         ]
         return java_cmd
     
-    def detect_crash_reason(self, log_output: str) -> Dict[str, Any]:
+    def detect_crash_reason(self, log_output: str) -> dict[str, Any]:
         """Parse Forge crash logs."""
         log_text = log_output.lower() if isinstance(log_output, str) else ""
         MOD_ID = r'[\w.\-]+'

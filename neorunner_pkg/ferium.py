@@ -3,15 +3,11 @@ Ferium Manager - Handles mod downloads, profile setup, and scheduler integration
 Manages Modrinth and CurseForge mod updates with automatic scheduling.
 """
 
-#
 
-import os
-import json
-import subprocess
 import logging
+import subprocess
 from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
+from typing import Any
 
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
@@ -20,7 +16,7 @@ try:
 except ImportError:
     APSCHEDULER_AVAILABLE = False
 
-from .config import ServerConfig, load_cfg
+from .config import ServerConfig
 from .constants import CWD
 from .log import log_event
 
@@ -30,18 +26,18 @@ log = logging.getLogger(__name__)
 class FeriumManager:
     """Manages ferium mod manager integration."""
     
-    def __init__(self, cwd: Optional[Path] = None, ferium_bin: Optional[str] = None):
+    def __init__(self, cwd: Path | None = None, ferium_bin: str | None = None):
         self.cwd = cwd or CWD
         self.ferium_bin = ferium_bin or str(self.cwd / ".local" / "bin" / "ferium")
         self.ferium_config_dir = Path.home() / ".config" / "ferium"
         self.ferium_config_file = self.ferium_config_dir / "config.json"
-        self.scheduler: Optional[Any] = None
+        self.scheduler: Any | None = None
         
-    def ferium_cmd(self, *args) -> Dict[str, Any]:
+    def ferium_cmd(self, *args) -> dict[str, Any]:
         """Run ferium command and return result."""
         cmd = [self.ferium_bin] + list(args)
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            result = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=300)
             return {
                 "success": result.returncode == 0,
                 "stdout": result.stdout,
@@ -114,7 +110,7 @@ class FeriumManager:
             log.error(f"[FERIUM] Upgrade failed: {result.get('stderr', 'Unknown error')}")
             return False
     
-    def list_mods(self) -> Optional[str]:
+    def list_mods(self) -> str | None:
         """List all mods in current profile."""
         result = self.ferium_cmd("list", "-v")
         if result["success"]:
@@ -214,7 +210,6 @@ class FeriumManager:
         """Scheduled task: Update CurseForge mods."""
         log_event("FERIUM_TASK", "Running CurseForge update...")
         # Placeholder - actual CurseForge scraping handled elsewhere
-        pass
     
     def weekly_strict_update(self):
         """Scheduled task: Weekly update with strict version compatibility."""
@@ -229,7 +224,7 @@ class FeriumManager:
             log_event("FERIUM_TASK", f"Weekly strict update failed: {e}")
 
 
-def setup_ferium_wizard(config: ServerConfig, cwd: Optional[Path] = None) -> ServerConfig:
+def setup_ferium_wizard(config: ServerConfig, cwd: Path | None = None) -> ServerConfig:
     """Run ferium setup wizard during initial configuration."""
     if cwd is None:
         cwd = CWD
@@ -248,7 +243,7 @@ def setup_ferium_wizard(config: ServerConfig, cwd: Optional[Path] = None) -> Ser
     loader = config.loader
     mods_dir = cwd / config.mods_dir
     
-    print(f"\nSetting up ferium with:")
+    print("\nSetting up ferium with:")
     print(f"  Profile: {profile_name}")
     print(f"  MC Version: {mc_version}")
     print(f"  Loader: {loader}")

@@ -4,24 +4,19 @@ This module provides functionality to search and download mods from CurseForge
 when the official API is not available (Cloudflare protection).
 """
 
-#
 
-import os
+import logging
+import random
 import re
 import time
-import random
-import logging
 from pathlib import Path
-from typing import Optional, Dict, Any, List
-
-from .constants import CWD
+from typing import Any
 
 log = logging.getLogger(__name__)
 
 PLAYWRIGHT_AVAILABLE = False
 try:
     from playwright.sync_api import sync_playwright
-    from playwright._impl._api_types import TimeoutError as PlaywrightTimeout
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     pass
@@ -76,7 +71,7 @@ def _cf_rate_limit() -> None:
     _last_cf_request_time = time.time()
 
 
-def _get_cf_headers() -> Dict[str, str]:
+def _get_cf_headers() -> dict[str, str]:
     """Get randomized headers for CurseForge requests."""
     return {
         "User-Agent": random.choice(CF_USER_AGENTS),
@@ -254,7 +249,7 @@ def search_curseforge(
 
 
 def _download_from_curseforge(
-    mod_info: Dict[str, Any],
+    mod_info: dict[str, Any],
     mods_dir: Path,
     mc_version: str,
     loader: str,
@@ -292,7 +287,7 @@ def get_mod_info_by_id_or_slug(
     mod_id_or_slug: str,
     mc_version: str,
     loader_name: str,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Resolve a mod ID or slug to CurseForge mod info.
     
     Args:
@@ -459,7 +454,7 @@ def get_mod_relationships(
     mod_slug: str,
     mc_version: str,
     loader_name: str,
-) -> Dict[str, List[Dict[str, Any]]]:
+) -> dict[str, list[dict[str, Any]]]:
     """Get all relationships (dependencies, dependents, interop) for a mod.
     
     Args:
@@ -549,7 +544,7 @@ def get_mod_relationships(
     return result
 
 
-def _scrape_relationship_cards(page, relationship_type: str) -> List[Dict[str, Any]]:
+def _scrape_relationship_cards(page, relationship_type: str) -> list[dict[str, Any]]:
     """Scrape relationship cards from the relationships page.
     
     Args:
@@ -611,13 +606,13 @@ def _scrape_relationship_cards(page, relationship_type: str) -> List[Dict[str, A
 
 
 def fetch_full_dependency_tree(
-    initial_mods: List[str],
+    initial_mods: list[str],
     mc_version: str,
     loader_name: str,
-    visited: Optional[set] = None,
+    visited: set | None = None,
     depth: int = 0,
     max_depth: int = 10,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Fetch the full dependency tree for a list of mods.
     
     Recursively resolves all dependencies (and their dependencies) to build
@@ -646,11 +641,11 @@ def fetch_full_dependency_tree(
         log.warning(f"Max dependency depth ({max_depth}) reached")
         return {"all_mods": {}, "required": [], "optional": [], "interops": [], "dependents": {}}
     
-    all_mods: Dict[str, Dict[str, Any]] = {}
-    required: List[str] = []
-    optional: List[str] = []
-    interops: List[str] = []
-    dependents: Dict[str, List[str]] = {}
+    all_mods: dict[str, dict[str, Any]] = {}
+    required: list[str] = []
+    optional: list[str] = []
+    interops: list[str] = []
+    dependents: dict[str, list[str]] = {}
     
     mods_to_process = list(initial_mods)
     
@@ -724,7 +719,7 @@ def search_curseforge_playwright(
     mc_version: str,
     loader_name: str,
     limit: int = 10,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Search CurseForge using Playwright (for when HTTP fails with 403).
     
     Args:
@@ -742,7 +737,7 @@ def search_curseforge_playwright(
     _cf_rate_limit()
     
     loader_id = CF_LOADER_IDS.get(loader_name.lower(), 6)
-    dep_norm = re.sub(r'[^a-z0-9]', '', query.lower())
+    re.sub(r'[^a-z0-9]', '', query.lower())
     
     ua = random.choice(CF_USER_AGENTS)
     viewport = random.choice(CF_VIEWPORTS)
@@ -841,11 +836,11 @@ def search_curseforge_playwright(
 
 
 __all__ = [
-    "search_curseforge",
-    "search_curseforge_playwright",
-    "is_available",
     "PLAYWRIGHT_AVAILABLE",
+    "fetch_full_dependency_tree",
     "get_mod_info_by_id_or_slug",
     "get_mod_relationships",
-    "fetch_full_dependency_tree",
+    "is_available",
+    "search_curseforge",
+    "search_curseforge_playwright",
 ]

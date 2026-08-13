@@ -1,12 +1,13 @@
 """Configuration management for NeoRunner."""
 
 from __future__ import annotations
+
 import json
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .constants import CWD, PARALLEL_PORTS, MOD_LOADERS
+from .constants import CWD, MOD_LOADERS, PARALLEL_PORTS
 
 
 def _get_default_version() -> str:
@@ -63,6 +64,14 @@ class ServerConfig:
     live_log_max_size_mb: int = 10
     live_log_backup_count: int = 5
     version_check_interval_hours: int = 24  # How often to check for version updates
+    max_restart_attempts: int = 25
+    max_crashes_before_quarantine: int = 3
+    # World upload / conversion
+    chunker_jar: str = ""  # Path to chunker-cli.jar (empty = tools/chunker-cli.jar)
+    world_upload_dir: str = "world_uploads"  # Staging dir for pending world uploads
+    world_upload_max_total_mb: int = 102400  # Hard cap on total size of a single upload
+    world_upload_max_files: int = 200000  # Hard cap on file count of a single upload
+    world_staging_retention_hours: int = 24  # Age after which stale uploads are purged
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ServerConfig:
@@ -134,7 +143,7 @@ def _validate_memory(val: str, default: str) -> str:
     val_str = str(val)
     if "echo" in val_str.lower() or "dashboard" in val_str.lower() or "http" in val_str.lower():
         return default
-    if not (val_str.endswith("G") or val_str.endswith("M")):
+    if not (val_str.endswith(("G", "M"))):
         return default
     return val_str
 
@@ -266,6 +275,14 @@ def ensure_config(cfg: ServerConfig) -> ServerConfig:
         crash_report_retention_days=cfg.crash_report_retention_days or 30,
         live_log_max_size_mb=cfg.live_log_max_size_mb or 10,
         live_log_backup_count=cfg.live_log_backup_count or 5,
+        max_restart_attempts=cfg.max_restart_attempts or 25,
+        max_crashes_before_quarantine=cfg.max_crashes_before_quarantine or 3,
+        chunker_jar=cfg.chunker_jar or "",
+        world_upload_dir=cfg.world_upload_dir or "world_uploads",
+        world_upload_max_total_mb=cfg.world_upload_max_total_mb or 102400,
+        world_upload_max_files=cfg.world_upload_max_files or 200000,
+        world_staging_retention_hours=cfg.world_staging_retention_hours or 24,
     )
     
     return result
+

@@ -3,27 +3,35 @@ Web dashboard for NeoRunner using Flask.
 Provides server management, mod management, world management, and configuration UI.
 """
 
-#
 
-import os
 import json
 import logging
+import os
+import re
 import subprocess
 import sys
 import threading
 import time
 from dataclasses import asdict
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional, Dict, Any, List
-from functools import wraps
+from typing import Any
 
-from flask import Flask, render_template, jsonify, request, send_file, Response, redirect, url_for
+from flask import (
+    Flask,
+    Response,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    url_for,
+)
 
 from .config import ServerConfig, load_cfg, save_cfg
 from .constants import CWD
 from .log import log_event
-from .version import get_latest_minecraft_version, get_all_minecraft_versions
+from .version import get_latest_minecraft_version
 
 # Setup logging
 log = logging.getLogger(__name__)
@@ -35,27 +43,55 @@ app = Flask(__name__, template_folder=str(template_dir), static_folder=str(stati
 DASHBOARD_PORT = None
 app.secret_key = os.urandom(24)
 
-# Basic auth for the admin dashboard (client download routes stay open).
+# Admin auth: checked against the user store (.neorunner-users.json), falling
+# back to env bootstrap credentials only when no users exist yet. Download and
+# other client-facing routes are public by default — only the admin UI and the
+# /api/* control surface require authentication.
 ADMIN_USER = os.environ.get("NEORUNNER_ADMIN_USER", "mc")
 ADMIN_PASS = os.environ.get("NEORUNNER_ADMIN_PASS", "123")
-AUTH_EXEMPT_PREFIXES = ("/download/", "/static/", "/favicon.ico", "/socket.io")
+
+# Paths that ALWAYS require auth (admin surface). Everything else is public
+# unless it starts with /api/ (see require_basic_auth).
+AUTH_REQUIRED_PREFIXES = ("/admin",)
+AUTH_PUBLIC_PREFIXES = ("/download", "/static/", "/favicon.ico", "/socket.io")
 
 
 def _check_auth(user: str, password: str) -> bool:
-    """Return True if the supplied credentials are valid."""
+    """Return True if the supplied credentials are valid.
+
+    Prefers the persisted user store; falls back to env bootstrap credentials
+    only when no users have been provisioned yet (first run before setup).
+    """
+    from .users import has_users, verify_credentials
+    if has_users():
+        return verify_credentials(user, password)
     return user == ADMIN_USER and password == ADMIN_PASS
+
+
+def _requires_auth(path: str) -> bool:
+    """True when a request path must be authenticated.
+
+    Protected: the admin dashboard UI (/ and /admin), the setup wizard, and the
+    entire /api/* control surface. Public: /download/*, static assets, favicon,
+    and websocket handshakes (so the installer JAR + download scripts stay open).
+    """
+    if any(path.startswith(p) for p in AUTH_PUBLIC_PREFIXES):
+        return False
+    if path.startswith("/api/"):
+        return True
+    return path in ("/", "/admin", "/admin/") or path.startswith("/admin/")
 
 
 @app.before_request
 def require_basic_auth():
-    """Protect the admin dashboard with HTTP Basic Auth.
+    """Gate the admin dashboard and API with HTTP Basic Auth.
 
-    Client-facing routes (/download/*, websocket, static assets) are kept
-    open so the installer JAR and download scripts keep working unauthenticated.
+    Client-facing routes (/download/*, websocket, static assets) are public so
+    the installer JAR and download scripts keep working unauthenticated.
     """
     if request.method == "OPTIONS":
         return None
-    if any(request.path.startswith(prefix) or request.path == prefix for prefix in AUTH_EXEMPT_PREFIXES):
+    if not _requires_auth(request.path):
         return None
     auth = request.authorization
     if not auth or not _check_auth(auth.username, auth.password):
@@ -70,11 +106,9 @@ def require_basic_auth():
 class DashboardState:
     """Shared state for dashboard."""
     def __init__(self):
-        self.server_process: Optional[Any] = None
-        self.last_zip_creation: Optional[float] = None
-        self.client_mod_status: Dict[str, Any] = {}
-        self.download_threads: List[threading.Thread] = []
-        self.events: List[Dict[str, Any]] = []
+        self.last_zip_creation: float | None = None
+        self.client_mod_status: dict[str, Any] = {}
+        self.events: list[dict[str, Any]] = []
         self.max_events = 200
         
     def add_event(self, event_type: str, message: str):
@@ -82,7 +116,7 @@ class DashboardState:
         self.events.append({
             "type": event_type,
             "message": message,
-            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "time": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
         })
         # Trim to max
         while len(self.events) > self.max_events:
@@ -98,7 +132,7 @@ def get_config_path() -> Path:
     return CWD / "config.json"
 
 
-def parse_server_properties() -> Dict[str, str]:
+def parse_server_properties() -> dict[str, str]:
     """Parse server.properties file."""
     props = {}
     props_path = CWD / "server.properties"
@@ -111,7 +145,7 @@ def parse_server_properties() -> Dict[str, str]:
     return props
 
 
-def write_server_properties(props: Dict[str, str]) -> None:
+def write_server_properties(props: dict[str, str]) -> None:
     """Write server.properties, preserving existing keys and updating values."""
     props_path = CWD / "server.properties"
     updates = dict(props)
@@ -139,7 +173,7 @@ def write_server_properties(props: Dict[str, str]) -> None:
                 f.write(f"{k}={v}\n")
 
 
-def scan_worlds() -> List[Dict[str, Any]]:
+def scan_worlds() -> list[dict[str, Any]]:
     """Scan for world folders (folders containing level.dat)."""
     cfg = load_cfg()
     server_mc_version = cfg.mc_version
@@ -161,7 +195,7 @@ def scan_worlds() -> List[Dict[str, Any]]:
                             version_info = get_world_version(str(level_dat))
                             world_version = version_info.get("version")
                             compatible = world_version == server_mc_version if world_version else True
-                        except:
+                        except Exception:
                             version_info = {}
                             world_version = None
                             compatible = True
@@ -172,7 +206,7 @@ def scan_worlds() -> List[Dict[str, Any]]:
                             for f in filenames:
                                 try:
                                     size += os.path.getsize(os.path.join(dirpath, f))
-                                except:
+                                except Exception:
                                     pass
                         
                         worlds.append({
@@ -184,7 +218,7 @@ def scan_worlds() -> List[Dict[str, Any]]:
                             "mc_version": world_version,
                             "compatible": compatible
                         })
-                    except Exception as e:
+                    except Exception:
                         worlds.append({
                             "name": entry,
                             "path": str(entry_path),
@@ -219,7 +253,7 @@ def switch_world(world_name: str, force: bool = False) -> tuple[bool, str]:
             world_version = version_info.get("version")
             if world_version and world_version != server_mc_version:
                 return False, f"Version mismatch: world is MC {world_version}, server is MC {server_mc_version}"
-        except:
+        except Exception:
             pass
     
     lines = []
@@ -242,7 +276,7 @@ def switch_world(world_name: str, force: bool = False) -> tuple[bool, str]:
     return True, f"World switched to '{world_name}'. Restart server to apply."
 
 
-def get_server_status() -> Dict[str, Any]:
+def get_server_status() -> dict[str, Any]:
     """Get server status (running, player count, etc)."""
     import subprocess
     
@@ -253,7 +287,7 @@ def get_server_status() -> Dict[str, Any]:
     uid = os.getuid()
     tmux_socket = f"/tmp/tmux-{uid}/default"
     result = subprocess.run(
-        f"tmux -S {tmux_socket} list-sessions 2>/dev/null | grep -c MC",
+        f"tmux -S {tmux_socket} list-sessions 2>/dev/null | grep -c MC", check=False,
         shell=True, capture_output=True, text=True
     )
     running = result.stdout.strip() == "1"
@@ -261,7 +295,7 @@ def get_server_status() -> Dict[str, Any]:
     # Also check for java process as backup
     if not running:
         ps_result = subprocess.run(
-            ["ps", "aux"],
+            ["ps", "aux"], check=False,
             capture_output=True,
             text=True,
         )
@@ -287,7 +321,7 @@ def get_server_status() -> Dict[str, Any]:
                 preflight_status = f"OK ({int(age/60)}m ago)"
             else:
                 preflight_status = f"Stale ({int(age/3600)}h ago)"
-        except:
+        except Exception:
             preflight_status = "Unknown"
     
     # Get world info
@@ -302,9 +336,9 @@ def get_server_status() -> Dict[str, Any]:
                 from .nbt_parser import get_world_version
                 version_info = get_world_version(str(level_dat))
                 world_version = version_info.get("version", "unknown")
-            except:
+            except Exception:
                 world_version = "unknown"
-    except:
+    except Exception:
         pass
     
     # Try to get player list from RCON
@@ -312,14 +346,14 @@ def get_server_status() -> Dict[str, Any]:
     if running and cfg.rcon_pass:
         try:
             rcon_result = subprocess.run(
-                f"echo 'list' | nc -w 1 localhost {cfg.rcon_port} 2>/dev/null",
+                f"echo 'list' | nc -w 1 localhost {cfg.rcon_port} 2>/dev/null", check=False,
                 shell=True, capture_output=True, text=True
             )
             if rcon_result.returncode == 0:
                 players_text = rcon_result.stdout
                 if "player" in players_text.lower():
                     players = players_text.split("\n")
-        except:
+        except Exception:
             pass
     
     # Get mod count
@@ -359,23 +393,23 @@ def get_uptime() -> str:
     import subprocess
     try:
         result = subprocess.run(
-            "ps aux | grep '[m]inecraft.*nogui' | awk '{print $2}'",
+            "ps aux | grep '[m]inecraft.*nogui' | awk '{print $2}'", check=False,
             shell=True, capture_output=True, text=True
         )
         if result.returncode == 0 and result.stdout.strip():
             pid = result.stdout.strip()
             result = subprocess.run(
-                f"ps -o etime= -p {pid}",
+                f"ps -o etime= -p {pid}", check=False,
                 shell=True, capture_output=True, text=True
             )
             if result.returncode == 0:
                 return result.stdout.strip()
-    except:
+    except Exception:
         pass
     return "unknown"
 
 
-def get_mod_list() -> List[Dict[str, Any]]:
+def get_mod_list() -> list[dict[str, Any]]:
     """Get list of installed mods."""
     cfg = load_cfg()
     mods_dir = CWD / cfg.mods_dir
@@ -393,16 +427,16 @@ def get_mod_list() -> List[Dict[str, Any]]:
                         "size_mb": round(size / (1024*1024), 2),
                         "path": filename
                     })
-                except:
+                except Exception:
                     pass
     
     return sorted(mods, key=lambda x: x["name"])
 
 
-def get_client_mods() -> List[Dict[str, Any]]:
+def get_client_mods() -> list[dict[str, Any]]:
     """Get list of client-side mods from clientonly folder."""
     cfg = load_cfg()
-    mods_dir = CWD / cfg.mods_dir
+    CWD / cfg.mods_dir
     clientonly_dir = Path(cfg.clientonly_dir)
     if not clientonly_dir.is_absolute():
         clientonly_dir = CWD / clientonly_dir
@@ -420,7 +454,7 @@ def get_client_mods() -> List[Dict[str, Any]]:
                         "size": f"{round(size / (1024*1024), 2)} MB",
                         "type": "client"
                     })
-                except:
+                except Exception:
                     pass
     
     return mods
@@ -444,6 +478,19 @@ def dashboard():
     if app.config.get('FIRST_START', False) or not (CWD / "server.properties").exists():
         return render_template("setup_wizard.html")
     return render_template("dashboard.html")
+
+
+@app.route("/download")
+@app.route("/download/")
+def download_landing():
+    """Public download landing page (the classic choices page).
+
+    Served without auth so players can grab the modpack. Renders the same
+    options page the public_site app used to serve (installer JAR, launcher
+    zip, CurseForge zip, install script).
+    """
+    from .public_site import index as public_index
+    return public_index()
 
 
 @app.route("/api/status")
@@ -479,22 +526,76 @@ def api_config_update():
         data = request.json
         cfg = load_cfg()
         
-        # Update allowed fields
+        # Update allowed fields (all settings exposed in the dashboard UI)
         allowed_fields = [
             "ferium_update_interval_hours",
             "ferium_weekly_update_day",
             "ferium_weekly_update_hour",
             "rcon_port",
+            "rcon_host",
             "http_port",
+            "mc_port",
             "mc_version",
             "loader",
             "mods_dir",
+            "clientonly_dir",
+            "quarantine_dir",
+            "hostname",
+            "curator_sort",
+            "curator_limit",
+            "curator_max_depth",
+            "curator_show_optional_audit",
             "broadcast_enabled",
+            "broadcast_auto_on_install",
+            "nag_show_mod_list_on_join",
+            "nag_first_visit_modal",
+            "motd_show_download_url",
+            "xmx",
+            "xms",
+            "view_distance",
+            "simulation_distance",
+            "max_tick_time",
+            "max_download_mb",
+            "rate_limit_seconds",
+            "run_curator_on_startup",
+            "install_script_types",
+            "log_retention_days",
+            "crash_report_retention_days",
+            "live_log_max_size_mb",
+            "live_log_backup_count",
+            "max_restart_attempts",
+            "max_crashes_before_quarantine",
         ]
-        
+
+        int_fields = {
+            "ferium_update_interval_hours", "ferium_weekly_update_hour", "curator_limit",
+            "max_download_mb", "rate_limit_seconds", "log_retention_days",
+            "crash_report_retention_days", "live_log_max_size_mb", "live_log_backup_count",
+            "max_restart_attempts", "max_crashes_before_quarantine",
+        }
+        bool_fields = {
+            "curator_show_optional_audit", "broadcast_enabled", "broadcast_auto_on_install",
+            "nag_show_mod_list_on_join", "nag_first_visit_modal", "motd_show_download_url",
+            "run_curator_on_startup",
+        }
+
         for field in allowed_fields:
-            if field in data:
-                setattr(cfg, field, data[field])
+            if field not in data:
+                continue
+            value = data[field]
+            if field in int_fields:
+                try:
+                    value = int(value)
+                except (TypeError, ValueError):
+                    continue
+            elif field in bool_fields:
+                value = bool(value)
+            elif field in ("http_port", "mc_port"):
+                try:
+                    value = int(value)
+                except (TypeError, ValueError):
+                    continue
+            setattr(cfg, field, value)
         
         save_cfg(cfg)
         log_event("CONFIG_UPDATE", f"Updated: {list(data.keys())}")
@@ -645,7 +746,7 @@ def api_upload_mod():
 MODPACK_UPLOAD_DIR = CWD / "modpacks"
 
 
-def _modpack_list() -> List[Dict[str, Any]]:
+def _modpack_list() -> list[dict[str, Any]]:
     """List uploaded modpack zips with metadata."""
     MODPACK_UPLOAD_DIR.mkdir(exist_ok=True)
     packs = []
@@ -653,7 +754,7 @@ def _modpack_list() -> List[Dict[str, Any]]:
         packs.append({
             "filename": f.name,
             "size": f.stat().st_size,
-            "mtime": datetime.fromtimestamp(f.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+            "mtime": datetime.fromtimestamp(f.stat().st_mtime, tz=UTC).strftime("%Y-%m-%d %H:%M:%S"),
         })
     return packs
 
@@ -777,7 +878,7 @@ def api_delete_modpack():
 def api_server_start():
     """Start server."""
     try:
-        from .server import run_server, is_server_running
+        from .server import is_server_running, run_server
         
         if is_server_running():
             return jsonify({"success": False, "error": "Server is already running"}), 400
@@ -796,7 +897,7 @@ def api_server_start():
 def api_server_stop():
     """Stop server."""
     try:
-        from .server import stop_server, is_server_running
+        from .server import is_server_running, stop_server
         
         if not is_server_running():
             return jsonify({"success": False, "error": "Server is not running"}), 400
@@ -814,7 +915,7 @@ def api_server_stop():
 def api_server_restart():
     """Restart server."""
     try:
-        from .server import restart_server, is_server_running
+        from .server import is_server_running, restart_server
         
         if not is_server_running():
             return jsonify({"success": False, "error": "Server is not running"}), 400
@@ -832,7 +933,7 @@ def api_server_restart():
 def api_server_status():
     """Get server status."""
     try:
-        from .server import is_server_running, get_server, get_events
+        from .server import get_server, is_server_running
         
         running = is_server_running()
         server = get_server()
@@ -851,7 +952,7 @@ def api_server_status():
 def api_server_send():
     """Send command to server."""
     try:
-        from .server import send_command, is_server_running
+        from .server import is_server_running, send_command
         
         if not is_server_running():
             return jsonify({"success": False, "error": "Server is not running"}), 400
@@ -870,16 +971,93 @@ def api_server_send():
         return jsonify({"success": False, "error": str(e)}), 400
 
 
+@app.route("/api/system/stats")
+def api_system_stats():
+    """Return host system stats: CPU, RAM, and disk usage."""
+    try:
+        import os
+        import shutil
+
+        # Disk usage of the server working directory.
+        disk = shutil.disk_usage(str(CWD))
+        total_gb = disk.total / (1024 ** 3)
+        used_gb = disk.used / (1024 ** 3)
+        free_gb = disk.free / (1024 ** 3)
+        disk_pct = round((disk.used / disk.total) * 100, 1) if disk.total else 0
+
+        # RAM via /proc/meminfo (Linux) or os.sysconf.
+        mem_total = mem_used = mem_free = 0
+        try:
+            with open("/proc/meminfo") as f:
+                info = {}
+                for line in f:
+                    parts = line.split(":")
+                    if len(parts) == 2:
+                        info[parts[0].strip()] = int(parts[1].strip().split()[0]) * 1024
+            mem_total = info.get("MemTotal", 0)
+            mem_free = info.get("MemAvailable", info.get("MemFree", 0))
+            mem_used = max(0, mem_total - mem_free)
+        except Exception:
+            mem_total = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+            mem_used = mem_total - (os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE"))
+            mem_free = mem_total - mem_used
+        mem_pct = round((mem_used / mem_total) * 100, 1) if mem_total else 0
+
+        # Load average.
+        load = []
+        try:
+            with open("/proc/loadavg") as f:
+                load = f.read().split()[:3]
+        except Exception:
+            pass
+
+        # Per-process memory of the java server if running.
+        java_mb = 0
+        try:
+            import subprocess as sp
+            out = sp.run(
+                ["ps", "-o", "rss=", "-C", "java"],
+                capture_output=True, text=True, timeout=10, check=False,
+            )
+            java_mb = sum(int(line.strip()) for line in out.stdout.splitlines() if line.strip()) // 1024
+        except Exception:
+            pass
+
+        return jsonify({
+            "success": True,
+            "cpu": {
+                "load_1m": load[0] if load else None,
+                "load_5m": load[1] if len(load) > 1 else None,
+                "load_15m": load[2] if len(load) > 2 else None,
+            },
+            "memory": {
+                "total_gb": round(mem_total / (1024 ** 3), 1),
+                "used_gb": round(mem_used / (1024 ** 3), 1),
+                "free_gb": round(mem_free / (1024 ** 3), 1),
+                "percent": mem_pct,
+                "java_mb": java_mb,
+            },
+            "disk": {
+                "total_gb": round(total_gb, 1),
+                "used_gb": round(used_gb, 1),
+                "free_gb": round(free_gb, 1),
+                "percent": disk_pct,
+            },
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
 @app.route("/api/mods/upgrade", methods=["POST"])
 def api_upgrade_mods():
     """Upgrade all mods via ferium."""
     try:
-        cfg = load_cfg()
+        load_cfg()
         ferium_bin = CWD / ".local" / "bin" / "ferium"
         
         import subprocess
         result = subprocess.run(
-            [str(ferium_bin), "upgrade"],
+            [str(ferium_bin), "upgrade"], check=False,
             capture_output=True, text=True, timeout=300
         )
         
@@ -906,7 +1084,7 @@ def api_logs():
             with open(log_file) as f:
                 all_lines = f.readlines()
                 logs = all_lines[-lines_param:]
-        except:
+        except Exception:
             pass
     
     return jsonify({"logs": logs})
@@ -932,27 +1110,22 @@ def logs_stream():
         yield "data: <connected>\n\n"
         
         # Track position for efficient reading
-        f = open(log_file, 'r', encoding='utf-8', errors='ignore')
-        f.seek(0, 2)  # Start at end
-        
-        while True:
-            try:
-                line = f.readline()
-                if not line:
-                    time.sleep(0.5)
+        with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+            f.seek(0, 2)  # Start at end
+
+            while True:
+                try:
+                    line = f.readline()
+                    if not line:
+                        time.sleep(0.5)
+                        continue
+                    # SSE format: "data: <content>\n\n"
+                    yield f"data: {line}"
+                except GeneratorExit:
+                    break
+                except Exception:
+                    time.sleep(1)
                     continue
-                # SSE format: "data: <content>\n\n"
-                yield f"data: {line}"
-            except GeneratorExit:
-                break
-            except Exception:
-                time.sleep(1)
-                continue
-        
-        try:
-            f.close()
-        except Exception:
-            pass
     
     return Response(generate(), mimetype='text/event-stream')
 
@@ -1009,7 +1182,7 @@ def api_download_mod(mod_name):
 @app.route("/api/mod-lists")
 def api_mod_lists():
     """Return curated mod lists from cache, with installed status for each mod."""
-    from .mods import curate_mod_list, parse_mod_manifest
+    from .mods import parse_mod_manifest
     
     cfg = load_cfg()
     loader = cfg.loader
@@ -1047,50 +1220,6 @@ def api_mod_lists():
     return jsonify({"error": "No cached mod lists. Run curator first."}), 404
 
 
-@app.route("/api/install-mods", methods=["POST"])
-def api_install_mods():
-    """Install selected mods from curated list."""
-    try:
-        data = request.json
-        selected = data.get("selected", [])
-        if not selected:
-            return jsonify({"success": False, "error": "No mods selected"}), 400
-        
-        cfg = load_cfg()
-        mods_dir = CWD / cfg.mods_dir
-        mods_dir.mkdir(exist_ok=True)
-        
-        from .mod_browser import ModInstaller
-        installer = ModInstaller(cfg)
-        
-        installed = []
-        failed = []
-        
-        for mod in selected:
-            mod_id = mod.get("id") or mod.get("project_id")
-            source = mod.get("source", "modrinth")
-            
-            success, msg = installer.install_mod(mod_id, source)
-            if success:
-                installed.append(mod.get("name", mod_id))
-            else:
-                failed.append(mod.get("name", mod_id))
-        
-        log_event("MOD_INSTALL", f"Installed {len(installed)} mods, {len(failed)} failed")
-        
-        if installed:
-            from .mod_hosting import conditional_create_mod_zip
-            threading.Thread(target=conditional_create_mod_zip, args=(mods_dir,), daemon=True).start()
-        
-        return jsonify({
-            "success": len(failed) == 0,
-            "installed": installed,
-            "failed": failed
-        })
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 400
-
-
 @app.route("/download/install-mods.bat")
 def download_install_bat():
     """Download Batch install script for client mods."""
@@ -1102,22 +1231,6 @@ def download_install_bat():
             script,
             mimetype="text/plain",
             headers={"Content-Disposition": "attachment; filename=install-mods.bat"}
-        )
-    except Exception as e:
-        return f"Error generating script: {e}", 500
-
-
-@app.route("/download/install")
-def download_install():
-    """Download PowerShell install script (for curl | iex)."""
-    try:
-        from .mod_hosting import generate_powershell_script
-        cfg = load_cfg()
-        script = generate_powershell_script(cfg)
-        return Response(
-            script,
-            mimetype="text/plain",
-            headers={"Content-Disposition": "attachment; filename=install-mods.ps1"}
         )
     except Exception as e:
         return f"Error generating script: {e}", 500
@@ -1145,8 +1258,8 @@ def download_curl():
 def download_manifest():
     """Download mod manifest JSON."""
     try:
+
         from .mod_hosting import update_manifest
-        from pathlib import Path
         cfg = load_cfg()
         mods_dir = CWD / cfg.mods_dir
         update_manifest(mods_dir)
@@ -1232,7 +1345,10 @@ def download_installer_jar():
         return Response(
             buf.getvalue(),
             mimetype="application/java-archive",
-            headers={"Content-Disposition": f"attachment; filename=neorunner-installer-{cfg.mc_version}.jar"}
+            headers={
+                "Content-Disposition": f"attachment; filename=neorunner-installer-{cfg.mc_version}.jar",
+                "Cache-Control": "no-store, no-cache, must-revalidate",
+            },
         )
     except Exception as e:
         return f"Error building installer jar: {e}", 500
@@ -1242,28 +1358,18 @@ def download_installer_jar():
 def download_loader_installer():
     """Serve the mod loader's client installer jar."""
     try:
-        from pathlib import Path
         cfg = load_cfg()
-        candidates = []
-        if cfg.loader == "neoforge":
-            lib = CWD / "libraries" / "net" / "neoforged" / "neoforge"
-            if lib.exists():
-                for v in sorted(lib.iterdir(), reverse=True):
-                    if v.is_dir():
-                        candidates.append(v / f"neoforge-{v.name}-installer.jar")
-            candidates.append(CWD / f"neoforge-{cfg.mc_version}-installer.jar")
-        elif cfg.loader == "forge":
-            candidates.append(CWD / f"forge-{cfg.mc_version}-installer.jar")
-        elif cfg.loader == "fabric":
-            candidates.append(CWD / "fabric-installer.jar")
-
-        for cand in candidates:
-            if cand.exists():
-                return Response(
-                    cand.read_bytes(),
-                    mimetype="application/java-archive",
-                    headers={"Content-Disposition": f"attachment; filename={cand.name}"}
-                )
+        from .mod_hosting import _loader_installer_path
+        cand = _loader_installer_path(cfg)
+        if cand is not None and cand.exists():
+            return Response(
+                cand.read_bytes(),
+                mimetype="application/java-archive",
+                headers={
+                    "Content-Disposition": f"attachment; filename={cand.name}",
+                    "Cache-Control": "no-store, no-cache, must-revalidate",
+                },
+            )
         return "No loader installer jar available on server", 404
     except Exception as e:
         return f"Error: {e}", 500
@@ -1334,13 +1440,13 @@ def api_worlds_backup():
         backup_dir = CWD / "backups"
         backup_dir.mkdir(exist_ok=True)
         
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         backup_name = f"{world_name}_{timestamp}.tar.gz"
         backup_path = backup_dir / backup_name
         
         import subprocess
         result = subprocess.run(
-            ["tar", "-czf", str(backup_path), "-C", str(CWD), world_name],
+            ["tar", "-czf", str(backup_path), "-C", str(CWD), world_name], check=False,
             capture_output=True, text=True
         )
         
@@ -1413,40 +1519,29 @@ def api_worlds_delete():
 def api_worlds_archives():
     """List archived/trashed worlds (version-specific holding areas)."""
     try:
-        archived = []
-        for root_name in ("worlds_archive", "worlds_trash"):
-            root = CWD / root_name
-            if not root.exists():
-                continue
-            if root_name == "worlds_archive":
-                for version_dir in sorted(root.iterdir()):
-                    if not version_dir.is_dir():
-                        continue
-                    for world_dir in sorted(version_dir.iterdir()):
-                        if world_dir.is_dir():
-                            archived.append({
-                                "name": world_dir.name,
-                                "location": root_name,
-                                "mc_version": version_dir.name.replace("mc-", ""),
-                                "path": str(world_dir)
-                            })
-            else:
-                for world_dir in sorted(root.iterdir()):
-                    if world_dir.is_dir():
-                        archived.append({
-                            "name": world_dir.name,
-                            "location": root_name,
-                            "mc_version": None,
-                            "path": str(world_dir)
-                        })
-        return jsonify({"archived": archived})
+        from .world_upload import list_archived_worlds
+        archived = list_archived_worlds()
+        trash = CWD / "worlds_trash"
+        if trash.is_dir():
+            for world_dir in sorted(trash.iterdir()):
+                if world_dir.is_dir():
+                    archived.append({
+                        "name": world_dir.name,
+                        "location": "worlds_trash",
+                        "mc_version": None,
+                        "loader": None,
+                        "kind": "folder",
+                        "compressed": False,
+                        "path": str(world_dir),
+                    })
+        return jsonify({"archived": sorted(archived, key=lambda a: a.get("mc_version") or "")})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 400
 
 
 @app.route("/api/worlds/restore", methods=["POST"])
 def api_worlds_restore():
-    """Restore an archived/trashed world back to the main directory."""
+    """Restore an archived (folder or tar.gz) / trashed world to the main dir."""
     try:
         data = request.json
         world_name = data.get("world", "")
@@ -1454,24 +1549,18 @@ def api_worlds_restore():
         if not world_name:
             return jsonify({"success": False, "error": "No world name provided"}), 400
 
-        import shutil
-        root = CWD / location
-        if not root.exists():
-            return jsonify({"success": False, "error": "Archive location not found"}), 404
-
         if location == "worlds_archive":
-            src = None
-            for version_dir in root.iterdir():
-                candidate = version_dir / world_name
-                if candidate.exists() and candidate.is_dir():
-                    src = candidate
-                    break
-            if src is None:
-                return jsonify({"success": False, "error": "Archived world not found"}), 404
-        else:
-            src = root / world_name
-            if not src.exists():
-                return jsonify({"success": False, "error": "Trashed world not found"}), 404
+            from .world_upload import restore_archived_world
+            ok, msg = restore_archived_world(world_name, cwd=CWD)
+            if not ok:
+                return jsonify({"success": False, "error": msg}), 404
+            log_event("WORLD_RESTORE", f"Restored world '{world_name}' from archives")
+            return jsonify({"success": True, "message": msg})
+
+        import shutil
+        src = CWD / location / world_name
+        if not src.exists():
+            return jsonify({"success": False, "error": "Trashed world not found"}), 404
 
         dest = CWD / world_name
         if dest.exists():
@@ -1479,6 +1568,221 @@ def api_worlds_restore():
         shutil.move(str(src), str(dest))
         log_event("WORLD_RESTORE", f"Restored world '{world_name}' from {location}")
         return jsonify({"success": True, "message": f"World '{world_name}' restored to main folder"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+@app.route("/api/worlds/archive-load", methods=["POST"])
+def api_worlds_archive_load():
+    """Restore an archived (compressed) world and activate it as level-name."""
+    try:
+        data = request.json
+        world_name = data.get("world", "")
+        mc_version = data.get("mc_version")
+        if not world_name:
+            return jsonify({"success": False, "error": "No world name provided"}), 400
+
+        from .world_upload import load_archived_world
+        ok, msg = load_archived_world(world_name, mc_version=mc_version, cwd=CWD)
+        if not ok:
+            return jsonify({"success": False, "error": msg}), 400
+        return jsonify({"success": True, "message": msg})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+@app.route("/api/worlds/conversion-formats")
+def api_world_conversion_formats():
+    """List Java output formats the installed Chunker CLI supports."""
+    try:
+        from .chunker import get_chunker_jar, java_formats
+        jar = get_chunker_jar()
+        if not jar.exists():
+            return jsonify({"success": False, "error": "Chunker CLI not installed - run 'neorunner setup' to install it"}), 400
+        formats = java_formats(jar)
+        return jsonify({"success": True, "formats": formats})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+@app.route("/api/worlds/upload/create", methods=["POST"])
+def api_world_upload_create():
+    """Create a staging slot for a world upload."""
+    try:
+        from .world_upload import create_staging
+        result = create_staging()
+        return jsonify({"success": True, **result})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+@app.route("/api/worlds/upload/file", methods=["POST"])
+def api_world_upload_file():
+    """Upload a single file into a staging slot (path is relative to the world root)."""
+    try:
+        token = request.form.get("token", "")
+        rel_path = request.form.get("path", "")
+        if not token or not rel_path:
+            return jsonify({"success": False, "error": "Missing token or path"}), 400
+        upload = request.files.get("file")
+        if upload is None:
+            return jsonify({"success": False, "error": "No file part in request"}), 400
+
+        from .world_upload import stage_file
+        data = upload.read()
+        result = stage_file(token, rel_path, data)
+        return jsonify({"success": True, **result})
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+@app.route("/api/worlds/upload/analyze", methods=["POST"])
+def api_world_upload_analyze():
+    """Validate and analyze a staged world upload before acceptance."""
+    try:
+        data = request.json
+        token = data.get("token", "")
+        if not token:
+            return jsonify({"success": False, "error": "No upload token"}), 400
+
+        cfg = load_cfg()
+        from .world_upload import analyze_upload
+        analysis = analyze_upload(token, server_mc_version=cfg.mc_version)
+        analysis["success"] = analysis.get("valid", False)
+        if not analysis.get("valid"):
+            analysis["error"] = "; ".join(analysis.get("errors", [])) or "Not a valid Minecraft world"
+        return jsonify(analysis)
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+@app.route("/api/worlds/upload/confirm", methods=["POST"])
+def api_world_upload_confirm():
+    """Compress an accepted, analyzed upload into its versioned archive slot."""
+    try:
+        data = request.json
+        token = data.get("token", "")
+        name = data.get("name", "")
+        loader = data.get("loader") or load_cfg().loader
+        if not token or not name:
+            return jsonify({"success": False, "error": "Missing token or world name"}), 400
+
+        from .world_upload import accept_upload
+        result = accept_upload(token, name, loader=loader)
+        return jsonify({"success": True, **result})
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+@app.route("/api/worlds/upload/cancel", methods=["POST"])
+def api_world_upload_cancel():
+    """Discard a pending world upload and clean its staging slot."""
+    try:
+        data = request.json
+        token = data.get("token", "")
+        if not token:
+            return jsonify({"success": False, "error": "No upload token"}), 400
+        from .world_upload import abort_upload
+        abort_upload(token)
+        return jsonify({"success": True, "message": "Upload discarded"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+@app.route("/api/worlds/upload/archive", methods=["POST"])
+def api_world_upload_archive():
+    """Upload a zipped/tar'ed world (.zip/.mcworld/.tar/.tar.gz), extract it
+    into a staging slot and return the analysis in one step."""
+    try:
+        token = request.form.get("token", "")
+        upload = request.files.get("file")
+        if not token:
+            return jsonify({"success": False, "error": "Missing upload token"}), 400
+        if upload is None:
+            return jsonify({"success": False, "error": "No file in request"}), 400
+        if not upload.filename.lower().endswith((".zip", ".mcworld", ".tar", ".tar.gz")):
+            return jsonify({"success": False, "error": "Only .zip/.mcworld/.tar/.tar.gz world archives allowed"}), 400
+
+        filename = Path(upload.filename).name
+        from .world_upload import extract_archive_upload, stage_file
+        stage_file(token, f"_upload_{filename}", upload.read())
+        try:
+            extract_archive_upload(token)
+        except ValueError:
+            from .world_upload import abort_upload
+            abort_upload(token)
+            return jsonify({"success": False, "error": "Uploaded archive does not contain a Minecraft world"}), 400
+
+        cfg = load_cfg()
+        from .world_upload import analyze_upload
+        analysis = analyze_upload(token, server_mc_version=cfg.mc_version)
+        analysis["success"] = analysis.get("valid", False)
+        return jsonify({"success": analysis.get("valid", False), "title": filename, **analysis})
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+@app.route("/api/worlds/convert", methods=["POST"])
+def api_world_convert():
+    """Convert a staged world to a target Java version via Chunker.
+
+    Converts Bedrock worlds to Java Edition (or up/down-grades a Java world),
+    replacing the staged upload with the converted Java world so it can be
+    re-analyzed and accepted.
+    """
+    try:
+        data = request.json
+        token = data.get("token", "")
+        target_format = str(data.get("target_format", "")).upper()
+        if not token:
+            return jsonify({"success": False, "error": "No upload token"}), 400
+        if not re.fullmatch(r"JAVA_\d[\d_]*", target_format):
+            return jsonify({"success": False, "error": f"Invalid conversion format: {target_format}"}), 400
+
+        from .chunker import convert_world
+        from .world_upload import find_world_root, resolve_staging
+
+        stage = resolve_staging(token)
+        world_root = find_world_root(stage)
+        if world_root is None:
+            return jsonify({"success": False, "error": "Staged upload is not a Minecraft world"}), 400
+
+        out = stage / "_converted"
+        result = convert_world(world_root, target_format, out)
+        if not result["success"]:
+            return jsonify({"success": False, "error": result.get("error", "conversion failed")}), 500
+
+        # Replace the staged world with the converted Java world.
+        import shutil as _sh
+        for item in list(stage.iterdir()):
+            if item.name == "__meta__.json" or item.name == "_converted":
+                continue
+            if item.is_dir():
+                _sh.rmtree(item, ignore_errors=True)
+            else:
+                item.unlink()
+        for item in out.iterdir():
+            _sh.move(str(item), str(stage / item.name))
+
+        # Refresh the size/file manifest for the converted world.
+        from .world_upload import _walk_tree, _write_meta
+        files = _walk_tree(stage)
+        total = sum(f.stat().st_size for f in files if f.is_file()) if files else 0
+        _write_meta(stage, {"files": len(files), "bytes": total})
+
+        from .world_upload import analyze_upload
+        cfg = load_cfg()
+        analysis = analyze_upload(token, server_mc_version=cfg.mc_version)
+        analysis["success"] = analysis.get("valid", False)
+        return jsonify({"success": analysis.get("valid", False), "analysis": analysis})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 400
 
@@ -1542,14 +1846,14 @@ def api_loaders():
                 if neoforge_dir.exists():
                     versions = [d for d in os.listdir(neoforge_dir) if (neoforge_dir / d).is_dir()]
                     if versions:
-                        version = sorted(versions)[-1]
+                        version = max(versions)
             
             elif name == "forge":
                 forge_dir = CWD / "libraries" / "net" / "minecraftforge" / "forge"
                 if forge_dir.exists():
                     versions = [d for d in os.listdir(forge_dir) if (forge_dir / d).is_dir()]
                     if versions:
-                        version = sorted(versions)[-1]
+                        version = max(versions)
             
             elif name == "fabric":
                 fabric_jar = CWD / "fabric-server-launch.jar"
@@ -1573,12 +1877,6 @@ def api_loaders():
         })
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 400
-
-
-@app.route("/api/events")
-def api_events():
-    """Get recent events."""
-    return jsonify({"events": state.events})
 
 
 @app.route("/api/server-events")
@@ -1615,7 +1913,7 @@ def api_broadcast():
         
         if is_server_running():
             result = subprocess.run(
-                f"echo 'tellraw @a [{{\"text\":\"[NeoRunner] Server updated - {mod_count} mods installed\",\"color\":\"green\"}}]' | nc -w 1 localhost {cfg.rcon_port} 2>/dev/null",
+                f"echo 'tellraw @a [{{\"text\":\"[NeoRunner] Server updated - {mod_count} mods installed\",\"color\":\"green\"}}]' | nc -w 1 localhost {cfg.rcon_port} 2>/dev/null", check=False,
                 shell=True,
                 capture_output=True,
                 text=True
@@ -1693,7 +1991,7 @@ def api_quarantine():
                             "size": f"{round(size / (1024*1024), 2)} MB",
                             "path": str(path)
                         })
-                    except:
+                    except Exception:
                         pass
         
         return jsonify({"quarantined": quarantined})
@@ -1721,14 +2019,14 @@ def api_blacklist():
                         patterns = data.get("patterns", [])
                     else:
                         blacklist = data
-            except:
+            except Exception:
                 pass
         
         if whitelist_file.exists():
             try:
                 with open(whitelist_file) as f:
                     whitelist = json.load(f)
-            except:
+            except Exception:
                 pass
         
         return jsonify({
@@ -1787,7 +2085,7 @@ def api_rescan_mods():
             try:
                 with zipfile.ZipFile(jar) as zf:
                     zf.namelist()
-            except:
+            except Exception:
                 corrupt.append(jar.name)
         
         return jsonify({
@@ -1847,7 +2145,7 @@ def api_loaders_snapshots():
                         "size_mb": round(stat.st_size / (1024*1024), 2),
                         "created": stat.st_mtime
                     })
-                except:
+                except Exception:
                     pass
         
         return jsonify({"snapshots": snapshots})
@@ -1986,7 +2284,7 @@ def api_loaders_switch():
         old_loader = cfg.loader
         old_mc = cfg.mc_version
         
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         
         # 1. Stop the server if running
         try:
@@ -2119,11 +2417,8 @@ def api_loaders_switch():
 
 def _download_link(cfg: ServerConfig) -> str:
     """Public download URL shown to clients (installer JAR)."""
-    from .mod_hosting import _get_server_hostname, _get_local_ip
-    host = _get_server_hostname(cfg)
-    if not host or host == "127.0.0.1":
-        return f"http://{_get_local_ip()}:{cfg.http_port}"
-    return f"https://{host}"
+    from .mod_hosting import public_download_link
+    return public_download_link(cfg)
 
 
 @app.route("/api/broadcast-mods", methods=["POST"])
@@ -2138,31 +2433,6 @@ def api_broadcast_mods():
         send_command(cmd)
         
         return jsonify({"success": True, "message": "Broadcast sent"})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 400
-
-
-@app.route("/api/kick", methods=["POST"])
-def api_kick():
-    """Kick a player from the server with a download-link message."""
-    try:
-        data = request.json or {}
-        player = (data.get("player") or "").strip()
-        if not player:
-            return jsonify({"success": False, "error": "No player specified"}), 400
-        
-        cfg = load_cfg()
-        from .server import send_command
-        
-        reason = (data.get("reason") or "").strip()
-        if not reason:
-            reason = f"Rejoining with missing/mismatched mods? Download from {_download_link(cfg)}/download/installer.jar"
-        elif "{link}" in reason:
-            reason = reason.replace("{link}", f"{_download_link(cfg)}/download/installer.jar")
-        
-        ok = send_command(f"kick {player} {reason}")
-        log_event("PLAYER_KICK", f"Kicked {player}: {reason}")
-        return jsonify({"success": ok, "message": f"Kick sent to {player}"})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 400
 
@@ -2548,7 +2818,7 @@ def api_modpack_convert():
         failed = len(results) - successful
         
         return jsonify({
-"success": True,
+            "success": True,
             "converted": successful,
             "failed": failed,
             "results": [{"success": s, "message": m, "file": filename} for s, m, filename in zip([r[0] for r in results], [r[1] for r in results], filenames)]
@@ -2557,7 +2827,7 @@ def api_modpack_convert():
         return jsonify({"success": False, "error": str(e)}), 400
 
 
-@app.route("/api/modpack/install", methods=["POST"])
+@app.route("/api/modpack/install-converted", methods=["POST"])
 def api_modpack_install():
     """Install converted modpack mods into the server mods folder."""
     try:
@@ -2689,14 +2959,13 @@ def api_java_install_command():
 def api_health():
     """Health check endpoint."""
     import shutil
-    import sys
     
     # Check Java
     java_ok = False
     try:
-        result = subprocess.run(["java", "-version"], capture_output=True)
+        result = subprocess.run(["java", "-version"], check=False, capture_output=True)
         java_ok = result.returncode == 0
-    except:
+    except Exception:
         pass
     
     # Check Python version
@@ -2864,6 +3133,7 @@ def api_run_preflight():
     """Manually trigger preflight dependency check."""
     try:
         import threading
+
         from .self_heal import preflight_dep_check
         
         cfg = load_cfg()
@@ -2908,8 +3178,9 @@ def api_reset_memory():
 
 def run_dashboard(host: str = "0.0.0.0", port: int = 8000, debug: bool = False):
     """Run the dashboard with Waitress production server."""
-    from waitress import serve
     import socket
+
+    from waitress import serve
     
     # Ensure port is integer
     try:

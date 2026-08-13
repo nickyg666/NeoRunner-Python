@@ -1,19 +1,17 @@
 """Tests for self-healing and crash handling."""
 
-import pytest
-import sys
 import os
+import sys
 import tempfile
-import json
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from neorunner_pkg.self_heal import (
+    load_crash_history,
     preflight_dep_check,
     quarantine_mod,
-    load_crash_history,
     save_crash_history,
 )
 

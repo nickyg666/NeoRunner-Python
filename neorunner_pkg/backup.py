@@ -3,18 +3,14 @@
 Handles world backups, scheduling, and restore operations.
 """
 
-#
 
-import os
-import shutil
-import subprocess
 import logging
+import shutil
+from datetime import UTC, datetime
 from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
+from typing import Any
 
 from .constants import CWD
-from .config import ServerConfig, load_cfg
 from .log import log_event
 
 log = logging.getLogger(__name__)
@@ -32,10 +28,10 @@ def get_current_world() -> str:
 
 
 def backup_world(
-    world_name: Optional[str] = None,
-    backup_dir: Optional[Path] = None,
-    cwd: Optional[Path] = None,
-) -> Optional[Path]:
+    world_name: str | None = None,
+    backup_dir: Path | None = None,
+    cwd: Path | None = None,
+) -> Path | None:
     """Create a backup of the current world.
     
     Args:
@@ -63,7 +59,7 @@ def backup_world(
     
     backup_dir.mkdir(parents=True, exist_ok=True)
     
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     backup_name = f"{world_name}_{timestamp}.tar.gz"
     backup_path = backup_dir / backup_name
     
@@ -87,10 +83,10 @@ def backup_world(
 
 
 def list_backups(
-    world_name: Optional[str] = None,
-    backup_dir: Optional[Path] = None,
-    cwd: Optional[Path] = None,
-) -> List[Dict[str, Any]]:
+    world_name: str | None = None,
+    backup_dir: Path | None = None,
+    cwd: Path | None = None,
+) -> list[dict[str, Any]]:
     """List available backups.
     
     Args:
@@ -127,7 +123,7 @@ def list_backups(
                 "world": world_part,
                 "path": str(f),
                 "size_mb": stat.st_size / (1024 * 1024),
-                "created": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                "created": datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat(),
             })
         except Exception:
             continue
@@ -138,8 +134,8 @@ def list_backups(
 
 def restore_backup(
     backup_path: Path,
-    world_name: Optional[str] = None,
-    cwd: Optional[Path] = None,
+    world_name: str | None = None,
+    cwd: Path | None = None,
 ) -> bool:
     """Restore a world from backup.
     
@@ -187,8 +183,8 @@ def restore_backup(
 
 def cleanup_old_backups(
     keep_count: int = 7,
-    backup_dir: Optional[Path] = None,
-    cwd: Optional[Path] = None,
+    backup_dir: Path | None = None,
+    cwd: Path | None = None,
 ) -> int:
     """Clean up old backups, keeping only the most recent N.
     
@@ -209,7 +205,7 @@ def cleanup_old_backups(
     if not backup_dir.exists():
         return 0
     
-    backups_by_world: Dict[str, List[Path]] = {}
+    backups_by_world: dict[str, list[Path]] = {}
     
     for f in backup_dir.glob("*.tar.gz"):
         world_name = f.stem.rsplit("_", 2)[0]
@@ -233,8 +229,8 @@ def cleanup_old_backups(
 
 __all__ = [
     "backup_world",
-    "list_backups",
-    "restore_backup",
     "cleanup_old_backups",
     "get_current_world",
+    "list_backups",
+    "restore_backup",
 ]

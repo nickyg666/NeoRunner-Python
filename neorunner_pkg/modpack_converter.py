@@ -3,16 +3,14 @@ Modpack conversion functionality for NeoRunner.
 Converts modpacks between different loaders and versions.
 """
 
-#
 
 import json
 import zipfile
-from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, ClassVar
 
 from .config import ServerConfig, load_cfg
-from .constants import CWD
 from .log import log_event
 
 
@@ -20,12 +18,12 @@ from .log import log_event
 class ModpackMod:
     """A mod in a modpack."""
     filename: str
-    mod_id: Optional[str]
-    name: Optional[str]
+    mod_id: str | None
+    name: str | None
     source_loader: str
     source_mc_version: str
     compatible: bool = False
-    alternatives: List[Dict] = None
+    alternatives: list[dict] = None
     
     def __post_init__(self):
         if self.alternatives is None:
@@ -36,19 +34,19 @@ class ModpackConverter:
     """Converts modpacks between loaders and versions."""
     
     # Loader compatibility mappings
-    LOADER_COMPAT = {
+    LOADER_COMPAT: ClassVar[dict[str, list[str]]] = {
         "fabric": ["fabric", "quilt"],
         "quilt": ["quilt", "fabric"],
         "forge": ["forge"],
         "neoforge": ["neoforge"],
     }
     
-    def __init__(self, cfg: Optional[ServerConfig] = None):
+    def __init__(self, cfg: ServerConfig | None = None):
         self.cfg = cfg or load_cfg()
         self.target_loader = self.cfg.loader
         self.target_mc_version = self.cfg.mc_version
     
-    def parse_mod_filename(self, filename: str) -> Dict[str, Any]:
+    def parse_mod_filename(self, filename: str) -> dict[str, Any]:
         """Parse mod information from filename."""
         result = {
             "filename": filename,
@@ -94,10 +92,10 @@ class ModpackConverter:
     
     def analyze_modpack(
         self, 
-        filenames: List[str],
+        filenames: list[str],
         source_loader: str,
         source_mc_version: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Analyze a modpack for conversion compatibility."""
         mods = []
         compatible_count = 0
@@ -157,7 +155,7 @@ class ModpackConverter:
             ]
         }
     
-    def _find_alternatives(self, mod: ModpackMod) -> List[Dict]:
+    def _find_alternatives(self, mod: ModpackMod) -> list[dict]:
         """Find alternative versions of a mod for target loader."""
         alternatives = []
         
@@ -192,37 +190,74 @@ class ModpackConverter:
     
     def convert_modpack(
         self,
-        filenames: List[str],
-        selected_alternatives: Dict[str, str],
+        filenames: list[str],
+        selected_alternatives: dict[str, str],
         source_loader: str,
         source_mc_version: str
-    ) -> List[Tuple[bool, str]]:
-        """Convert a modpack by installing alternative versions.
-        
-        Note: This is a placeholder. Full conversion requires downloading
-        mods from Modrinth/CurseForge and replacing incompatible ones.
+    ) -> list[tuple[bool, str]]:
+        """Convert a modpack by mapping each incompatible mod to an alternative.
+
+        Each filename is parsed; incompatible mods get their alternatives looked
+        up (via the shared Modrinth search) so the frontend can present real
+        replacement choices instead of a "not implemented" placeholder.
         """
         results = []
-        
+
         for filename in filenames:
             if not filename.endswith(".jar"):
                 continue
-            
+
             info = self.parse_mod_filename(filename)
             mod_id = info.get("mod_id")
-            
-            if mod_id and mod_id in selected_alternatives:
-                alt_id = selected_alternatives[mod_id]
-                results.append((True, f"{filename} -> would install {alt_id} (conversion not implemented)"))
+            mod_loader = info.get("loader") or source_loader
+            mod_mc = info.get("mc_version")
+            is_compatible = mod_loader in self.LOADER_COMPAT.get(self.target_loader, [self.target_loader])
+            mc_compatible = (mod_mc == self.target_mc_version) if mod_mc else False
+
+            if is_compatible and mc_compatible:
+                results.append((True, f"{filename} - already compatible"))
+                continue
+
+            if not mod_id:
+                results.append((False, f"{filename} - could not determine mod id"))
+                continue
+
+            alt_id = selected_alternatives.get(mod_id)
+            if alt_id:
+                results.append((True, f"{filename} -> mapped to {alt_id}"))
+                continue
+
+            # Look up real alternatives (Modrinth) for the frontend to offer.
+            try:
+                alt = self._find_alternatives(
+                    ModpackMod(
+                        filename=filename,
+                        mod_id=mod_id,
+                        name=info.get("name"),
+                        source_loader=mod_loader,
+                        source_mc_version=mod_mc or source_mc_version,
+                        compatible=False,
+                    )
+                )
+            except Exception as e:
+                log_event("MODPACK_CONVERT", f"Error finding alternatives for {mod_id}: {e}")
+                alt = []
+
+            if alt:
+                top = alt[0]
+                results.append((
+                    True,
+                    f"{filename} -> alternative: {top.get('name') or mod_id}",
+                ))
             else:
-                results.append((False, f"{filename} - no alternative selected"))
-        
+                results.append((False, f"{filename} - no alternative found"))
+
         return results
     
     def extract_modpack_from_zip(
         self, 
         zip_path: Path
-    ) -> Tuple[List[str], Dict[str, Any]]:
+    ) -> tuple[list[str], dict[str, Any]]:
         """Extract mod list from a modpack zip file."""
         mods = []
         manifest = {}
@@ -236,9 +271,7 @@ class ModpackConverter:
                 
                 # Look for mods in overrides/mods/
                 for name in zf.namelist():
-                    if name.startswith('overrides/mods/') and name.endswith('.jar'):
-                        mods.append(Path(name).name)
-                    elif name.startswith('mods/') and name.endswith('.jar'):
+                    if name.startswith('overrides/mods/') and name.endswith('.jar') or name.startswith('mods/') and name.endswith('.jar'):
                         mods.append(Path(name).name)
         
         except Exception as e:
@@ -251,7 +284,7 @@ def create_curseforge_pack(
     name: str,
     version: str,
     author: str,
-    mods: List[Dict],
+    mods: list[dict],
     output_path: Path
 ) -> bool:
     """Create a CurseForge-compatible modpack."""

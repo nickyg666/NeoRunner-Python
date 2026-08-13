@@ -1,18 +1,20 @@
 """Tests for mod curation: client-only detection, quarantine workflow."""
 
-import sys
-import os
 import json
+import os
+import sys
 import tempfile
 import zipfile
 from pathlib import Path
-from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from neorunner_pkg.client_only_detector import (
-    analyze_mod, strip_client_classes, patch_mixin_config, process_mod,
-    fix_server_mods, KNOWN_CLIENT_ONLY,
+    analyze_mod,
+    fix_server_mods,
+    patch_mixin_config,
+    process_mod,
+    strip_client_classes,
 )
 from neorunner_pkg.self_heal import quarantine_mod
 

@@ -1,10 +1,7 @@
 """Tests for mod hosting functionality."""
 
-import pytest
-import sys
 import os
-from unittest.mock import patch, MagicMock
-import tempfile
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -58,8 +55,8 @@ class TestModHostingBatScript:
     
     def test_generate_bat_script_neoforge(self):
         """Generate batch script for NeoForge."""
-        from neorunner_pkg.mod_hosting import generate_bat_script
         from neorunner_pkg.config import ServerConfig
+        from neorunner_pkg.mod_hosting import generate_bat_script
         
         cfg = ServerConfig(mc_version="1.21.11", loader="neoforge", http_port=8000)
         script = generate_bat_script(cfg)
@@ -69,8 +66,8 @@ class TestModHostingBatScript:
     
     def test_generate_bat_script_fabric(self):
         """Generate batch script for Fabric."""
-        from neorunner_pkg.mod_hosting import generate_bat_script
         from neorunner_pkg.config import ServerConfig
+        from neorunner_pkg.mod_hosting import generate_bat_script
         
         cfg = ServerConfig(mc_version="1.20.4", loader="fabric", http_port=8000)
         script = generate_bat_script(cfg)
@@ -79,8 +76,8 @@ class TestModHostingBatScript:
     
     def test_generate_bat_script_contains_curl(self):
         """Batch script contains curl command."""
-        from neorunner_pkg.mod_hosting import generate_bat_script
         from neorunner_pkg.config import ServerConfig
+        from neorunner_pkg.mod_hosting import generate_bat_script
         
         cfg = ServerConfig(http_port=8000)
         script = generate_bat_script(cfg)
@@ -142,8 +139,8 @@ class TestModHostingManifestFunctions:
 
     def test_update_manifest_includes_clientonly(self, tmp_path, monkeypatch):
         """Manifest includes server + clientonly mods with types."""
-        from neorunner_pkg.mod_hosting import update_manifest
         from neorunner_pkg.config import ServerConfig
+        from neorunner_pkg.mod_hosting import update_manifest
 
         mods_dir = tmp_path / "mods"
         clientonly = tmp_path / "clientonly"
@@ -165,8 +162,8 @@ class TestModHostingManifestFunctions:
 
     def test_update_manifest_relative_clientonly(self, tmp_path, monkeypatch):
         """Relative clientonly dir resolved against CWD."""
-        from neorunner_pkg.mod_hosting import update_manifest
         from neorunner_pkg.config import ServerConfig
+        from neorunner_pkg.mod_hosting import update_manifest
 
         mods_dir = tmp_path / "mods"
         clientonly = tmp_path / "clientonly"
@@ -184,8 +181,8 @@ class TestModHostingManifestFunctions:
 
     def test_create_mod_zip(self, tmp_path):
         """create_mod_zip bundles mods and clientonly."""
-        from neorunner_pkg.mod_hosting import create_mod_zip
         from neorunner_pkg.config import ServerConfig
+        from neorunner_pkg.mod_hosting import create_mod_zip
 
         mods_dir = tmp_path / "mods"
         clientonly = tmp_path / "clientonly"
@@ -216,9 +213,10 @@ class TestModHostingManifestFunctions:
 
     def test_conditional_create_mod_zip_throttle(self, tmp_path, monkeypatch):
         """Zip not recreated within 5 minutes."""
-        from neorunner_pkg.mod_hosting import conditional_create_mod_zip
-        import neorunner_pkg.mod_hosting as mh
         import time
+
+        import neorunner_pkg.mod_hosting as mh
+        from neorunner_pkg.mod_hosting import conditional_create_mod_zip
 
         mods_dir = tmp_path / "mods"
         mods_dir.mkdir()
@@ -234,8 +232,8 @@ class TestModHostingManifestFunctions:
 
     def test_generate_powershell_script(self):
         """PowerShell script contains manifest download URL."""
-        from neorunner_pkg.mod_hosting import generate_powershell_script
         from neorunner_pkg.config import ServerConfig
+        from neorunner_pkg.mod_hosting import generate_powershell_script
 
         cfg = ServerConfig(http_port=8000)
         script = generate_powershell_script(cfg)
@@ -246,8 +244,8 @@ class TestModHostingManifestFunctions:
 
     def test_generate_bash_script(self):
         """Bash script contains manifest URL."""
-        from neorunner_pkg.mod_hosting import generate_bash_script
         from neorunner_pkg.config import ServerConfig
+        from neorunner_pkg.mod_hosting import generate_bash_script
 
         cfg = ServerConfig(http_port=8000)
         script = generate_bash_script(cfg)

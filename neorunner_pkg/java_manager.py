@@ -3,17 +3,16 @@ Java version management for NeoRunner.
 Handles Java installation, version detection, and switching.
 """
 
-#
 
 import os
 import re
-import subprocess
 import shutil
-from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+import subprocess
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, ClassVar
 
-from .config import ServerConfig, load_cfg
+from .config import load_cfg
 from .constants import CWD
 from .log import log_event
 
@@ -32,7 +31,7 @@ class JavaManager:
     """Manages Java installations for the server."""
     
     # Known Java vendors
-    VENDORS = {
+    VENDORS: ClassVar[dict[str, str]] = {
         "openjdk": "OpenJDK",
         "temurin": "Eclipse Temurin",
         "amazon": "Amazon Corretto",
@@ -41,11 +40,11 @@ class JavaManager:
     }
     
     def __init__(self):
-        self.installations: List[JavaVersion] = []
+        self.installations: list[JavaVersion] = []
         self.scan_installations()
     
     @staticmethod
-    def get_required_java_version(loader: str = "neoforge", loader_version: str = None) -> int:
+    def get_required_java_version(loader: str = "neoforge", loader_version: str | None = None) -> int:
         """Get required Java version based on loader/loader version.
         
         NeoForge 26.x requires Java 25
@@ -65,14 +64,13 @@ class JavaManager:
     def _get_loader_version(self) -> str:
         """Get current loader version from config."""
         try:
-            cfg = load_cfg()
-            loader = cfg.loader
+            load_cfg()
             # Get loader version - check libraries first
             lib_path = CWD / "libraries" / "net" / "neoforged" / "neoforge"
             if lib_path.exists():
                 versions = [d.name for d in lib_path.iterdir() if d.is_dir()]
                 if versions:
-                    return sorted(versions)[-1]
+                    return max(versions)
             # Fallback: just return a high version to trigger Java 25
             return "21.11.42"
         except Exception:
@@ -133,11 +131,11 @@ class JavaManager:
         # Sort by version number (descending)
         self.installations.sort(key=lambda x: x.version_number, reverse=True)
     
-    def _get_java_version(self, java_path: str) -> Optional[JavaVersion]:
+    def _get_java_version(self, java_path: str) -> JavaVersion | None:
         """Get version information from a Java executable."""
         try:
             result = subprocess.run(
-                [java_path, "-version"],
+                [java_path, "-version"], check=False,
                 capture_output=True,
                 text=True,
                 timeout=10
@@ -174,11 +172,11 @@ class JavaManager:
         
         return None
     
-    def get_compatible_installations(self) -> List[JavaVersion]:
+    def get_compatible_installations(self) -> list[JavaVersion]:
         """Get Java installations that meet minimum requirements."""
         return [j for j in self.installations if j.version_number >= self.get_required_java_version()]
     
-    def get_best_java(self) -> Optional[JavaVersion]:
+    def get_best_java(self) -> JavaVersion | None:
         """Get the best available Java installation."""
         compatible = self.get_compatible_installations()
         return compatible[0] if compatible else None
@@ -239,7 +237,7 @@ class JavaManager:
         except Exception as e:
             log_event("JAVA_SERVICE_ERROR", f"Error updating service: {e}")
     
-    def install_java(self, version: int = 21, vendor: str = "openjdk") -> Tuple[bool, str]:
+    def install_java(self, version: int = 21, vendor: str = "openjdk") -> tuple[bool, str]:
         """Install Java using system package manager."""
         log_event("JAVA_INSTALL", f"Installing Java {version} ({vendor})")
         
@@ -291,7 +289,7 @@ class JavaManager:
         except subprocess.CalledProcessError as e:
             return False, f"Installation failed: {e}"
     
-    def check_java_compatibility(self, mods_dir: Path) -> Dict[str, Any]:
+    def check_java_compatibility(self, mods_dir: Path) -> dict[str, Any]:
         """Check if mods are compatible with current Java version."""
         best_java = self.get_best_java()
         
@@ -335,7 +333,7 @@ class JavaManager:
             return "# Please install Java manually from https://adoptium.net/"
 
 
-def get_java_info() -> Dict[str, Any]:
+def get_java_info() -> dict[str, Any]:
     """Get current Java information."""
     manager = JavaManager()
     

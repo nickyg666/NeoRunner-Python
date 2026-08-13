@@ -3,24 +3,39 @@ Mod hosting server with HTTP endpoints for mod distribution.
 Provides secure mod downloads with rate limiting and conditional zip creation.
 """
 
-#
 
-import os
+import io
 import json
+import os
+import socket
+import threading
 import time
 import zipfile
-import hashlib
-import threading
-import socket
-from http.server import SimpleHTTPRequestHandler, HTTPServer
+from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
-from typing import Optional, Dict, Any, Set
-from datetime import datetime
-from urllib.parse import quote as url_quote
 
-from .config import load_cfg, ServerConfig
+from .config import ServerConfig, load_cfg
 from .constants import CWD
 from .log import log_event
+
+# Public host used when no hostname is configured (the tunnel/reverse-proxy host
+# that external clients reach the download endpoints through).
+DEFAULT_PUBLIC_HOST = "mc.w8.mom"
+
+
+def public_download_base(cfg: ServerConfig) -> str:
+    """Base public URL clients use to reach the download endpoints.
+
+    Prefers ``cfg.hostname`` (the configured public host), falling back to the
+    known public tunnel host when unset.
+    """
+    host = cfg.hostname or DEFAULT_PUBLIC_HOST
+    return f"https://{host}"
+
+
+def public_download_link(cfg: ServerConfig, path: str = "/download/installer.jar") -> str:
+    """Full public URL for a download endpoint (installer jar by default)."""
+    return public_download_base(cfg) + path
 
 
 def _is_private_ip(ip: str) -> bool:
@@ -42,10 +57,8 @@ def _is_private_ip(ip: str) -> bool:
         if first == 192 and second == 168:
             return True
         # 127.x.x.x
-        if first == 127:
-            return True
-        return False
-    except:
+        return first == 127
+    except Exception:
         return False
 
 
@@ -58,7 +71,7 @@ def _get_local_ip() -> str:
     
     try:
         result = subprocess.run(
-            ["ip", "addr", "show"],
+            ["ip", "addr", "show"], check=False,
             capture_output=True, text=True, timeout=5
         )
         
@@ -78,10 +91,8 @@ def _get_local_ip() -> str:
                         ip = ip_cidr.split('/')[0]
                         
                         # Find interface name (usually at end of line after "scope")
-                        iface = ''
                         for i, p in enumerate(parts):
                             if p in ['enp0s3', 'eth0', 'eth1', 'wlan0', 'eno1', 'en0', 'en1']:
-                                iface = p
                                 break
                             if 'scope' in p and i + 1 < len(parts):
                                 # Next thing might be interface
@@ -90,7 +101,7 @@ def _get_local_ip() -> str:
                         # Also check end of line for interface
                         line_end = parts[-1] if parts else ''
                         if line_end not in ['lo', 'inet6'] and any(x in line_end for x in ['enp', 'eth', 'wlan', 'eno']):
-                            iface = line_end
+                            pass
                         
                         if ip.startswith('127.'):
                             continue
@@ -153,7 +164,7 @@ def _get_server_hostname(cfg: ServerConfig) -> str:
 _last_request_time = 0
 _download_lock = threading.Lock()
 _zip_creation_lock = threading.RLock()
-_last_zip_time: Optional[float] = None
+_last_zip_time: float | None = None
 
 
 class SecureHTTPHandler(SimpleHTTPRequestHandler):
@@ -163,14 +174,13 @@ class SecureHTTPHandler(SimpleHTTPRequestHandler):
     
     def log_message(self, format, *args):
         """Suppress default logging."""
-        pass
     
     def do_GET(self):
         """Handle GET requests with security checks."""
         cfg = load_cfg()
         
         # Track downloads
-        is_download = self.path.startswith("/download/mods") or self.path.endswith(".zip")
+        self.path.startswith("/download/mods") or self.path.endswith(".zip")
         
         # Rate limiting
         current_time = time.time()
@@ -199,8 +209,8 @@ class SecureHTTPHandler(SimpleHTTPRequestHandler):
             self._handle_client_status(cfg)
             return
         
-        # Handle install scripts
-        if self.path.startswith("/install") or self.path.startswith("/download/install"):
+        # Handle install scripts (install-mods.bat only; PowerShell removed)
+        if self.path.startswith("/install-mods.bat") or self.path == "/download/install-mods.bat":
             log_event("DEBUG", f"Install script request: {self.path}")
             self._handle_install_script(cfg)
             return
@@ -251,7 +261,7 @@ class SecureHTTPHandler(SimpleHTTPRequestHandler):
                 clientonly_dir = CWD / clientonly_dir
             
             # Build list of files to include
-            mods_to_zip: Dict[str, Path] = {}
+            mods_to_zip: dict[str, Path] = {}
             missing = []
             
             for mod_name in requested_mods:
@@ -473,17 +483,8 @@ class SecureHTTPHandler(SimpleHTTPRequestHandler):
                 self.send_error(404, "Bat script not found")
             return
         
-        # /download/install serves PowerShell (for curl | iex)
-        if script_type == "install" or script_type == "windows" or script_type == "install-mods.ps1":
-            script = generate_powershell_script(cfg)
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain")
-            self.send_header("Content-Disposition", 'attachment; filename="install-mods.ps1"')
-            self.end_headers()
-            self.wfile.write(script.encode())
-            log_event("HTTP_DOWNLOAD", "Served PowerShell install script")
-            return
-        
+        # /download/install (PowerShell) removed; fall through to other handlers.
+
         elif script_type == "linux" or script_type == "install-mods.sh":
             script = generate_bash_script(cfg)
             self.send_response(200)
@@ -498,7 +499,7 @@ class SecureHTTPHandler(SimpleHTTPRequestHandler):
             self.send_error(404, "Script type not found")
 
 
-def update_manifest(mods_dir: Path, cfg: Optional[ServerConfig] = None) -> bool:
+def update_manifest(mods_dir: Path, cfg: ServerConfig | None = None) -> bool:
     """Update manifest.json with current mod list including client-only mods."""
     mods_dir = Path(mods_dir)
     if cfg is None:
@@ -509,7 +510,7 @@ def update_manifest(mods_dir: Path, cfg: Optional[ServerConfig] = None) -> bool:
     manifest_path = mods_dir / "manifest.json"
     
     try:
-        mods: Dict[str, Path] = {}
+        mods: dict[str, Path] = {}
         
         # Collect server mods (skip .server.jar)
         if mods_dir.exists():
@@ -521,9 +522,8 @@ def update_manifest(mods_dir: Path, cfg: Optional[ServerConfig] = None) -> bool:
         clientonly_mods = {}
         if clientonly_dir.exists():
             for f in os.listdir(clientonly_dir):
-                if f.endswith('.jar') and not f.endswith('.server.jar'):
-                    if f not in mods:
-                        clientonly_mods[f] = clientonly_dir / f
+                if f.endswith('.jar') and not f.endswith('.server.jar') and f not in mods:
+                    clientonly_mods[f] = clientonly_dir / f
         
         # Build manifest with type field (server vs clientonly)
         files = []
@@ -545,7 +545,7 @@ def update_manifest(mods_dir: Path, cfg: Optional[ServerConfig] = None) -> bool:
         return False
 
 
-def create_mod_zip(mods_dir: Path, cfg: Optional[ServerConfig] = None) -> Optional[Path]:
+def create_mod_zip(mods_dir: Path, cfg: ServerConfig | None = None) -> Path | None:
     """
     Create mods_latest.zip with all mods + clientonly mods.
     Also updates manifest.json first.
@@ -563,7 +563,7 @@ def create_mod_zip(mods_dir: Path, cfg: Optional[ServerConfig] = None) -> Option
             # Always update manifest first
             update_manifest(mods_dir)
             
-            mods_to_zip: Dict[str, Path] = {}
+            mods_to_zip: dict[str, Path] = {}
             
             # Collect server mods (skip .server.jar)
             if mods_dir.exists():
@@ -574,9 +574,8 @@ def create_mod_zip(mods_dir: Path, cfg: Optional[ServerConfig] = None) -> Option
             # Add client-only mods
             if clientonly_dir.exists():
                 for f in os.listdir(clientonly_dir):
-                    if f.endswith('.jar') and not f.endswith('.server.jar'):
-                        if f not in mods_to_zip:
-                            mods_to_zip[f] = clientonly_dir / f
+                    if f.endswith('.jar') and not f.endswith('.server.jar') and f not in mods_to_zip:
+                        mods_to_zip[f] = clientonly_dir / f
             
             # Create zip
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
@@ -594,7 +593,7 @@ def create_mod_zip(mods_dir: Path, cfg: Optional[ServerConfig] = None) -> Option
             return None
 
 
-def conditional_create_mod_zip(mods_dir: Path, cfg: Optional[ServerConfig] = None) -> Optional[Path]:
+def conditional_create_mod_zip(mods_dir: Path, cfg: ServerConfig | None = None) -> Path | None:
     """
     Create mod zip only if needed (not recently created).
     This is called when a client reports 0 correct mods.
@@ -620,12 +619,53 @@ def conditional_create_mod_zip(mods_dir: Path, cfg: Optional[ServerConfig] = Non
         return result
 
 
-def build_launcher_zip_bytes(cfg: Optional[ServerConfig] = None) -> Optional[io.BytesIO]:
+def _loader_installer_path(cfg: ServerConfig) -> Path | None:
+    """Locate (or download) the loader's client installer jar.
+
+    The installer jar is what installs the loader + creates the launcher profile
+    on a client. The server-side install deletes it after use, so we re-fetch it
+    from Maven and cache it under .cache/ for the download endpoints.
+    """
+    loader = getattr(cfg, "loader", "neoforge") or "neoforge"
+    cache_dir = CWD / ".cache" / "loader_installer"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    if loader == "neoforge":
+        # Resolve the installed NeoForge version (matching mc_version).
+        lib = CWD / "libraries" / "net" / "neoforged" / "neoforge"
+        versions = sorted((d.name for d in lib.iterdir() if d.is_dir()), reverse=True) if lib.exists() else []
+        if not versions:
+            return None
+        ver = versions[0]
+        jar_name = f"neoforge-{ver}-installer.jar"
+        cached = cache_dir / jar_name
+        if cached.exists() and cached.stat().st_size > 10_000:
+            return cached
+        url = f"https://maven.neoforged.net/releases/net/neoforged/neoforge/{ver}/{jar_name}"
+        try:
+            import urllib.request
+            req = urllib.request.Request(url, headers={"User-Agent": "NeoRunner/2.0"})
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                data = resp.read()
+            if len(data) > 10_000:
+                cached.write_bytes(data)
+                return cached
+        except Exception as e:
+            log_event("LOADER_INSTALLER", f"Failed to download {jar_name}: {e}")
+        return None
+
+    if loader == "fabric":
+        return None  # Fabric installer is fetched by the client installer differently
+    if loader == "forge":
+        return None
+    return None
+
+
+def build_launcher_zip_bytes(cfg: ServerConfig | None = None) -> io.BytesIO | None:
     """Build the client launcher zip: README + mods/ (server+clientonly jars) + config/ + defaultconfigs/.
 
     This is the 'drop into .minecraft' pack. Returns in-memory bytes.
     """
-    import io
     if cfg is None:
         cfg = load_cfg()
 
@@ -638,21 +678,29 @@ def build_launcher_zip_bytes(cfg: Optional[ServerConfig] = None) -> Optional[io.
 
     mc_version = getattr(cfg, 'mc_version', None) or '1.21.11'
     loader = getattr(cfg, 'loader', 'neoforge') or 'neoforge'
+    installer = _loader_installer_path(cfg)
 
     readme = (
         "NeoRunner modpack\n"
         "=================\n\n"
         "To install:\n"
-        "  1. Open your .minecraft folder (Windows: %appdata%\\.minecraft)\n"
-        "  2. Unzip the contents of this file INTO .minecraft so that the\n"
+        "  1. Run " + (installer.name if installer else "the loader installer") + " to install " + loader + " (this creates the launcher profile).\n"
+        "  2. Open your .minecraft folder (Windows: %appdata%\\.minecraft)\n"
+        "  3. Unzip the contents of this file INTO .minecraft so that the\n"
         "     'mods' and 'config' folders land next to 'saves'.\n"
-        "  3. Launch Minecraft with the official launcher + " + loader + "\n"
-        "  4. Join the server!\n"
+        "  4. Launch Minecraft with the " + loader + " profile and join the server!\n"
     )
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("README.txt", readme)
+        zi = zipfile.ZipInfo("README.txt", date_time=(2020, 1, 1, 0, 0, 0))
+        zi.compress_type = zipfile.ZIP_DEFLATED
+        zf.writestr(zi, readme)
+
+        # Include the loader client installer at the zip root so the client can
+        # install the loader + create the launcher profile.
+        if installer is not None and installer.exists():
+            zf.write(str(installer), arcname=installer.name)
 
         for d in (mods_dir, clientonly_dir):
             if d.exists():
@@ -661,7 +709,9 @@ def build_launcher_zip_bytes(cfg: Optional[ServerConfig] = None) -> Optional[io.
                         continue
                     zf.write(str(f), arcname=f"mods/{f.name}")
 
-        for folder in ("config", "defaultconfigs"):
+        # Ship client-facing asset folders extracted from CurseForge overrides/:
+        # config/defaultconfigs plus shaderpacks and resourcepacks.
+        for folder in ("config", "defaultconfigs", "shaderpacks", "resourcepacks"):
             path = CWD / folder
             if path.exists():
                 for f in sorted(path.rglob("*")):
@@ -669,23 +719,22 @@ def build_launcher_zip_bytes(cfg: Optional[ServerConfig] = None) -> Optional[io.
                         zf.write(str(f), arcname=f"{folder}/{f.relative_to(path)}")
 
     buf.seek(0)
-    log_event("MOD_ZIP", f"Built launcher.zip for {loader} {mc_version}")
+    log_event("MOD_ZIP", f"Built launcher.zip for {loader} {mc_version}" + (" (with installer)" if installer else ""))
     return buf
 
 
 def generate_powershell_script(cfg: ServerConfig) -> str:
     """Generate PowerShell install script for Windows."""
     hostname = _get_server_hostname(cfg)
-    http_port = cfg.http_port
+    base_url = f"https://{hostname}" if hostname else f"http://localhost:{cfg.http_port}"
     
     return '''param(
-    [string]$ServerHost = "''' + hostname + '''",
-    [int]$ServerPort = ''' + str(http_port) + '''
+    [string]$BaseUrl = "''' + base_url + '''"
 )
 
 $ErrorActionPreference = "Continue"
 
-$baseUrl = "http://$ServerHost`:$ServerPort"
+$baseUrl = $BaseUrl
 $mcDir = "$env:APPDATA\\.minecraft"
 $modsDir = "$mcDir\\mods"
 $oldDir = "$mcDir\\oldmods"
@@ -695,7 +744,7 @@ if (-not (Test-Path $oldDir)) { New-Item -ItemType Directory -Path $oldDir -Forc
 
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  NeoRunner Mod Sync" -ForegroundColor Green
-Write-Host "  Server: $ServerHost`:$ServerPort" -ForegroundColor Gray
+Write-Host "  Server: $baseUrl" -ForegroundColor Gray
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -786,14 +835,12 @@ pause
 def generate_bash_script(cfg: ServerConfig) -> str:
     """Generate Bash install script for Linux/Mac."""
     hostname = _get_server_hostname(cfg)
-    http_port = cfg.http_port
+    base_url = f"https://{hostname}" if hostname else f"http://localhost:{cfg.http_port}"
     
     return f'''#!/bin/bash
 # NeoRunner Mod Installer for Linux/Mac
 
-SERVER_HOST="{hostname}"
-SERVER_PORT="{http_port}"
-BASE_URL="http://$SERVER_HOST:$SERVER_PORT"
+BASE_URL="{base_url}"
 
 # Detect Minecraft directory
 if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -806,7 +853,7 @@ MODS_DIR="$MINECRAFT_DIR/mods"
 
 echo "═══════════════════════════════════════════"
 echo "  NeoRunner Mod Installer"
-echo "  Server: $SERVER_HOST:$SERVER_PORT"
+echo "  Server: $BASE_URL"
 echo "═══════════════════════════════════════════"
 echo ""
 
@@ -887,7 +934,7 @@ def get_server_ip() -> str:
             ip = cfg.server_ip
             if ip and ip != 'localhost' and not ip.startswith('127.'):
                 return ip
-    except:
+    except Exception:
         pass
     
     # Fallback to auto-detect
@@ -897,21 +944,19 @@ def get_server_ip() -> str:
 def generate_bat_script(cfg: ServerConfig) -> str:
     """Generate batch script (install-mods.bat) that downloads only missing mods from server."""
     hostname = _get_server_hostname(cfg)
-    http_port = cfg.http_port
+    # Public clients reach the download endpoints over HTTPS through the
+    # Cloudflare tunnel (https://<hostname>), not the internal HTTP port.
+    base_url = f"https://{hostname}" if hostname else f"http://localhost:{cfg.http_port}"
     
     return '''@echo off
 REM install-mods.bat - NeoRunner Client Mod Sync Script
 setlocal enabledelayedexpansion
 
-set "SERVER_HOST=''' + hostname + '''"
-set "SERVER_PORT=''' + str(http_port) + '''"
-
-if "%SERVER_HOST%"=="" set "SERVER_HOST=localhost"
-if "%SERVER_PORT%"=="" set "SERVER_PORT=8000"
+set "BASE_URL=''' + base_url + '''"
 
 echo ==========================================
 echo    NeoRunner Mod Sync
-echo    Server: %SERVER_HOST%:%SERVER_PORT%
+echo    Server: %BASE_URL%
 echo ==========================================
 echo.
 
@@ -923,7 +968,7 @@ if not exist "%MODS_DIR%" mkdir "%MODS_DIR%"
 if not exist "%OLD_DIR%" mkdir "%OLD_DIR%"
 
 echo [1/4] Fetching server manifest...
-curl.exe -s "http://%SERVER_HOST%:%SERVER_PORT%/download/manifest" -o "%TEMP%\\neorunner_manifest.json"
+curl.exe -s "%BASE_URL%/download/manifest" -o "%TEMP%\\neorunner_manifest.json"
 if errorlevel 1 (
     echo ERROR: Failed to fetch manifest
     pause
@@ -963,7 +1008,7 @@ echo    Missing: %MISSING%
 
 if %MISSING% GTR 0 (
     echo    Downloading %MISSING% missing mods...
-    curl.exe -sL "http://%SERVER_HOST%:%SERVER_PORT%/download/all" -o "%TEMP%\\neorunner_mods.zip"
+    curl.exe -sL "%BASE_URL%/download/all" -o "%TEMP%\\neorunner_mods.zip"
     if errorlevel 1 (
         echo    ERROR: Failed to download mods
     ) else (

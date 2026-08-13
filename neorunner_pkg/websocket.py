@@ -3,14 +3,11 @@ WebSocket support for NeoRunner dashboard.
 Provides real-time log streaming and server status updates.
 """
 
-#
 
-import os
-import json
 import threading
 import time
 from pathlib import Path
-from typing import Set, Dict, Any
+from typing import Any
 
 try:
     from flask_socketio import SocketIO, emit
@@ -45,7 +42,6 @@ def init_socketio(app):
     @socketio.on('disconnect')
     def handle_disconnect():
         """Handle client disconnection."""
-        pass
     
     @socketio.on('subscribe_logs')
     def handle_subscribe_logs():
@@ -210,8 +206,6 @@ def start_websocket_services(app):
 
 def stop_websocket_services():
     """Stop WebSocket services."""
-    global log_tailer, status_broadcaster
-    
     if log_tailer:
         log_tailer.stop()
     
@@ -219,9 +213,7 @@ def stop_websocket_services():
         status_broadcaster.stop()
 
 
-def emit_event(event_type: str, data: Dict[str, Any]):
+def emit_event(event_type: str, data: dict[str, Any]):
     """Emit an event to all connected clients."""
-    global socketio
-    
     if socketio:
         socketio.emit(event_type, data, namespace='/')

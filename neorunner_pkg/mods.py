@@ -1,21 +1,17 @@
 """Mod management for NeoRunner."""
 
-#
 
-import zipfile
 import json
-import re
-import os
 import logging
-import urllib.request
 import urllib.error
-from pathlib import Path
-from typing import Optional, Dict, Any, Set, List
+import urllib.request
+import zipfile
 from dataclasses import dataclass
-from functools import lru_cache
+from pathlib import Path
+from typing import Any
 
-from .constants import CWD
 from .config import ServerConfig
+from .constants import CWD
 from .log import log_event
 
 log = logging.getLogger(__name__)
@@ -34,10 +30,10 @@ class ModInfo:
 
 
 # Cache for library detection to avoid repeated API calls
-_library_cache: Dict[str, bool] = {}
+_library_cache: dict[str, bool] = {}
 
 
-def parse_mod_manifest(jar_path: Path) -> Optional[dict]:
+def parse_mod_manifest(jar_path: Path) -> dict | None:
     """Parse mod info from its MANIFEST.MF or mod.json.
     
     Args:
@@ -98,7 +94,7 @@ def parse_mod_manifest(jar_path: Path) -> Optional[dict]:
         if zf:
             try:
                 zf.close()
-            except:
+            except Exception:
                 pass
     
     return None
@@ -162,7 +158,7 @@ def check_if_library_modrinth(mod_id: str) -> bool:
     return False
 
 
-def check_if_library_curseforge(mod_id: str, api_key: Optional[str] = None) -> bool:
+def check_if_library_curseforge(mod_id: str, api_key: str | None = None) -> bool:
     """Check if a mod is a library by querying CurseForge API.
     
     A mod is considered a library if it has more dependents than dependencies.
@@ -194,7 +190,7 @@ def check_if_library_curseforge(mod_id: str, api_key: Optional[str] = None) -> b
                 return False
             
             mod_data = mods[0]
-            mod_id_cf = mod_data.get("id")
+            mod_data.get("id")
             
             # Get mod description to check for "library" keyword
             summary = mod_data.get("summary", "").lower()
@@ -229,10 +225,7 @@ def is_library(mod_id: str, cfg: ServerConfig | None = None) -> bool:
         return True
     
     # Try CurseForge if API key available
-    if check_if_library_curseforge(mod_id):
-        return True
-    
-    return False
+    return bool(check_if_library_curseforge(mod_id))
 
 
 def classify_mod(jar_path: Path, cfg: ServerConfig | None = None) -> str:
@@ -279,13 +272,11 @@ def classify_mod(jar_path: Path, cfg: ServerConfig | None = None) -> str:
     try:
         with zipfile.ZipFile(jar_path) as zf:
             for name in zf.namelist():
-                if name.endswith((".class", ".java")):
-                    # Check for client-side class patterns
-                    if "/client/" in name or "Client" in name:
-                        # But also check for server classes
-                        has_server = any("/server/" in n or "Server" in n for n in zf.namelist() if n.endswith(".class"))
-                        if not has_server:
-                            return "clientonly"
+                if name.endswith((".class", ".java")) and ("/client/" in name or "Client" in name):
+                    # But also check for server classes
+                    has_server = any("/server/" in n or "Server" in n for n in zf.namelist() if n.endswith(".class"))
+                    if not has_server:
+                        return "clientonly"
     except Exception:
         pass
     
@@ -304,7 +295,7 @@ def sort_mods_by_type(mods_dir: Path, cfg: ServerConfig | None = None) -> dict[s
         Dictionary with keys "clientonly", "server", "both"
     """
     mods_dir = Path(mods_dir)
-    clientonly_dir = CWD / "clientonly"
+    CWD / "clientonly"
     
     result = {
         "clientonly": [],
@@ -352,7 +343,6 @@ def preflight_mod_compatibility_check(mods_dir: Path, cfg: ServerConfig) -> dict
         Dictionary with compatibility results
     """
     import shutil
-    from .log import log_event
     
     mods_dir = Path(mods_dir)
     if not mods_dir.exists():
@@ -426,8 +416,7 @@ def preflight_mod_compatibility_check(mods_dir: Path, cfg: ServerConfig) -> dict
         
         # Check MC version compatibility  
         mc_versions = manifest.get("game_versions", [])
-        if mc_versions and server_mc_version not in mc_versions:
-            if isinstance(mc_versions, list) and len(mc_versions) > 0:
+        if mc_versions and server_mc_version not in mc_versions and isinstance(mc_versions, list) and len(mc_versions) > 0:
                 result["warnings"].append(
                     f"{jar.name}: MC version {server_mc_version} not in {mc_versions}"
                 )
@@ -443,7 +432,7 @@ def curate_mod_list(
     mc_version: str,
     loader: str,
     include_required_deps: bool = True,
-    optional_dep_audit: Optional[dict] = None,
+    optional_dep_audit: dict | None = None,
 ) -> list[dict]:
     """Curate a mod list, adding required dependencies.
     
@@ -464,7 +453,7 @@ def curate_mod_list(
         "fabric-language-kotlin", "ferritecore", "geckolib",
         "patchouli", "reach-entity-attributes", "sodium", "sodium-extra",
         "indium", " Reese's Sodium Options", " continuity", " fabric-api",
-        "fabric-language-kotlin", "fabricloader", "malilib", "modmenu",
+        "fabricloader", "malilib", "modmenu",
     }
     
     curated = []
@@ -507,9 +496,9 @@ def fetch_modrinth_mods(
     loader: str,
     limit: int = 100,
     offset: int = 0,
-    categories: Optional[list[str]] = None,
+    categories: list[str] | None = None,
     sort: str = "downloads"
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Fetch mods from Modrinth API.
     
     Args:
@@ -574,7 +563,7 @@ def fetch_modrinth_mods(
 
 
 def download_mod_from_modrinth(
-    mod_data: Dict[str, Any],
+    mod_data: dict[str, Any],
     mods_dir: Path,
     mc_version: str,
     loader: str,
@@ -591,7 +580,7 @@ def download_mod_from_modrinth(
         True if downloaded successfully
     """
     mod_id = mod_data.get("id")
-    mod_slug = mod_data.get("slug", mod_data.get("name", ""))
+    mod_data.get("slug", mod_data.get("name", ""))
     mod_name = mod_data.get("name", "unknown")
     
     if not mod_id:
@@ -661,7 +650,7 @@ def download_mod_from_modrinth(
         return False
 
 
-def get_mod_dependencies_modrinth(mod_id: str) -> List[str]:
+def get_mod_dependencies_modrinth(mod_id: str) -> list[str]:
     """Get required dependencies for a mod from Modrinth.
     
     Args:
@@ -690,10 +679,10 @@ def resolve_mod_dependencies_modrinth(
     mod_id: str,
     mc_version: str,
     loader: str,
-    resolved: Optional[set] = None,
+    resolved: set | None = None,
     depth: int = 0,
     max_depth: int = 3
-) -> Set[str]:
+) -> set[str]:
     """Recursively resolve all dependencies for a mod.
     
     Args:
@@ -722,7 +711,7 @@ def resolve_mod_dependencies_modrinth(
     return resolved
 
 
-def download_file(url: str, dest_dir: Path, filename: Optional[str] = None) -> bool:
+def download_file(url: str, dest_dir: Path, filename: str | None = None) -> bool:
     """Download a file from URL.
     
     Args:
@@ -754,15 +743,15 @@ def download_file(url: str, dest_dir: Path, filename: Optional[str] = None) -> b
 
 __all__ = [
     "ModInfo",
-    "parse_mod_manifest",
-    "is_library",
     "classify_mod",
-    "sort_mods_by_type",
-    "preflight_mod_compatibility_check",
     "curate_mod_list",
-    "fetch_modrinth_mods",
-    "download_mod_from_modrinth",
-    "get_mod_dependencies_modrinth",
-    "resolve_mod_dependencies_modrinth",
     "download_file",
+    "download_mod_from_modrinth",
+    "fetch_modrinth_mods",
+    "get_mod_dependencies_modrinth",
+    "is_library",
+    "parse_mod_manifest",
+    "preflight_mod_compatibility_check",
+    "resolve_mod_dependencies_modrinth",
+    "sort_mods_by_type",
 ]

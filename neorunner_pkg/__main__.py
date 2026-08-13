@@ -9,10 +9,10 @@ Handles:
 4. Normal startup (if server exists)
 """
 
-import sys
 import os
-import subprocess
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 # Determine working directory - use the module location as server root
@@ -20,8 +20,7 @@ NEORUNNER_HOME = Path(__file__).parent.resolve()
 os.chdir(NEORUNNER_HOME)
 sys.path.insert(0, str(NEORUNNER_HOME))
 
-from . import load_cfg, save_cfg, ServerConfig, log_event
-from neorunner.constants import CWD
+from . import load_cfg
 
 
 def check_system_prerequisites():
@@ -140,7 +139,7 @@ def install_prerequisites(missing):
         print(f"Missing system packages: {', '.join(missing['packages'])}")
         
         if commands["packages"]:
-            pkg_mgr = list(commands["packages"].keys())[0]
+            pkg_mgr = next(iter(commands["packages"].keys()))
             cmd = commands["packages"][pkg_mgr]
             
             print(f"\nDetected package manager: {pkg_mgr}")
@@ -155,14 +154,14 @@ def install_prerequisites(missing):
         
         # Install Java separately (might need special handling)
         if "java" in missing["packages"]:
-            print(f"\nInstalling Java...")
+            print("\nInstalling Java...")
             if "install_java" in commands:
                 try:
                     subprocess.run(commands["install_java"], shell=True, check=True)
                     print("✓ Java installed")
                 except subprocess.CalledProcessError as e:
                     print(f"✗ Failed to install Java: {e}")
-                    print(f"Please install Java manually:")
+                    print("Please install Java manually:")
                     print(f"  Package name: {commands.get('java_package', 'java-21-openjdk')}")
                     return False
     
@@ -187,7 +186,7 @@ def check_java_compatibility():
     """Check Java version compatibility."""
     try:
         result = subprocess.run(
-            ["java", "-version"],
+            ["java", "-version"], check=False,
             capture_output=True,
             text=True
         )
@@ -212,7 +211,7 @@ def check_java_compatibility():
             else:
                 print(f"⚠ Java {version} detected (requires Java {java_req}+)")
                 return False
-    except:
+    except Exception:
         print("✗ Java not found")
         return False
 
@@ -229,7 +228,7 @@ def start_first_start_wizard():
     print("="*70)
     print("\nNo server.properties found.")
     print("Starting web-based setup wizard...")
-    print(f"\nOpen your browser to: http://0.0.0.0:8000")
+    print("\nOpen your browser to: http://0.0.0.0:8000")
     print("\nThe wizard will guide you through:")
     print("  • Minecraft version selection")
     print("  • Mod loader installation")
@@ -303,7 +302,7 @@ def main():
                 try:
                     subprocess.run(commands["install_java"], shell=True, check=True)
                     print("✓ Java installed")
-                except:
+                except Exception:
                     print("✗ Failed to install Java")
                     sys.exit(1)
     

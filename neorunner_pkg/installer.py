@@ -1,33 +1,26 @@
 """Installation and setup for NeoRunner."""
 
-#
-
+import json
 import os
-import re
+import shutil
 import subprocess
 import urllib.request
-import json
-import shutil
 from pathlib import Path
-from typing import Optional
 
-from .constants import CWD, MOD_LOADERS
 from .config import ServerConfig
+from .constants import CWD
 from .log import log_event
 
-
 SYSTEM_PACKAGES = ["curl", "rsync", "unzip", "zip", "java"]
-
 
 def check_system_deps() -> bool:
     """Check if required system dependencies are installed."""
     missing = []
     for pkg in SYSTEM_PACKAGES:
-        result = subprocess.run(["which", pkg], capture_output=True)
+        result = subprocess.run(["which", pkg], check=False, capture_output=True)
         if result.returncode != 0:
             missing.append(pkg)
     return len(missing) == 0
-
 
 def install_system_deps() -> bool:
     """Install required system dependencies."""
@@ -63,7 +56,6 @@ def install_system_deps() -> bool:
         log_event("ERROR", f"Failed to install deps: {e}")
         return False
 
-
 def ensure_eula(cfg: ServerConfig) -> None:
     """Ensure eula.txt exists with eula=true."""
     eula_path = CWD / "eula.txt"
@@ -77,23 +69,24 @@ def ensure_eula(cfg: ServerConfig) -> None:
             eula_path.write_text(content.replace("eula=false", "eula=true"))
             log_event("INFO", "Updated eula.txt to eula=true")
 
-
 def ensure_directories(cfg: ServerConfig) -> None:
     """Create required directories."""
     dirs = [
         CWD / cfg.mods_dir,
         CWD / cfg.clientonly_dir,
-        CWD / cfg.quarantine_dir,
+        # Quarantine lives under mods/ (matching self_heal.quarantine_mod and the
+        # dashboard's quarantine endpoints, which all use mods_dir/"quarantine").
+        CWD / cfg.mods_dir / "quarantine",
         CWD / "libraries",
         CWD / "backups",
         CWD / "config",
         CWD / "logs",
         CWD / "crash-reports",
+        CWD / "tools",  # world conversion tools (chunker-cli.jar)
     ]
     
     for d in dirs:
         d.mkdir(parents=True, exist_ok=True)
-
 
 def install_neoforge(cfg: ServerConfig) -> bool:
     """Download and install NeoForge server."""
@@ -151,7 +144,7 @@ def install_neoforge(cfg: ServerConfig) -> bool:
         # Run installer
         log_event("INFO", "Running installer...")
         result = subprocess.run(
-            ["java", "-jar", installer_jar, "--installServer"],
+            ["java", "-jar", installer_jar, "--installServer"], check=False,
             cwd=CWD, capture_output=True, text=True, timeout=600
         )
         
@@ -177,11 +170,9 @@ def install_neoforge(cfg: ServerConfig) -> bool:
             installer_path.unlink()
         return False
 
-
 def install_fabric(cfg: ServerConfig) -> bool:
     """Download and install Fabric server."""
     import urllib.request
-    import shutil
     
     log_event("INFO", f"Installing Fabric for MC {cfg.mc_version}...")
     
@@ -221,7 +212,7 @@ def install_fabric(cfg: ServerConfig) -> bool:
         # Run installer
         log_event("INFO", "Running Fabric installer...")
         result = subprocess.run(
-            ["java", "-jar", str(installer_path), "--installServer"],
+            ["java", "-jar", str(installer_path), "--installServer"], check=False,
             cwd=CWD, capture_output=True, text=True, timeout=600
         )
         
@@ -238,7 +229,6 @@ def install_fabric(cfg: ServerConfig) -> bool:
         if installer_path and installer_path.exists():
             installer_path.unlink()
         return False
-
 
 def install_forge(cfg: ServerConfig) -> bool:
     """Download and install Forge server."""
@@ -259,7 +249,7 @@ def install_forge(cfg: ServerConfig) -> bool:
     forge_version = None
     try:
         # Try Maven Central for Forge versions
-        versions_url = f"https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.json"
+        versions_url = "https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.json"
         req = urllib.request.Request(versions_url, headers={"User-Agent": "NeoRunner/1.0"})
         with urllib.request.urlopen(req, timeout=15) as resp:
             versions_data = json.loads(resp.read().decode())
@@ -294,7 +284,7 @@ def install_forge(cfg: ServerConfig) -> bool:
         # Run installer
         log_event("INFO", "Running Forge installer...")
         result = subprocess.run(
-            ["java", "-jar", installer_jar, "--installServer"],
+            ["java", "-jar", installer_jar, "--installServer"], check=False,
             cwd=CWD, capture_output=True, text=True, timeout=600
         )
         
@@ -313,7 +303,6 @@ def install_forge(cfg: ServerConfig) -> bool:
             installer_path.unlink()
         return False
 
-
 def install_loader(cfg: ServerConfig) -> bool:
     """Install the required loader based on config."""
     loader = cfg.loader.lower()
@@ -327,184 +316,6 @@ def install_loader(cfg: ServerConfig) -> bool:
     else:
         log_event("ERROR", f"Unknown loader: {loader}")
         return False
-
-
-def ensure_dependency(dep_name: str, cfg: ServerConfig) -> bool:
-    """Search for and download a missing dependency using clientonly/Modrinth/CurseForge.
-    
-    Args:
-        dep_name: Name of the dependency (e.g., "architectury")
-        cfg: Server configuration
-        
-    Returns:
-        True if dependency was found and downloaded, False otherwise
-    """
-    from .mod_browser import ModBrowser, ModInstaller, CurseForgeScraper, PLAYWRIGHT_AVAILABLE
-    
-    log_event("SELF_HEAL", f"Searching for missing dependency: {dep_name}")
-    
-    mods_dir = CWD / cfg.mods_dir
-    if not mods_dir.exists():
-        mods_dir.mkdir(parents=True, exist_ok=True)
-    
-    clientonly_dir = CWD / cfg.clientonly_dir
-    search_name = dep_name.lower().replace("-", "").replace("_", "")
-    
-    if clientonly_dir.exists():
-        for jar in clientonly_dir.glob("*.jar"):
-            jar_name = jar.stem.lower().replace("-", "").replace("_", "")
-            if search_name in jar_name or jar_name in search_name:
-                dest = mods_dir / jar.name
-                if not dest.exists():
-                    shutil.copy2(jar, dest)
-                    log_event("SELF_HEAL", f"Copied {jar.name} from clientonly/ to mods/")
-                return True
-    
-    installer = ModInstaller(cfg)
-    
-    # First try Modrinth
-    browser = ModBrowser(cfg)
-    
-    search_variations = [
-        dep_name.lower(),
-        dep_name.replace("-", " ").lower(),
-        dep_name.replace("_", " ").lower(),
-        f"{dep_name} api",
-    ]
-    
-    for variation in search_variations:
-        try:
-            results = browser.search(variation, limit=5)
-            if results:
-                best_match = None
-                for r in results:
-                    title = r.name.lower()
-                    slug = r.slug.lower()
-                    search_term = variation.lower()
-                    
-                    if search_term in title or search_term in slug:
-                        best_match = r
-                        break
-                
-                if not best_match and results:
-                    best_match = results[0]
-                
-                if best_match:
-                    project_id = best_match.id
-                    if project_id:
-                        success, msg = installer.install_mod(project_id, "modrinth")
-                        if success:
-                            log_event("SELF_HEAL", f"Downloaded dependency: {best_match.name} ({dep_name})")
-                            return True
-                        else:
-                            log_event("WARN", f"Failed to install {best_match.name}: {msg}")
-        except Exception as e:
-            log_event("WARN", f"Error searching Modrinth for {dep_name}: {e}")
-            continue
-    
-    # Try CurseForge scraper if Playwright is available
-    if PLAYWRIGHT_AVAILABLE:
-        log_event("SELF_HEAL", f"Searching CurseForge for: {dep_name}")
-        try:
-            cf = CurseForgeScraper(cfg)
-            cf_results = cf.search(dep_name, limit=5)
-            
-            for result in cf_results:
-                # Try to get download from CurseForge
-                try:
-                    from playwright.sync_api import sync_playwright
-                    from playwright_stealth import Stealth
-                    
-                    loader_id = 1754  # NeoForge
-                    mc_version = cfg.mc_version
-                    url = f"https://www.curseforge.com/minecraft/mc-mods/{result.slug}/files?gameVersion={mc_version}"
-                    
-                    with sync_playwright() as p:
-                        browser = p.chromium.launch(headless=True)
-                        context = browser.new_context(
-                            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                        )
-                        page = context.new_page()
-                        Stealth().apply_stealth_sync(page)
-                        
-                        try:
-                            page.goto(url, timeout=30000)
-                            page.wait_for_selector("tr.project-file-list-item", timeout=15000)
-                        except:
-                            browser.close()
-                            continue
-                        
-                        rows = page.query_selector_all("tr.project-file-list-item")
-                        for row in rows[:10]:
-                            try:
-                                version_el = row.query_selector("td.version-col")
-                                if version_el:
-                                    version_text = version_el.inner_text().strip()
-                                    if mc_version in version_text and "NeoForge" in version_text:
-                                        dl_link = row.query_selector("a.btn[href*='/download/']")
-                                        if dl_link:
-                                            dl_href = dl_link.get_attribute("href")
-                                            if not dl_href:
-                                                continue
-                                            file_id_match = re.search(r'/download/(\d+)', dl_href)
-                                            if file_id_match:
-                                                file_id = file_id_match.group(1)
-                                                download_url = f"https://www.curseforge.com{dl_href}"
-                                                
-                                                req = urllib.request.Request(download_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
-                                                with urllib.request.urlopen(req, timeout=60) as response:
-                                                    final_url = response.geturl()
-                                                    with urllib.request.urlopen(urllib.request.Request(final_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}), timeout=120) as dl_response:
-                                                        filename = result.slug + ".jar"
-                                                        file_path = mods_dir / filename
-                                                        file_path.write_bytes(dl_response.read())
-                                                        log_event("SELF_HEAL", f"Downloaded {filename} from CurseForge")
-                                                        browser.close()
-                                                        return True
-                                                break
-                            except:
-                                continue
-                        
-                        browser.close()
-                except Exception as e:
-                    log_event("WARN", f"CurseForge download failed for {result.name}: {e}")
-                    continue
-        except Exception as e:
-            log_event("WARN", f"CurseForge search failed for {dep_name}: {e}")
-    
-    log_event("ERROR", f"Could not find dependency: {dep_name}")
-    return False
-
-
-def ensure_dependencies(cfg: ServerConfig, required_deps: list[str]) -> int:
-    """Ensure all required dependencies are installed.
-    
-    Args:
-        cfg: Server configuration
-        required_deps: List of dependency names to check/install
-        
-    Returns:
-        Number of dependencies successfully installed
-    """
-    mods_dir = CWD / cfg.mods_dir
-    existing_mods = set()
-    
-    if mods_dir.exists():
-        for f in mods_dir.glob("*.jar"):
-            name = f.stem.lower()
-            for dep in required_deps:
-                if dep.lower().replace("-", "").replace("_", "") in name.replace("-", "").replace("_", ""):
-                    existing_mods.add(dep.lower())
-    
-    to_install = [d for d in required_deps if d.lower() not in existing_mods]
-    
-    installed = 0
-    for dep in to_install:
-        if ensure_dependency(dep, cfg):
-            installed += 1
-    
-    return installed
-
 
 def strip_client_classes(jar_path: Path) -> bool:
     """Strip client-side classes from a mod JAR to make it server-compatible.
@@ -531,8 +342,7 @@ def strip_client_classes(jar_path: Path) -> bool:
     stripped_path = jar_path.parent / f"{jar_path.stem}.server.jar"
     
     try:
-        with zipfile.ZipFile(jar_path, 'r') as src_zip:
-            with zipfile.ZipFile(temp_path, 'w', zipfile.ZIP_DEFLATED) as dst_zip:
+        with zipfile.ZipFile(jar_path, 'r') as src_zip, zipfile.ZipFile(temp_path, 'w', zipfile.ZIP_DEFLATED) as dst_zip:
                 for item in src_zip.infolist():
                     # Skip client-side files
                     should_skip = any(
@@ -562,7 +372,6 @@ def strip_client_classes(jar_path: Path) -> bool:
         if temp_path.exists():
             temp_path.unlink()
         return False
-
 
 def handle_client_only_mod(mod_name: str, reason: str, mods_dir: Path) -> bool:
     """Handle a mod that only has client-side components.
@@ -626,15 +435,13 @@ def handle_client_only_mod(mod_name: str, reason: str, mods_dir: Path) -> bool:
     log_event("WARN", f"Could not strip client classes from {mod_name}, keeping original")
     return False
 
-
 def setup(cfg: ServerConfig) -> bool:
     """Run full setup process."""
     log_event("INFO", "Starting NeoRunner setup...")
     
     # Check/install system deps
-    if not check_system_deps():
-        if not install_system_deps():
-            return False
+    if not check_system_deps() and not install_system_deps():
+        return False
     
     # Create directories
     ensure_directories(cfg)
@@ -646,5 +453,19 @@ def setup(cfg: ServerConfig) -> bool:
     if not install_loader(cfg):
         return False
     
+    # Patch the loader jar so mismatched clients are shown the modpack
+    # download link instead of "Incompatible client! Please use NeoForge X".
+    from .jar_message_patcher import patch_loader_messages
+    patch_loader_messages(cfg.loader)
+
+    # Bundle the Chunker world-conversion CLI (Bedrock -> Java, version up/down
+    # grade). Best-effort: a missing download should not abort setup.
+    try:
+        from .chunker import ensure_chunker
+        ensure_chunker(cfg)
+        log_event("INFO", "Chunker world converter installed")
+    except Exception as e:
+        log_event("WARN", f"Chunker installation skipped: {e}")
+
     log_event("INFO", "Setup complete!")
     return True

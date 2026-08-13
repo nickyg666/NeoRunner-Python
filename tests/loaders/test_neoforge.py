@@ -1,14 +1,13 @@
 """Tests for NeoForge loader crash detection."""
 
-import pytest
-import sys
 import os
+import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from neorunner_pkg.loaders.neoforge import NeoForgeLoader
 from neorunner_pkg.config import ServerConfig
+from neorunner_pkg.loaders.neoforge import NeoForgeLoader
 
 
 def _make_loader():
@@ -26,32 +25,32 @@ class TestNeoForgeCrashDetection:
         cases = [
             # (log_sample, expected_type, expected_dep_or_culprit)
 (
-                "---- Minecraft Crash Report ----\n"
-                "Failure message: mod foo requires bar",
+                ("---- Minecraft Crash Report ----\n"
+                "Failure message: mod foo requires bar"),
                 "missing_dep",
                 "bar",
             ),
             (
-                "---- Minecraft Crash Report ----\n"
-                "Error loading mod: mymod\nnet.neoforged.fml.ModLoadingException",
+                ("---- Minecraft Crash Report ----\n"
+                "Error loading mod: mymod\nnet.neoforged.fml.ModLoadingException"),
                 "mod_error",
                 "mymod",
             ),
             (
-                "---- Minecraft Crash Report ----\n"
-                "DuplicateModsFoundException: mods/a.jar and mods/b.jar",
+                ("---- Minecraft Crash Report ----\n"
+                "DuplicateModsFoundException: mods/a.jar and mods/b.jar"),
                 "mod_conflict",
                 "duplicate",
             ),
             (
-                "---- Minecraft Crash Report ----\n"
-                "This world is incompatible with the server version",
+                ("---- Minecraft Crash Report ----\n"
+                "This world is incompatible with the server version"),
                 "version_mismatch",
                 None,
             ),
             (
-                "---- Minecraft Crash Report ----\n"
-                "mixin apply for mod coolmod failed",
+                ("---- Minecraft Crash Report ----\n"
+                "mixin apply for mod coolmod failed"),
                 "mod_conflict",
                 "mixin_fail",
             ),

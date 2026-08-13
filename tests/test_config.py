@@ -1,15 +1,22 @@
 """Tests for config validation and management."""
 
-import pytest
-import sys
-import os
 import json
+import os
+import sys
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from neorunner_pkg.config import ServerConfig, validate_config, ensure_config
-from neorunner_pkg.config import load_cfg, save_cfg, _validate_memory, _get_default_version
-
+from neorunner_pkg.config import (
+    ServerConfig,
+    _get_default_version,
+    _validate_memory,
+    ensure_config,
+    load_cfg,
+    save_cfg,
+    validate_config,
+)
 
 
 class TestConfigValidation:
@@ -191,9 +198,9 @@ class TestValidateConfigErrors:
     """Test validate_config error branches and fail_on_error."""
 
     def _empty(self, **kw):
-        defaults = dict(mc_version="1.21.11", loader="neoforge", mods_dir="mods",
-                        clientonly_dir="clientonly", quarantine_dir="quarantine",
-                        xmx="4G", xms="2G")
+        defaults = {"mc_version": "1.21.11", "loader": "neoforge", "mods_dir": "mods",
+                        "clientonly_dir": "clientonly", "quarantine_dir": "quarantine",
+                        "xmx": "4G", "xms": "2G"}
         defaults.update(kw)
         return ServerConfig(**defaults)
 

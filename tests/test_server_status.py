@@ -1,9 +1,8 @@
 """Tests for server status checks and monitoring."""
 
-import pytest
-import sys
 import os
-from unittest.mock import patch, MagicMock, PropertyMock
+import sys
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -35,8 +34,8 @@ class TestTmuxServer:
     
     def test_tmux_server_init(self):
         """TmuxServer initializes correctly."""
-        from neorunner_pkg.server import TmuxServer
         from neorunner_pkg.config import ServerConfig
+        from neorunner_pkg.server import TmuxServer
         
         cfg = ServerConfig()
         server = TmuxServer(cfg)
@@ -47,8 +46,8 @@ class TestTmuxServer:
     
     def test_tmux_server_default_values(self):
         """TmuxServer has expected defaults."""
-        from neorunner_pkg.server import TmuxServer
         from neorunner_pkg.config import ServerConfig
+        from neorunner_pkg.server import TmuxServer
         
         cfg = ServerConfig()
         server = TmuxServer(cfg)
@@ -116,8 +115,8 @@ class TestServerConfigIntegration:
     
     def test_server_gets_loader_config(self):
         """Server gets loader from config."""
-        from neorunner_pkg.server import TmuxServer
         from neorunner_pkg.config import ServerConfig
+        from neorunner_pkg.server import TmuxServer
         
         cfg = ServerConfig(loader="neoforge", mc_version="1.21.11")
         server = TmuxServer(cfg)

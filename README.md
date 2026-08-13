@@ -14,10 +14,19 @@ A comprehensive Python platform for managing self-hosted Minecraft modded server
 ### Web Dashboard
 - **Real-Time Server Status**: Running state, player count, uptime
 - **Mod Management**: Upload, delete, organize mods
-- **World Management**: Scan, switch, backup worlds
+- **World Management**: Scan, switch, backup, upload and convert worlds
 - **Configuration UI**: Update ports, memory, mod settings
 - **Live Log Streaming**: Real-time server log viewer
 - **Network Channel Analysis**: Detect client/server mod mismatches
+
+### World Upload & Conversion
+- **Folder/Archive Upload**: Select a world folder (or a `.zip`/`.mcworld`/`.tar.gz`) from the dashboard
+- **Pre-Accept Validation**: Analyzes structure, world version, Java requirement, size/count caps and flags suspicious payloads before the world is accepted
+- **Hardened Uploads**: Path-traversal protection, zip/tar bomb caps, executable-file flagging, safe filename sanitization
+- **Versioned Archiving**: Accepted worlds are compressed into `worlds_archive/mc-<version>/` and decompressed on switch
+- **Bedrock Detection**: Bedrock worlds are detected and can be converted to Java via Chunker
+- **Chunker Integration**: Convert Bedrock → Java (or up/downgrade Java worlds) to the running server version or any picked Java version; bundled into `neorunner setup`
+
 
 ### Mod Management
 - **Modrinth Integration**: Search and download mods via Modrinth API

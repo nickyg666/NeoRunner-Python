@@ -169,26 +169,11 @@ class TestKickEndpoint:
         with dashboard.app.test_client() as c:
             yield c
 
-    def test_kick_requires_player(self, client):
-        r = client.post("/api/kick", json={}, headers=_auth_header())
-        assert r.status_code == 400
-
-    def test_kick_sends_command_with_link(self, client, monkeypatch):
-        sent = []
-        monkeypatch.setattr("neorunner_pkg.server.send_command", lambda cmd: sent.append(cmd) or True)
+    def test_manual_kick_endpoint_removed(self, client):
+        """Manual kick was removed - mismatched clients are auto-prompted at
+        connect time via the patched loader jar instead."""
         r = client.post("/api/kick", json={"player": "Steve"}, headers=_auth_header())
-        assert r.status_code == 200
-        assert r.json["success"] is True
-        assert len(sent) == 1
-        assert sent[0].startswith("kick Steve")
-        assert "mc.w8.mom/download/installer.jar" in sent[0]
-
-    def test_kick_custom_reason_keeps_link(self, client, monkeypatch):
-        sent = []
-        monkeypatch.setattr("neorunner_pkg.server.send_command", lambda cmd: sent.append(cmd) or True)
-        r = client.post("/api/kick", json={"player": "Alex", "reason": "Mods outdated: {link}"}, headers=_auth_header())
-        assert r.status_code == 200
-        assert "mc.w8.mom/download/installer.jar" in sent[0]
+        assert r.status_code == 404
 
     def test_broadcast_mods_includes_link(self, client, monkeypatch):
         sent = []

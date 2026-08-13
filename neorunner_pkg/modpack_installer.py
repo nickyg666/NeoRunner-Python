@@ -79,7 +79,7 @@ def resolve_file_name(project_id: int, file_id: int) -> str | None:
         for f in data.get("files", []):
             if f.get("id") == file_id:
                 return f.get("name")
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         log.warning("cfwidget lookup failed for %s/%s: %s", project_id, file_id, e)
     return None
 
@@ -125,7 +125,7 @@ def download_cf_mod(
                         if on_progress:
                             on_progress(safe_name, written, total)
             return True, safe_name
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             errors.append(f"{url}: {e}")
             log.warning("CF download failed via %s: %s", cdn_base, e)
     return False, "; ".join(errors)
@@ -190,7 +190,7 @@ def install_curseforge_pack(
     result = InstallResult()
     try:
         manifest, files = parse_manifest(zip_path)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         log.error("Invalid modpack zip %s: %s", zip_path, e)
         result.errors.append(f"invalid modpack archive: {e}")
         return result
@@ -260,7 +260,7 @@ def install_curseforge_pack(
             result.files.append({"file": f"overrides/ ({n} files)", "status": "extracted"})
             if n == 0:
                 result.errors.append("modpack has no overrides/ folder")
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             result.errors.append(f"overrides extraction failed: {e}")
 
     result.skipped = result.total - result.installed - result.failed

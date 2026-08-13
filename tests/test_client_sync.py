@@ -1,17 +1,17 @@
 """Tests for client sync: manifest, auto-fetch, resync, PS1 script."""
 
-import sys
-import os
 import json
+import os
+import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from neorunner_pkg.mod_hosting import update_manifest, generate_powershell_script
-from neorunner_pkg.crash_analyzer import CrashAnalyzer, CrashAnalysis
 from neorunner_pkg.config import ServerConfig
+from neorunner_pkg.crash_analyzer import CrashAnalysis, CrashAnalyzer
+from neorunner_pkg.mod_hosting import generate_powershell_script, update_manifest
 
 
 class TestClientSync:
@@ -30,7 +30,7 @@ class TestClientSync:
 
     def test_manifest_includes_clientonly(self):
         """clientonly folder contents appear in manifest with type=clientonly."""
-        tmp, mods, clientonly, cfg = self._setup()
+        _tmp, mods, _clientonly, cfg = self._setup()
         ok = update_manifest(mods, cfg)
         assert ok is True
         manifest = json.loads((mods / "manifest.json").read_text())
@@ -75,7 +75,7 @@ class TestClientSync:
 
     def test_ps1_fetches_latest_manifest(self):
         """Generated PS1 script must fetch from /download/manifest URL."""
-        tmp, mods, clientonly, cfg = self._setup()
+        _tmp, _mods, _clientonly, cfg = self._setup()
         script = generate_powershell_script(cfg)
         assert "/download/manifest" in script
         assert "manifest" in script.lower()

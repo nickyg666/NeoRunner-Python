@@ -3,20 +3,18 @@ CLI for NeoRunner.
 Provides command-line interface for server management.
 """
 
-#
 
-import os
-import sys
-import json
 import argparse
+import fcntl
+import json
+import os
 import signal
-import time
+import sys
 import threading
-from pathlib import Path
-from typing import Optional
+import time
 
-from .config import load_cfg, save_cfg, ServerConfig
-from .constants import CWD
+from .config import ServerConfig, load_cfg, save_cfg
+from .constants import CWD, PID_FILE
 from .log import log_event
 
 
@@ -26,18 +24,134 @@ def signal_handler(sig, frame):
     sys.exit(0)
 
 
+def _read_daemon_pid() -> int | None:
+    """Return the running daemon's PID from the pid file, or None if absent/stale."""
+    try:
+        if not PID_FILE.exists():
+            return None
+        pid = int(PID_FILE.read_text().strip())
+    except (ValueError, OSError):
+        return None
+    return pid if pid > 0 else None
+
+
+def _pid_alive(pid: int) -> bool:
+    """True if a process with the given PID currently exists."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def _is_neorunner_process(pid: int) -> bool:
+    """True if the PID's command line looks like a NeoRunner process."""
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            cmdline = f.read().replace(b"\x00", b" ")
+        return b"neorunner" in cmdline
+    except OSError:
+        return False
+
+
+def _running_daemon_pid() -> int | None:
+    """Return the PID of a live NeoRunner daemon, or None."""
+    pid = _read_daemon_pid()
+    if pid is None:
+        return None
+    if not _pid_alive(pid):
+        return None
+    if not _is_neorunner_process(pid):
+        return None
+    return pid
+
+
+def _acquire_instance_lock() -> int | None:
+    """Acquire the single-instance lock (``fcntl.flock`` on the pid file).
+
+    Returns the open lock file descriptor, or ``None`` if another NeoRunner
+    instance already holds the lock.  The flock is released automatically when
+    the process exits, so a crashed daemon never leaves a stale lock behind.
+    """
+    try:
+        fd = os.open(str(PID_FILE), os.O_RDWR | os.O_CREAT, 0o644)
+    except OSError as e:
+        print(f"Warning: could not open pid file {PID_FILE}: {e}")
+        return None
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        return None
+    try:
+        os.ftruncate(fd, 0)
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.write(fd, str(os.getpid()).encode())
+    except OSError:
+        pass
+    return fd
+
+
+def _stop_daemon(wait: float = 10.0) -> bool:
+    """Terminate a running daemon (SIGTERM) and wait for it to exit."""
+    pid = _running_daemon_pid()
+    if pid is None:
+        return False
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        return False
+    deadline = time.time() + wait
+    while time.time() < deadline and _pid_alive(pid):
+        time.sleep(0.1)
+    return not _pid_alive(pid)
+
+
+def _signal_daemon_reload() -> bool:
+    """Ask the running daemon to reload config + users (SIGHUP)."""
+    pid = _running_daemon_pid()
+    if pid is None:
+        return False
+    try:
+        os.kill(pid, signal.SIGHUP)
+        return True
+    except OSError:
+        return False
+
+
 def cmd_start(args):
     """Start the NeoRunner server and services with crash recovery."""
-    
+    # Single-instance guard: refuse to spin up a second daemon/dashboard.
+    lock_fd = _acquire_instance_lock()
+    if lock_fd is None:
+        print("NeoRunner is already running.")
+        print("Use 'neorunner restart' to restart, or 'neorunner stop' first.")
+        return 1
+
     if args.daemon:
         pid = os.fork()
         if pid > 0:
             if args.pid_file:
-                with open(args.pid_file, 'w') as f:
-                    f.write(str(pid))
+                try:
+                    with open(args.pid_file, 'w') as f:
+                        f.write(str(pid))
+                except OSError:
+                    pass
             sys.exit(0)
         
         os.setsid()
+        
+        # Refresh the pid file with our (child) pid now that we are the daemon.
+        try:
+            os.ftruncate(lock_fd, 0)
+            os.lseek(lock_fd, 0, os.SEEK_SET)
+            os.write(lock_fd, str(os.getpid()).encode())
+        except OSError:
+            pass
         
         devnull = os.open(os.devnull, os.O_RDWR)
         os.dup2(devnull, 0)
@@ -61,11 +175,9 @@ def cmd_start(args):
     print(f"Working directory: {CWD}")
     
     # Import here to avoid circular imports
-    from .installer import setup, check_system_deps, ensure_dependencies
-    from .server import run_server, is_server_running, wait_for_server, stop_server
     from .dashboard import run_dashboard
-    from .log import log_event
-    from .version import get_latest_minecraft_version, get_all_minecraft_versions
+    from .installer import check_system_deps, setup
+    from .server import is_server_running, run_server, stop_server, wait_for_server
     
     # Check system dependencies
     if not check_system_deps():
@@ -82,6 +194,17 @@ def cmd_start(args):
         if not setup(cfg):
             print("Setup failed!")
             return 1
+    
+    # Ensure the loader jar shows the modpack download link instead of the
+    # generic "Incompatible client!" message (idempotent; re-applies after
+    # loader version bumps that replace the jar).
+    try:
+        from .jar_message_patcher import loader_is_patched, patch_loader_messages
+        if not loader_is_patched(cfg.loader):
+            print("Patching loader jar with modpack download message...")
+            patch_loader_messages(cfg.loader)
+    except Exception as e:
+        log_event("WARN", f"Could not patch loader jar: {e}")
     
     # Start services
     threads = []
@@ -106,14 +229,30 @@ def cmd_start(args):
         shutdown_requested = True
         if server_process:
             stop_server()
-    
+        try:
+            os.close(lock_fd)
+        except OSError:
+            pass
+
+    # SIGHUP: reload config + user store (sent by `neorunner users` and others).
+    def handle_reload(signum, frame):
+        nonlocal cfg
+        try:
+            from .config import ensure_config
+            from .config import load_cfg as _reload_cfg
+            cfg = ensure_config(_reload_cfg())
+            log_event("RELOAD", "Reloaded config and user store (SIGHUP)")
+        except Exception as e:
+            log_event("WARN", f"Reload failed: {e}")
+
     signal.signal(signal.SIGINT, lambda s, f: request_shutdown())
     signal.signal(signal.SIGTERM, lambda s, f: request_shutdown())
+    signal.signal(signal.SIGHUP, handle_reload)
     
     # Start Minecraft server with crash recovery loop
     if not args.no_server:
         restart_count = 0
-        max_restarts = 10
+        max_restarts = cfg.max_restart_attempts
         crash_cooldown = 30  # seconds between restarts
         
         while not shutdown_requested:
@@ -126,8 +265,8 @@ def cmd_start(args):
             print("Running preflight checks...")
             def run_preflight():
                 try:
-                    # Skip all dependency checks - server.py handles this now
-                    pass
+                    from .self_heal import preflight_dep_check
+                    preflight_dep_check(cfg)
                 except Exception as e:
                     log_event("WARN", f"Preflight error: {e}")
             
@@ -147,7 +286,7 @@ def cmd_start(args):
                 time.sleep(crash_cooldown)
                 continue
             
-            print(f"Minecraft server started")
+            print("Minecraft server started")
             
             # Wait for server to actually bind ports
             if not wait_for_server(timeout=60):
@@ -175,13 +314,13 @@ def cmd_start(args):
     print("\n" + "="*50)
     print("NeoRunner is running!")
     print(f"Dashboard: http://0.0.0.0:{cfg.http_port}")
-    print(f"  (Access from any device on your network)")
+    print("  (Access from any device on your network)")
     print("Press Ctrl+C to stop")
     print("="*50 + "\n")
     
     # Keep running - this is the main loop that monitors Java
     restart_attempts = 0
-    max_restart_attempts = 5
+    max_restart_attempts = cfg.max_restart_attempts
     restart_delay = 5
     try:
         while not shutdown_requested:
@@ -214,7 +353,7 @@ def cmd_start(args):
 
 def cmd_stop(args):
     """Stop the NeoRunner server."""
-    from .server import stop_server, is_server_running
+    from .server import is_server_running, stop_server
     
     print("Stopping NeoRunner...")
     
@@ -223,9 +362,15 @@ def cmd_stop(args):
             print("Server stopped.")
         else:
             print("Failed to stop server!")
-            return 1
     else:
         print("Server is not running.")
+    
+    # Also terminate the daemon (dashboard + monitor) so a later `start` can
+    # re-acquire the single-instance lock.
+    if _stop_daemon():
+        print("Daemon stopped.")
+    else:
+        print("Daemon is not running.")
     
     return 0
 
@@ -239,10 +384,13 @@ def cmd_restart(args):
 
 def cmd_setup(args):
     """Run setup wizard - prompts unless --yes flag or all args provided."""
-    import sys
-    from .config import ensure_config, load_cfg, save_cfg, ServerConfig
+    from .config import ensure_config, load_cfg, save_cfg
     from .installer import setup
-    from .version import get_latest_minecraft_version, get_all_minecraft_versions, get_latest_for_loader
+    from .version import (
+        get_all_minecraft_versions,
+        get_latest_for_loader,
+        get_latest_minecraft_version,
+    )
     
     cfg = load_cfg()
     cfg = ensure_config(cfg)
@@ -342,22 +490,59 @@ def cmd_setup(args):
         print("\nConfiguration saved!")
     
     print("\nRunning NeoRunner setup...")
-    if setup(cfg):
-        print("Setup complete!")
-        print(f"\nServer configured for:")
-        print(f"  Minecraft: {cfg.mc_version}")
-        print(f"  Loader: {cfg.loader}")
-        print(f"  Memory: {cfg.xms} -> {cfg.xmx}")
-        print(f"  HTTP Port: {cfg.http_port}")
-        return 0
-    else:
+    if not setup(cfg):
         print("Setup failed!")
         return 1
+    print("Setup complete!")
+    print("\nServer configured for:")
+    print(f"  Minecraft: {cfg.mc_version}")
+    print(f"  Loader: {cfg.loader}")
+    print(f"  Memory: {cfg.xms} -> {cfg.xmx}")
+    print(f"  HTTP Port: {cfg.http_port}")
+
+    # External access (dynamic DNS + automatic SSL) - first-class, hard-fails.
+    from .external_access import (
+        ExternalAccessError,
+        setup_external_access,
+        setup_systemd,
+    )
+
+    wants_external = bool(args.domain and args.external_access)
+    if wants_external:
+        print(f"\nConfiguring external access via {args.external_access} for {args.domain}...")
+        try:
+            setup_external_access(cfg, {
+                "domain": args.domain,
+                "external_access": args.external_access,
+                "cf_token": args.cf_token or "",
+                "mc_port": args.mc_port,
+                "ddclient": args.ddclient,
+                "ddclient_provider": args.ddclient_provider,
+                "ddclient_login": args.ddclient_login,
+                "ddclient_password": args.ddclient_password,
+            })
+            print(f"  External access configured: https://{args.domain}")
+        except ExternalAccessError as e:
+            print(f"  FAILED to configure external access: {e}")
+            return 1
+    elif args.domain and not args.external_access:
+        print("  Note: --domain given but no --external-access provider; skipping (use --external-access caddy|cloudflare)")
+
+    if args.systemd:
+        print("\nInstalling systemd service for persistence...")
+        try:
+            setup_systemd(cfg)
+            print("  systemd service installed (neorunner.service, auto-start on boot)")
+        except ExternalAccessError as e:
+            print(f"  FAILED to install systemd service: {e}")
+            return 1
+
+    return 0
 
 
 def cmd_init(args):
     """Initialize default config - only if missing or --force."""
-    from .config import save_cfg, ensure_config, ServerConfig, load_cfg
+    from .config import ensure_config, load_cfg, save_cfg
     from .constants import CWD
     from .version import get_latest_minecraft_version
     
@@ -455,8 +640,8 @@ def cmd_config(args):
 
 def cmd_config_setup(cfg):
     """Interactive configuration wizard."""
-    from .config import ensure_config, save_cfg, ServerConfig
-    from .version import get_latest_minecraft_version, get_latest_for_loader
+    from .config import ensure_config, save_cfg
+    from .version import get_latest_for_loader, get_latest_minecraft_version
     
     print("="*50)
     print("NeoRunner Configuration Wizard")
@@ -609,8 +794,9 @@ def cmd_mods(args):
     
     elif args.sort:
         print("Sorting mods by type...")
-        from .mods import sort_mods_by_type
         import shutil
+
+        from .mods import sort_mods_by_type
         
         mods_dir = CWD / cfg.mods_dir
         clientonly_dir = mods_dir / "clientonly"
@@ -633,6 +819,70 @@ def cmd_mods(args):
     return 0
 
 
+def cmd_users(args):
+    """Admin user management (dashboard login credentials)."""
+    from .users import add_user, list_users, remove_user, set_password
+
+    if args.list:
+        users = list_users()
+        if not users:
+            print("No admin users configured (dashboard falls back to env bootstrap credentials).")
+        else:
+            print("Admin users:")
+            for u in users:
+                print(f"  - {u}")
+        return 0
+
+    if args.add:
+        if not args.password:
+            import getpass
+            args.password = getpass.getpass(f"Password for {args.add}: ")
+        if add_user(args.add, args.password):
+            print(f"Added/updated user '{args.add}'.")
+            if _signal_daemon_reload():
+                print("Daemon reloaded; the new user can log in now.")
+            else:
+                print("No running daemon; changes apply on next 'neorunner start'.")
+            return 0
+        print("Error: username and password are required.")
+        return 1
+
+    if args.remove:
+        if remove_user(args.remove):
+            print(f"Removed user '{args.remove}'.")
+            _signal_daemon_reload()
+            return 0
+        print(f"User '{args.remove}' not found.")
+        return 1
+
+    if args.set_password:
+        if not args.password:
+            import getpass
+            args.password = getpass.getpass(f"New password for {args.set_password}: ")
+        if set_password(args.set_password, args.password):
+            print(f"Updated password for '{args.set_password}'.")
+            _signal_daemon_reload()
+            return 0
+        print(f"User '{args.set_password}' not found.")
+        return 1
+
+    print("Usage: neorunner users [--list | --add USER | --remove USER | --set-password USER] [--password PASS]")
+    return 1
+
+
+def _add_start_args(parser: argparse.ArgumentParser) -> None:
+    """Add the shared start/restart options to a subparser."""
+    parser.add_argument('--no-server', action='store_true', help='Run dashboard only, skip Minecraft server')
+    parser.add_argument('--no-dashboard', action='store_true', help='Run server only, skip dashboard')
+    parser.add_argument('--xmx', default=None, help='Override max heap memory')
+    parser.add_argument('--xms', default=None, help='Override initial heap memory')
+    parser.add_argument('--no-preflight', action='store_true', help='Skip preflight dependency checks')
+    parser.add_argument('--force', action='store_true', help='Force start even with missing deps')
+    parser.add_argument('--foreground', action='store_true', help='Run in foreground (don\'t daemonize)')
+    parser.add_argument('--daemon', '-d', action='store_true', help='Run in background (daemon mode)')
+    parser.add_argument('--pid-file', help='PID file to write when daemonizing')
+
+
 def main():
     """Main CLI entry point."""
     # Setup signal handlers
@@ -648,40 +898,37 @@ def main():
     
     # Start command
     start_parser = subparsers.add_parser('start', help='Start the server')
-    start_parser.add_argument('--no-server', action='store_true', help='Don\'t start Minecraft server')
-    start_parser.add_argument('--no-dashboard', action='store_true', help='Don\'t start web dashboard')
-    start_parser.add_argument('--no-mod-server', action='store_true', help='Don\'t start mod hosting server')
-    start_parser.add_argument('--force', action='store_true', help='Force start even with missing deps')
-    start_parser.add_argument('--foreground', action='store_true', help='Run in foreground (don\'t daemonize)')
-    start_parser.add_argument('--daemon', '-d', action='store_true', help='Run in background (daemon mode)')
-    start_parser.add_argument('--pid-file', help='PID file to write when daemonizing')
+    _add_start_args(start_parser)
     
     # Stop command
-    subparsers.add_parser('stop', help='Stop the server')
+    subparsers.add_parser('stop', help='Stop the server and daemon')
     
-    # Restart command
-    subparsers.add_parser('restart', help='Restart the server')
+    # Restart command (shares start options)
+    restart_parser = subparsers.add_parser('restart', help='Restart the server')
+    _add_start_args(restart_parser)
     
-    # Setup command
-    setup_parser = subparsers.add_parser('setup', help='Run interactive setup wizard')
-    setup_parser.add_argument('--mc-version', default=None, help='Minecraft version (auto-detected if not specified)')
-    setup_parser.add_argument('--loader', default=None, choices=['neoforge', 'forge', 'fabric'], help='Mod loader (NeoForge default)')
-    setup_parser.add_argument('--xmx', default=None, help='Max heap memory (default: 4G)')
-    setup_parser.add_argument('--xms', default=None, help='Initial heap memory')
-    setup_parser.add_argument('--http-port', type=int, default=None, help='HTTP port for dashboard')
-    setup_parser.add_argument('--query-port', type=int, default=None, help='Game port')
-    setup_parser.add_argument('--force', action='store_true', help='Force setup even if config exists')
-    setup_parser.add_argument('--yes', '-y', action='store_true', help='Skip all prompts, use defaults')
+    # Help command - full verbosity for every command
+    subparsers.add_parser('help', help='Show full help for all commands and options')
     
-    # Install command (alias for setup, fully interactive)
-    install_parser = subparsers.add_parser('install', help='Run interactive installation (same as setup)')
-    install_parser.add_argument('--mc-version', default=None, help='Minecraft version')
-    install_parser.add_argument('--loader', default=None, choices=['neoforge', 'forge', 'fabric'], help='Mod loader')
-    install_parser.add_argument('--xmx', default=None, help='Max heap memory')
+    # Install command - full installation with external access + persistence
+    install_parser = subparsers.add_parser('install', help='Install NeoRunner (config, loader, external access, systemd)')
+    install_parser.add_argument('--mc-version', default=None, help='Minecraft version (auto-detected if not specified)')
+    install_parser.add_argument('--loader', default=None, choices=['neoforge', 'forge', 'fabric'], help='Mod loader (NeoForge default)')
+    install_parser.add_argument('--xmx', default=None, help='Max heap memory (default: 4G)')
     install_parser.add_argument('--xms', default=None, help='Initial heap memory')
-    install_parser.add_argument('--http-port', type=int, default=None, help='HTTP port')
+    install_parser.add_argument('--http-port', type=int, default=None, help='HTTP port for dashboard')
     install_parser.add_argument('--query-port', type=int, default=None, help='Game port')
-    install_parser.add_argument('--force', action='store_true', help='Force installation')
+    install_parser.add_argument('--force', action='store_true', help='Force setup even if config exists')
+    install_parser.add_argument('--yes', '-y', action='store_true', help='Skip all prompts, use defaults')
+    install_parser.add_argument('--domain', default=None, help='Public domain for external access (e.g. play.example.com)')
+    install_parser.add_argument('--external-access', default=None, choices=['caddy', 'cloudflare'], help='Expose dashboard/downloads (and MC port) publicly')
+    install_parser.add_argument('--cf-token', default=None, help='Cloudflare API token for named-tunnel setup')
+    install_parser.add_argument('--mc-port', type=int, default=None, help='Public TCP port to proxy Minecraft through (Caddy)')
+    install_parser.add_argument('--ddclient', action='store_true', help='Configure ddclient dynamic DNS for --domain')
+    install_parser.add_argument('--ddclient-provider', default='dyndns2', help='ddclient protocol (dyndns2, cloudflare, noip...)')
+    install_parser.add_argument('--ddclient-login', default='', help='ddclient account/login')
+    install_parser.add_argument('--ddclient-password', default='', help='ddclient password/token')
+    install_parser.add_argument('--systemd', action='store_true', help='Install a systemd service for auto-start (persistence)')
     
     # Init command - create default config
     init_parser = subparsers.add_parser('init', help='Initialize default config')
@@ -715,11 +962,26 @@ def main():
     mods_parser.add_argument('--upgrade', action='store_true', help='Upgrade mods')
     mods_parser.add_argument('--sort', action='store_true', help='Sort mods by type')
     mods_parser.add_argument('--keywords', nargs='+', help='Keywords to search/install mods')
+
+    # Users command - admin credential management
+    users_parser = subparsers.add_parser('users', help='Manage admin dashboard users')
+    users_parser.add_argument('--list', action='store_true', help='List admin users')
+    users_parser.add_argument('--add', help='Add a user (or reset their password)')
+    users_parser.add_argument('--remove', help='Remove a user')
+    users_parser.add_argument('--set-password', help='Change a user password')
+    users_parser.add_argument('--password', help='Password (prompts if omitted)')
     
     args = parser.parse_args()
     
-    if args.command is None:
+    if args.command is None or args.command == 'help':
+        # Full verbosity: main usage + every subcommand's full options.
         parser.print_help()
+        print("\n" + "=" * 70)
+        print("Command reference (full options)")
+        print("=" * 70)
+        for name, sub in subparsers.choices.items():
+            print(f"\n$ neorunner {name}")
+            sub.print_help()
         return 0
     
     # Route to appropriate handler
@@ -727,13 +989,13 @@ def main():
         'start': cmd_start,
         'stop': cmd_stop,
         'restart': cmd_restart,
-        'setup': cmd_setup,
         'init': cmd_init,
-        'install': cmd_setup,  # 'install' is alias for 'setup'
+        'install': cmd_setup,
         'status': cmd_status,
         'config': cmd_config,
         'world': cmd_world,
         'mods': cmd_mods,
+        'users': cmd_users,
     }
     
     handler = handlers.get(args.command)

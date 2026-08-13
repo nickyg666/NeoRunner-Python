@@ -6,15 +6,13 @@ Actions:
 3. Mods with client mixin targets -> patch mixin JSON to remove client targets
 """
 
-import zipfile
-import os
-import re
 import json
 import logging
+import re
 import shutil
-from pathlib import Path
-from typing import Dict, List, Optional
+import zipfile
 from dataclasses import dataclass, field
+from pathlib import Path
 
 log = logging.getLogger(__name__)
 
@@ -54,8 +52,8 @@ class ModAnalysis:
     action: str = "keep"  # keep, move, strip, patch
     has_client_classes: bool = False
     has_client_mixins: bool = False
-    client_files: List[str] = field(default_factory=list)
-    client_mixins: List[str] = field(default_factory=list)
+    client_files: list[str] = field(default_factory=list)
+    client_mixins: list[str] = field(default_factory=list)
     description: str = ""
 
 
@@ -132,8 +130,7 @@ def strip_client_classes(jar_path: Path, backup: bool = True) -> bool:
     temp_path = jar_path.parent / f"{jar_path.stem}.stripping.tmp"
     
     try:
-        with zipfile.ZipFile(jar_path, 'r') as src_zip:
-            with zipfile.ZipFile(temp_path, 'w', zipfile.ZIP_DEFLATED) as dst_zip:
+        with zipfile.ZipFile(jar_path, 'r') as src_zip, zipfile.ZipFile(temp_path, 'w', zipfile.ZIP_DEFLATED) as dst_zip:
                 for item in src_zip.infolist():
                     # Skip client-side class files
                     if item.filename.endswith('.class'):
@@ -171,8 +168,7 @@ def patch_mixin_config(jar_path: Path) -> bool:
     patches_applied = 0
     
     try:
-        with zipfile.ZipFile(jar_path, 'r') as src_zip:
-            with zipfile.ZipFile(temp_path, 'w', zipfile.ZIP_DEFLATED) as dst_zip:
+        with zipfile.ZipFile(jar_path, 'r') as src_zip, zipfile.ZipFile(temp_path, 'w', zipfile.ZIP_DEFLATED) as dst_zip:
                 for item in src_zip.infolist():
                     content = src_zip.read(item.filename)
                     
@@ -180,7 +176,6 @@ def patch_mixin_config(jar_path: Path) -> bool:
                     if item.filename.endswith('.json') and 'mixin' in item.filename.lower():
                         try:
                             text = content.decode('utf-8')
-                            original = text
                             
                             # Try to parse and modify JSON
                             try:
@@ -269,7 +264,7 @@ def process_mod(analysis: ModAnalysis, mods_dir: Path, clientonly_dir: Path) -> 
     return True  # "keep" - no action needed
 
 
-def fix_server_mods(mods_dir: Path, clientonly_dir: Path = None, verbose: bool = True) -> Dict:
+def fix_server_mods(mods_dir: Path, clientonly_dir: Path | None = None, verbose: bool = True) -> dict:
     """Scan and fix all mods in directory."""
     if clientonly_dir is None:
         clientonly_dir = mods_dir.parent / "clientonly"
@@ -314,7 +309,7 @@ def fix_server_mods(mods_dir: Path, clientonly_dir: Path = None, verbose: bool =
             results["failed"].append(analysis.filename)
     
     if verbose:
-        print(f"\n=== Fix Summary ===")
+        print("\n=== Fix Summary ===")
         print(f"Scanned: {results['scanned']}")
         print(f"Moved to clientonly: {len(results['moved'])}")
         print(f"Stripped client classes: {len(results['stripped'])}")

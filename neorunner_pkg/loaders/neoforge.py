@@ -1,15 +1,14 @@
 """NeoForge modloader implementation."""
 
-#
 
 import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Any
 
-from . import LoaderBase, _get_cfg_value
 from ..log import log_event
+from . import LoaderBase, _get_cfg_value
 
 
 class NeoForgeLoader(LoaderBase):
@@ -34,7 +33,7 @@ class NeoForgeLoader(LoaderBase):
                 content = f.read()
             # Check for corruption patterns
             if 'echo ' in content or 'Dashboard' in content or '#!/bin/bash' in content:
-                log_event("WARN", f"user_jvm_args.txt corrupted (contains bash code), regenerating...")
+                log_event("WARN", "user_jvm_args.txt corrupted (contains bash code), regenerating...")
                 return False
             # Ensure it starts with -Xmx
             lines = [l.strip() for l in content.strip().split('\n') if l.strip()]
@@ -47,21 +46,22 @@ class NeoForgeLoader(LoaderBase):
     
     def _setup_jvm_args(self) -> None:
         """Create user_jvm_args.txt with memory and performance settings."""
-        cwd_str = str(self.cwd) if hasattr(self.cwd, '__fspath__') else str(self.cwd)
+        cwd_str = str(self.cwd)
         jvm_file = os.path.join(cwd_str, "user_jvm_args.txt")
         
         xmx = _get_cfg_value(self.cfg, 'xmx', '4G')
         xms = _get_cfg_value(self.cfg, 'xms', '2G')
         
-        if not (xmx.endswith('G') or xmx.endswith('M')):
+        if not (xmx.endswith(('G', 'M'))):
             xmx = '4G'
-        if not (xms.endswith('G') or xms.endswith('M')):
+        if not (xms.endswith(('G', 'M'))):
             xms = '2G'
         
         jvm_args = f"""-Xmx{xmx}
 -Xms{xms}
 -XX:+UseG1GC
 -Djava.net.preferIPv4Stack=true
+-Dneoforge.logging.debugNetwork=true
 """
         with open(jvm_file, 'w') as f:
             f.write(jvm_args)
@@ -70,7 +70,7 @@ class NeoForgeLoader(LoaderBase):
             content = f.read()
         if 'echo' in content or 'Dashboard' in content:
             with open(jvm_file, 'w') as f:
-                f.write(f"-Xmx{xmx}\n-Xms{xms}\n-XX:+UseG1GC\n-Djava.net.preferIPv4Stack=true\n")
+                f.write(f"-Xmx{xmx}\n-Xms{xms}\n-XX:+UseG1GC\n-Djava.net.preferIPv4Stack=true\n-Dneoforge.logging.debugNetwork=true\n")
         
         log_event("LOADER_NEOFORGE", f"Created user_jvm_args.txt: {xmx}/{xms}")
     
@@ -85,7 +85,6 @@ class NeoForgeLoader(LoaderBase):
         # Check for world regeneration needed
         world_dir = self.cwd / "world" if isinstance(self.cwd, Path) else os.path.join(self.cwd, "world")
         mc_ver = self.mc_version if hasattr(self, 'mc_version') else "1.21"
-        props_mc_ver = None
         
         if os.path.exists(props_file):
             try:
@@ -93,12 +92,12 @@ class NeoForgeLoader(LoaderBase):
                     for line in f:
                         line = line.strip()
                         if line.startswith("level-name="):
-                            props_mc_ver = line.split("=", 1)[1]
+                            line.split("=", 1)[1]
             except Exception:
                 pass
         
         # Check version compatibility
-        old_world_marker = os.path.join(self.cwd, "world", "version" if isinstance(self.cwd, Path) else "world/version")
+        os.path.join(self.cwd, "world", "version" if isinstance(self.cwd, Path) else "world/version")
         needs_regen = False
         if os.path.exists(world_dir):
             # Check if world version matches current MC version
@@ -150,10 +149,9 @@ class NeoForgeLoader(LoaderBase):
                 with open(props_file, 'r') as f:
                     for line in f:
                         line = line.strip()
-                        if line and not line.startswith('#'):
-                            if '=' in line:
-                                k, v = line.split('=', 1)
-                                existing[k] = v
+                        if line and not line.startswith('#') and '=' in line:
+                            k, v = line.split('=', 1)
+                            existing[k] = v
             except Exception:
                 pass
             properties.update(existing)
@@ -174,12 +172,15 @@ class NeoForgeLoader(LoaderBase):
             with open(eula_file, 'w') as f:
                 f.write("eula=true\n")
     
-    def build_java_command(self) -> List[str]:
+    def build_java_command(self) -> list[str]:
         """Build NeoForge launch command."""
         nf_ver = self._get_neoforge_version()
+        if not nf_ver:
+            log_event("LOADER_NEOFORGE", "Could not determine NeoForge version; falling back to run.sh")
+            return ["./run.sh", "nogui"]
         
         jar = f"libraries/net/neoforged/neoforge/{nf_ver}/neoforge-{nf_ver}-universal.jar"
-        cwd_str = str(self.cwd) if hasattr(self.cwd, '__fspath__') else str(self.cwd)
+        cwd_str = str(self.cwd)
         jar_path = os.path.join(cwd_str, jar)
         installer_jar = os.path.join(cwd_str, f"libraries/net/neoforged/neoforge/{nf_ver}/neoforge-{nf_ver}-installer.jar")
         
@@ -189,7 +190,7 @@ class NeoForgeLoader(LoaderBase):
             log_event("LOADER_NEOFORGE", "Downloading ServerStarterJar...")
             try:
                 subprocess.run(
-                    ["wget", "-q", "-O", starter_jar, "https://github.com/neoforged/ServerStarterJar/releases/download/0.1.34/server.jar"],
+                    ["wget", "-q", "-O", starter_jar, "https://github.com/neoforged/ServerStarterJar/releases/download/0.1.34/server.jar"], check=False,
                     capture_output=True, timeout=60, cwd=cwd_str
                 )
             except Exception:
@@ -198,19 +199,18 @@ class NeoForgeLoader(LoaderBase):
         # Try to run installer with ServerStarterJar if it exists
         if os.path.exists(starter_jar):
             run_script = os.path.join(cwd_str, "run.sh")
-            if not os.path.exists(run_script) or True:
+            if not os.path.exists(run_script) or not os.path.exists(jar_path):
                 log_event("LOADER_NEOFORGE", f"Running installer for {nf_ver}...")
                 try:
                     # Try with ServerStarterJar first
                     result = subprocess.run(
-                        ["java", "-jar", starter_jar, "--installer", nf_ver],
+                        ["java", "-jar", starter_jar, "--installer", nf_ver], check=False,
                         capture_output=True, text=True, timeout=180, cwd=cwd_str
                     )
-                    if result.returncode != 0 and "installer" in result.stderr.lower():
+                    if result.returncode != 0 and "installer" in result.stderr.lower() and os.path.exists(installer_jar):
                         # Fallback: try direct with installer JAR if it exists
-                        if os.path.exists(installer_jar):
                             subprocess.run(
-                                ["java", "-jar", installer_jar, "--installServer", "."],
+                                ["java", "-jar", installer_jar, "--installServer", "."], check=False,
                                 capture_output=True, timeout=180, cwd=cwd_str
                             )
                 except Exception as e:
@@ -244,7 +244,7 @@ class NeoForgeLoader(LoaderBase):
                         jar_path = os.path.join(lib_path, v, f"neoforge-{v}-universal.jar")
                         if os.path.exists(jar_path):
                             return v
-                latest = sorted(versions)[-1]
+                latest = max(versions)
                 jar_path = os.path.join(lib_path, latest, f"neoforge-{latest}-universal.jar")
                 if os.path.exists(jar_path):
                     return latest
@@ -256,7 +256,7 @@ class NeoForgeLoader(LoaderBase):
             return latest.split("-")[0] if "-" in latest else latest
         return None
     
-    def detect_crash_reason(self, log_output: str) -> Dict[str, Any]:
+    def detect_crash_reason(self, log_output: str) -> dict[str, Any]:
         """Parse NeoForge crash logs for common issues.
         
         Returns dict with:
@@ -495,7 +495,7 @@ class NeoForgeLoader(LoaderBase):
             mod_pkgs = [(a, m) for a, m in stack_mods if a not in framework_pkgs and m not in framework_pkgs]
             
             if mod_pkgs:
-                author, modname = mod_pkgs[0]
+                _author, modname = mod_pkgs[0]
                 return {
                     "type": "mod_error",
                     "culprit": modname,

@@ -1,9 +1,7 @@
 """Tests for constants and utility functions."""
 
-import pytest
-import sys
 import os
-from unittest.mock import patch, MagicMock
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -87,8 +85,8 @@ class TestLogManager:
     
     def test_run_log_cleanup_returns_dict(self):
         """run_log_cleanup returns dict."""
-        from neorunner_pkg.log_manager import run_log_cleanup
         from neorunner_pkg.config import ServerConfig
+        from neorunner_pkg.log_manager import run_log_cleanup
         
         cfg = ServerConfig()
         

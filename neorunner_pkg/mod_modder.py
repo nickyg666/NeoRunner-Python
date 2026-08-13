@@ -110,15 +110,11 @@ BEST PRACTICES FOR MODPACK AUTHORS:
 
 ================================================================================
 """
-import os
 import json
-import subprocess
+import logging
+import os
 import re
 import zipfile
-import tempfile
-import shutil
-import logging
-from typing import Dict, List, Set, Tuple, Optional
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -129,10 +125,10 @@ class MixinConflictResolver:
     def __init__(self, mods_dir: str, mc_version: str):
         self.mods_dir = mods_dir
         self.mc_version = mc_version
-        self.conflicts: List[Dict] = []
-        self.mixin_targets: Dict[str, List[str]] = {}
+        self.conflicts: list[dict] = []
+        self.mixin_targets: dict[str, list[str]] = {}
         
-    def scan_mod_mixins(self, jar_path: str) -> Dict:
+    def scan_mod_mixins(self, jar_path: str) -> dict:
         """Scan a single mod JAR for mixin definitions"""
         result = {
             "mod": os.path.basename(jar_path),
@@ -159,23 +155,23 @@ class MixinConflictResolver:
                                 for pkg in config.get("mixins", []):
                                     if pkg:
                                         result["targets"].append(pkg)
-                        except:
+                        except Exception:
                             pass
                     
-                    if name.endswith('mods.toml') or name.endswith('fabric.mod.json'):
+                    if name.endswith(('mods.toml', 'fabric.mod.json')):
                         try:
                             content = zf.read(name).decode('utf-8')
                             if 'mixin' in content.lower():
                                 mixin_refs = re.findall(r'mixin[s]?["\']?\s*[:=]\s*["\']?([^\s"\',}]+)', content, re.IGNORECASE)
                                 result["targets"].extend(mixin_refs)
-                        except:
+                        except Exception:
                             pass
-        except Exception as e:
+        except Exception:
             pass
         
         return result
     
-    def scan_all_mods(self) -> Dict[str, Dict]:
+    def scan_all_mods(self) -> dict[str, dict]:
         """Scan all mods in the mods directory for mixins"""
         mods_data = {}
         
@@ -189,10 +185,10 @@ class MixinConflictResolver:
         
         return mods_data
     
-    def detect_conflicts(self, mods_data: Dict[str, Dict]) -> List[Dict]:
+    def detect_conflicts(self, mods_data: dict[str, dict]) -> list[dict]:
         """Detect potential mixin conflicts between mods"""
         conflicts = []
-        target_to_mods: Dict[str, List[str]] = {}
+        target_to_mods: dict[str, list[str]] = {}
         
         for mod_name, data in mods_data.items():
             for target in data.get("targets", []):
@@ -213,7 +209,7 @@ class MixinConflictResolver:
         self.mixin_targets = target_to_mods
         return conflicts
     
-    def resolve_by_load_order(self) -> Dict:
+    def resolve_by_load_order(self) -> dict:
         """Attempt to resolve conflicts by adjusting mod load order via file prefixes"""
         results = {"resolved": 0, "renamed": [], "errors": [], "skipped": []}
         
@@ -263,7 +259,7 @@ class MixinConflictResolver:
         logger.info(f"Conflict resolution complete: {results['resolved']} resolved, {len(results['errors'])} errors")
         return results
     
-    def _determine_priority(self, mods: List[str], target: str) -> Optional[str]:
+    def _determine_priority(self, mods: list[str], target: str) -> str | None:
         """Determine which mod should have priority"""
         priority_mod = None
         highest_score = -1
@@ -296,7 +292,7 @@ class ModModder:
         self.mc_version = mc_version
         self.resolver = MixinConflictResolver(mods_dir, mc_version)
         
-    def analyze_and_resolve(self) -> Dict:
+    def analyze_and_resolve(self) -> dict:
         """Full analysis and conflict resolution workflow"""
         mods_data = self.resolver.scan_all_mods()
         
@@ -331,7 +327,7 @@ class ModModder:
             "resolved": resolution["resolved"]
         }
     
-    def get_mod_load_order(self) -> List[str]:
+    def get_mod_load_order(self) -> list[str]:
         """Get current mod load order based on filename prefixes"""
         if not os.path.isdir(self.mods_dir):
             return []
@@ -358,13 +354,13 @@ class ModModder:
                                 return "quilt"
                             if any('mods.toml' in n for n in names):
                                 return "forge"
-                    except:
+                    except Exception:
                         continue
         except Exception as e:
             logger.warning(f"Could not detect loader type: {e}")
         return "unknown"
     
-    def optimize_load_order(self) -> Dict:
+    def optimize_load_order(self) -> dict:
         """
         Optimize load order for all mods (APIs first, then regular mods, addons last).
         

@@ -1,22 +1,18 @@
 """Log management for NeoRunner - retention, rotation, and cleanup."""
 
-#
 
-import os
 import shutil
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
-from .constants import CWD
 from .config import ServerConfig
+from .constants import CWD
 from .log import log_event
 
 
 class LogManager:
     """Manages log retention, rotation, and cleanup."""
     
-    def __init__(self, cfg: Optional[ServerConfig] = None):
+    def __init__(self, cfg: ServerConfig | None = None):
         self.cfg = cfg or ServerConfig()
         self.cwd = CWD
         self.live_log = self.cwd / "live.log"
@@ -49,12 +45,12 @@ class LogManager:
             return 0
         
         retention_days = getattr(self.cfg, 'crash_report_retention_days', 30)
-        cutoff = datetime.now() - timedelta(days=retention_days)
+        cutoff = datetime.now(UTC) - timedelta(days=retention_days)
         deleted = 0
         
         for entry in self.crash_reports_dir.iterdir():
             if entry.is_file() and entry.suffix == ".txt":
-                mtime = datetime.fromtimestamp(entry.stat().st_mtime)
+                mtime = datetime.fromtimestamp(entry.stat().st_mtime, tz=UTC)
                 if mtime < cutoff:
                     try:
                         entry.unlink()
@@ -112,12 +108,12 @@ class LogManager:
             return 0
         
         retention_days = getattr(self.cfg, 'log_retention_days', 30)
-        cutoff = datetime.now() - timedelta(days=retention_days)
+        cutoff = datetime.now(UTC) - timedelta(days=retention_days)
         deleted = 0
         
         for f in self.cwd.glob("live.log.*"):
             if f.is_file():
-                mtime = datetime.fromtimestamp(f.stat().st_mtime)
+                mtime = datetime.fromtimestamp(f.stat().st_mtime, tz=UTC)
                 if mtime < cutoff:
                     try:
                         f.unlink()
@@ -128,7 +124,7 @@ class LogManager:
         return deleted
 
 
-def run_log_cleanup(cfg: Optional[ServerConfig] = None) -> dict:
+def run_log_cleanup(cfg: ServerConfig | None = None) -> dict:
     """Convenience function to run log cleanup."""
     manager = LogManager(cfg)
     return manager.cleanup()

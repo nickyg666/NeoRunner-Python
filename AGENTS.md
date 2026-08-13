@@ -514,4 +514,68 @@ Total: 25 tests passing
 
 ---
 
+## Phase 5: World Upload & Conversion ✅ COMPLETE
+
+### Purpose
+Let admins upload worlds (folder or archive) through the dashboard, validate
+them before acceptance, and convert Bedrock (or incompatible-version) worlds
+to Java via Chunker.
+
+### Upload Flow
+```
+Folder picker (webkitdirectory) OR .zip/.mcworld/.tar/.tar.gz
+  -> staging slot world_uploads/<token>/  (never trusted as a live world)
+  -> analysis (structure, platform, version, Java, caps, payload scan)
+  -> decision panel
+       Java compatible   -> Accept & Archive
+       Java incompatible -> Convert to server version (Chunker) OR accept
+       Bedrock           -> Convert to running version / pick another Java
+                            version / Discard & try another
+  -> accept: compress to worlds_archive/mc-<version>/<loader>/<name>.tar.gz
+  -> switch: decompress into server dir + set level-name
+```
+
+### Validation & Hardening (world_upload.py)
+- `sanitize_rel_path` / `sanitize_world_name` — traversal + charset sanitization
+- Zip/tar extraction with path-traversal protection (`_safe_extract_tar`)
+- Total size / file count caps (`world_upload_max_total_mb`,
+  `world_upload_max_files`) — zip/tar bomb protection
+- Executable payload flagging (`.exe/.dll/.sh/.bat/.jar/.so`) in analysis
+- Platform detection: `region/*.mca` -> Java, `db/*.ldb` -> Bedrock
+- `min_java_major` (1.20.5+ -> Java 21, 1.18-1.20.4 -> 17, 1.17 -> 16) vs
+  `installed_java_major` for Java compatibility
+- Stale staging purged after `world_staging_retention_hours`
+
+### Chunker (chunker.py)
+- `ensure_chunker` downloads `chunker-cli.jar` from HiveGamesOSS/Chunker
+  releases into `tools/`; called from `installer.setup`
+- `convert_world(input, OUTPUT_FORMAT, output)` wraps
+  `java -Xmx.. -jar chunker-cli.jar -i .. -f .. -o ..`
+- `mc_to_chunker_format("1.21.11")` -> `JAVA_1_21_11`
+- `list_available_formats` / `java_formats` for the picker dropdown
+
+### Endpoints
+- `POST /api/worlds/upload/create|file|archive|analyze|confirm|cancel`
+- `POST /api/worlds/convert` (Chunker, replaces staging with converted world)
+- `GET  /api/worlds/conversion-formats`
+- `POST /api/worlds/archive-load` (decompress + activate)
+- `GET  /api/worlds/archives` / `POST /api/worlds/restore` (tar.gz aware)
+
+### Config Additions
+```json
+{
+  "chunker_jar": "",
+  "world_upload_dir": "world_uploads",
+  "world_upload_max_total_mb": 102400,
+  "world_upload_max_files": 200000,
+  "world_staging_retention_hours": 24
+}
+```
+
+### Tests
+- `tests/test_world_upload.py` (28 tests) + `tests/test_chunker.py` (15 tests)
+
+---
+
 *Implementation completed: 2026-04-30*
+

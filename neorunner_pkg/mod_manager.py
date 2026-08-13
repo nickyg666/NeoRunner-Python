@@ -1,15 +1,14 @@
 """Mod management system with Modrinth/CurseForge integration"""
-import requests
 import json
 import os
 import subprocess
-from typing import List, Dict, Optional
-from pathlib import Path
+
+import requests
 
 
 class ModInfo:
     """Mod metadata with dependency tracking"""
-    def __init__(self, slug: str, name: str, loader: str, mc_version: str, deps: List[str] = None, source: str = "modrinth"):
+    def __init__(self, slug: str, name: str, loader: str, mc_version: str, deps: list[str] | None = None, source: str = "modrinth"):
         self.slug = slug
         self.name = name
         self.loader = loader
@@ -43,7 +42,7 @@ class ModManager:
         
         os.makedirs(self.mods_dir, exist_ok=True)
     
-    def get_100_mods_modrinth(self) -> List[ModInfo]:
+    def get_100_mods_modrinth(self) -> list[ModInfo]:
         """Fetch 100+ actual gameplay mods from Modrinth (no libraries/APIs)"""
         print(f"\n[MOD_MANAGER] Fetching 100 {self.loader} mods from Modrinth ({self.mc_version})...")
         
@@ -127,7 +126,7 @@ class ModManager:
         print(f"  Collected: {len(sorted_mods)} mods from Modrinth")
         return sorted_mods
     
-    def get_100_mods_curseforge(self) -> List[ModInfo]:
+    def get_100_mods_curseforge(self) -> list[ModInfo]:
         """Fetch 100+ NeoForge/Forge mods from CurseForge"""
         print(f"\n[MOD_MANAGER] Fetching 100 {self.loader} mods from CurseForge ({self.mc_version})...")
         
@@ -199,7 +198,7 @@ class ModManager:
         print(f"  Collected: {len(sorted_mods)} mods from CurseForge")
         return sorted_mods
     
-    def fetch_dependencies(self, mod_list: List[ModInfo]) -> Dict[str, List[str]]:
+    def fetch_dependencies(self, mod_list: list[ModInfo]) -> dict[str, list[str]]:
         """Fetch dependencies for each mod from Modrinth API"""
         print(f"\n[MOD_MANAGER] Fetching dependencies for {len(mod_list)} mods...")
         
@@ -237,7 +236,7 @@ class ModManager:
         print(f"  Dependencies fetched: {sum(len(d) for d in deps.values())} total")
         return deps
     
-    def install_mods(self, mod_slugs: List[str], resolve_deps: bool = True) -> Dict[str, any]:
+    def install_mods(self, mod_slugs: list[str], resolve_deps: bool = True) -> dict[str, any]:
         """Install mods via ferium with dependency resolution"""
         print(f"\n[MOD_MANAGER] Installing {len(mod_slugs)} mods ({self.loader}, {self.mc_version})...")
         
@@ -246,7 +245,7 @@ class ModManager:
         
         # Remove and recreate profile
         subprocess.run(
-            [self.ferium_bin, "profile", "delete", profile_name, "--yes"],
+            [self.ferium_bin, "profile", "delete", profile_name, "--yes"], check=False,
             capture_output=True
         )
         
@@ -258,7 +257,7 @@ class ModManager:
                 "--game-version", self.mc_version,
                 "--mod-loader", self._ferium_loader_name(),
                 "--output-dir", self.mods_dir
-            ],
+            ], check=False,
             capture_output=True,
             text=True
         )
@@ -269,7 +268,7 @@ class ModManager:
         
         # Switch to profile
         subprocess.run(
-            [self.ferium_bin, "profile", "switch", profile_name],
+            [self.ferium_bin, "profile", "switch", profile_name], check=False,
             capture_output=True
         )
         
@@ -279,7 +278,7 @@ class ModManager:
         
         for i, slug in enumerate(mod_slugs):
             result = subprocess.run(
-                [self.ferium_bin, "add", slug],
+                [self.ferium_bin, "add", slug], check=False,
                 capture_output=True,
                 text=True,
                 timeout=30
@@ -296,7 +295,7 @@ class ModManager:
         # Download
         print(f"\n[MOD_MANAGER] Downloading {added} mods...")
         result = subprocess.run(
-            [self.ferium_bin, "download"],
+            [self.ferium_bin, "download"], check=False,
             capture_output=True,
             text=True,
             timeout=600
@@ -327,7 +326,7 @@ class ModManager:
                 return True
         return False
     
-    def save_inventory(self, mods: List[ModInfo]):
+    def save_inventory(self, mods: list[ModInfo]):
         """Save mod metadata for tracking"""
         inventory = {
             "loader": self.loader,
@@ -339,7 +338,7 @@ class ModManager:
     
     # === Keyword-based installation ===
     
-    def search_mods_by_keyword(self, keyword: str, limit: int = 10) -> List['ModInfo']:
+    def search_mods_by_keyword(self, keyword: str, limit: int = 10) -> list['ModInfo']:
         """Search mods by keyword on Modrinth"""
         url = "https://api.modrinth.com/v2/search"
         params = {"query": keyword, "game_versions": f"[{self.mc_version}]", "facets": '[["project_type:mod"]]', "limit": limit}
@@ -358,7 +357,7 @@ class ModManager:
         except Exception:
             return []
     
-    def install_by_keywords(self, keywords: List[str], resolve_deps: bool = True) -> Dict:
+    def install_by_keywords(self, keywords: list[str], resolve_deps: bool = True) -> dict:
         """Install mods matching keywords"""
         all_mods = {}
         
@@ -373,7 +372,7 @@ class ModManager:
         # Download each mod
         installed, failed = [], []
         
-        for slug, mod in all_mods.items():
+        for slug in all_mods:
             try:
                 version_url = f"https://api.modrinth.com/v2/project/{slug}/version"
                 params = {"game_versions": [self.mc_version], "loaders": [self.loader]}

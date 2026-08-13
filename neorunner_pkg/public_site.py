@@ -10,25 +10,34 @@ Gives unmodded players a painless path onto the modded server:
 import io
 import json
 import logging
-import os
 import socket
 import zipfile
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
-from flask import Flask, Response, jsonify, request, send_file
+from flask import Flask, Response, jsonify, send_file
 
 from .config import load_cfg
 from .constants import CWD
-from .log import log_event
 from .mod_hosting import create_mod_zip, update_manifest
 
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-PUBLIC_HOST = "mc.w8.mom"
 SERVER_HOST = "w8.mom"
+
+
+def _public_host() -> str:
+    """Public download hostname: prefer config hostname, fall back to SERVER_HOST."""
+    try:
+        cfg = load_cfg()
+        host = getattr(cfg, "hostname", None)
+        if host:
+            return host
+    except Exception:
+        pass
+    return SERVER_HOST
 
 """Default MC port for join instructions (server.properties server-port)."""
 DEFAULT_SERVER_PORT = 25565
@@ -69,7 +78,7 @@ def _server_info() -> dict:
     if loader == "neoforge" and lib_path.exists():
         versions = [d.name for d in lib_path.iterdir() if d.is_dir()]
         if versions:
-            loader_version = sorted(versions)[-1]
+            loader_version = max(versions)
 
     port = getattr(cfg, "mc_port", DEFAULT_SERVER_PORT) or DEFAULT_SERVER_PORT
 
@@ -81,11 +90,11 @@ def _server_info() -> dict:
         "mod_count": mod_count,
         "server_address": SERVER_HOST if int(port) == DEFAULT_SERVER_PORT else f"{SERVER_HOST}:{port}",
         "port": int(port),
-        "generated": datetime.now().isoformat(timespec="seconds"),
+        "generated": datetime.now(UTC).isoformat(timespec="seconds"),
     }
 
 
-def _loader_display(loader: str, loader_version: str = None) -> str:
+def _loader_display(loader: str, loader_version: str | None = None) -> str:
     label = {"neoforge": "NeoForge", "forge": "Forge", "fabric": "Fabric"}.get(loader, loader.title())
     if loader_version:
         return f"{label} {loader_version}"
@@ -107,10 +116,111 @@ def _collect_jars() -> list:
     return jars
 
 
-def _extra_folder_entries() -> list:
-    """config/, defaultconfigs/ go into the pack for a working client."""
+_cf_files_cache: tuple = (None, None)
+_CF_ID_MAP_FILE = "data/cf_mod_id_map.json"
+
+
+def _cf_id_map() -> dict:
+    """Map installed jar filename -> {projectID, fileID} using the modpack zip.
+
+    Resolved filenames come from the CurseForge API (cfwidget) and are cached
+    on disk so the map only needs one network pass after a modpack install.
+    Mods not part of any CF pack (auto-fetched deps, client-only) are absent
+    from the map and ship via overrides/mods.
+    """
+    map_path = CWD / _CF_ID_MAP_FILE
+    if map_path.exists():
+        try:
+            return json.loads(map_path.read_text())
+        except Exception:
+            pass
+
+    mapping = {}
+    entries = _modpack_cf_files()
+    if entries:
+        from .modpack_installer import resolve_file_name
+
+        for f in entries:
+            pid, fid = f.get("projectID"), f.get("fileID")
+            if not pid or not fid:
+                continue
+            try:
+                fname = resolve_file_name(pid, fid)
+            except Exception:
+                fname = None
+            if fname:
+                mapping[fname] = {"projectID": pid, "fileID": fid}
+        try:
+            map_path.parent.mkdir(parents=True, exist_ok=True)
+            map_path.write_text(json.dumps(mapping, indent=2))
+        except Exception:
+            pass
+    return mapping
+
+
+def _modpack_cf_files() -> list:
+    """Return CurseForge (projectID, fileID) entries from the installed modpack zip.
+
+    ``modpacks/<name>.zip`` is a CurseForge export that lists every mod with its
+    numeric CF project/file IDs. ``_build_curseforge_zip`` embeds these so the
+    CurseForge app shows a proper mod list ("modpack info") instead of an empty
+    file set with mods smuggled into overrides/mods.
+
+    Returns a list of ``{"projectID", "fileID", "required"}``. Empty if no
+    modpack zip (or none that matches the current MC version / loader).
+    """
+    global _cf_files_cache
+    cfg = load_cfg()
+    cache_key = (getattr(cfg, "mc_version", ""), getattr(cfg, "loader", ""))
+    if _cf_files_cache[0] == cache_key:
+        return _cf_files_cache[1]
+
+    import zipfile as _zipfile
+
     entries = []
-    for folder in ("config", "defaultconfigs"):
+    modpacks_dir = CWD / "modpacks"
+    if modpacks_dir.exists():
+        for zp in sorted(modpacks_dir.glob("*.zip"), reverse=True):
+            try:
+                with _zipfile.ZipFile(zp) as zf:
+                    raw = zf.read("manifest.json")
+                manifest = json.loads(raw)
+                mc = manifest.get("minecraft", {})
+                if mc.get("version") and cfg.mc_version and mc["version"] != cfg.mc_version:
+                    continue
+                loaders = mc.get("modLoaders", [])
+                primary = next((l for l in loaders if l.get("primary")), None)
+                if primary:
+                    lid = primary.get("id", "")
+                    if cfg.loader and lid and not lid.startswith(cfg.loader):
+                        continue
+                entries = [
+                    {
+                        "projectID": f.get("projectID"),
+                        "fileID": f.get("fileID"),
+                        "required": f.get("required", True),
+                    }
+                    for f in manifest.get("files", [])
+                    if f.get("projectID") and f.get("fileID")
+                ]
+                if entries:
+                    break
+            except Exception:
+                continue
+
+    _cf_files_cache = (cache_key, entries)
+    return entries
+
+
+def _extra_folder_entries() -> list:
+    """config/, defaultconfigs/, shaderpacks/, resourcepacks/ go into the pack.
+
+    These are the client-facing asset folders a CurseForge modpack's overrides/
+    can contain. They ride along in overrides/ so shaders and resource packs are
+    shipped to the client, not just mods.
+    """
+    entries = []
+    for folder in ("config", "defaultconfigs", "shaderpacks", "resourcepacks"):
         path = CWD / folder
         if path.exists():
             entries.append((folder, path))
@@ -125,20 +235,109 @@ def _build_launcher_zip() -> io.BytesIO:
     return buf
 
 
+def _modpack_meta() -> dict:
+    """Return ``{"name", "version"}`` of the installed CurseForge modpack zip.
+
+    Falls back to generic values when no modpack zip matches the current
+    MC version / loader.
+    """
+    cfg = load_cfg()
+    modpacks_dir = CWD / "modpacks"
+    if modpacks_dir.exists():
+        for zp in sorted(modpacks_dir.glob("*.zip"), reverse=True):
+            try:
+                with zipfile.ZipFile(zp) as zf:
+                    raw = zf.read("manifest.json")
+                manifest = json.loads(raw)
+                mc = manifest.get("minecraft", {})
+                if mc.get("version") and cfg.mc_version and mc["version"] != cfg.mc_version:
+                    continue
+                loaders = mc.get("modLoaders", [])
+                primary = next((l for l in loaders if l.get("primary")), None)
+                if primary:
+                    lid = primary.get("id", "")
+                    if cfg.loader and lid and not lid.startswith(cfg.loader):
+                        continue
+                return {
+                    "name": manifest.get("name") or "NeoRunner Server Pack",
+                    "version": manifest.get("version") or "1.0.0",
+                }
+            except Exception:
+                continue
+    return {"name": "NeoRunner Server Pack", "version": "1.0.0"}
+
+
+def _non_mod_cf_assets() -> list:
+    """Return CF files[] entries that are NOT mods (shaderpacks, worlds, etc.).
+
+    A CurseForge manifest ``files[]`` must only reference mod jars. Anything
+    else (shaderpacks, resource packs, world saves) belongs in ``overrides/``
+    under its proper subfolder. This resolves each manifest entry back to the
+    installed filename (via the cached jar->CF id map) and returns the ones
+    that are not jars.
+    """
+    id_map = _cf_id_map()
+    reverse = {}
+    for fname, ids in id_map.items():
+        reverse[(ids.get("projectID"), ids.get("fileID"))] = fname
+
+    assets = []
+    for f in _modpack_cf_files():
+        key = (f.get("projectID"), f.get("fileID"))
+        fname = reverse.get(key)
+        if fname and not fname.lower().endswith(".jar"):
+            src = CWD / "mods" / fname
+            if src.exists():
+                assets.append((fname, src))
+    return assets
+
+
+def _asset_override_arcname(fname: str, src: Path) -> str:
+    """Map a non-mod CF asset to its CurseForge overrides/ path."""
+    try:
+        with zipfile.ZipFile(src) as zf:
+            names = zf.namelist()
+    except Exception:
+        names = []
+    # Shaderpack zips contain a shaders/ folder at the top level.
+    if any(n.startswith("shaders/") for n in names):
+        return f"overrides/shaderpacks/{fname}"
+    # World saves contain level.dat.
+    if any(n.endswith("level.dat") for n in names):
+        world_folder = names[0].split("/")[0]
+        return f"overrides/saves/{world_folder}/"
+    # Everything else goes straight into overrides/.
+    return f"overrides/{fname}"
+
+
 def _build_curseforge_zip() -> io.BytesIO:
     info = _server_info()
     loader_id = "neoforge-" + (info["loader_version"] or "26.1.0.0")
     if info["loader"] == "fabric":
         loader_id = "fabric-0.19.3"
 
+    meta = _modpack_meta()
+    cf_files = _modpack_cf_files()
+    non_mod_assets = _non_mod_cf_assets()
+
+    # CurseForge spec: files[] must only contain mod jars. Shaderpacks, worlds
+    # and other non-mod content belongs in overrides/ (the manifest "files" are
+    # downloaded into mods/ by the launcher).
+    known_asset_names = {f[0] for f in non_mod_assets}
+    asset_keys = _asset_cf_keys(non_mod_assets)
+    mod_files = [
+        f for f in cf_files
+        if (f.get("projectID"), f.get("fileID")) not in asset_keys
+    ]
+
     manifest = {
-        "manifestType": "minecraftModPack",
+        "manifestType": "minecraftModpack",
         "manifestVersion": 1,
-        "name": "NeoRunner Server Pack",
-        "version": info["mc_version"],
+        "name": meta["name"],
+        "version": meta["version"],
         "author": "NeoRunner",
         "overrides": "overrides",
-        "files": [],
+        "files": mod_files,
         "minecraft": {
             "version": info["mc_version"],
             "modLoaders": [{"id": loader_id, "primary": True}],
@@ -154,7 +353,41 @@ def _build_curseforge_zip() -> io.BytesIO:
             "  My Modpacks > Import > select this .zip\n\n"
             "Then launch and join the server at " + info["server_address"] + "\n",
         )
+        # Non-mod assets (shaderpacks, world saves) go into overrides/ at their
+        # proper subfolder so the launcher places them correctly.
+        for fname, src in non_mod_assets:
+            arc = _asset_override_arcname(fname, src)
+            if arc.endswith("/"):
+                with zipfile.ZipFile(src) as zfsrc:
+                    for n in zfsrc.namelist():
+                        if n.endswith("/"):
+                            continue
+                        # names[] entries already include the top-level world
+                        # folder; drop it since arc already names that folder.
+                        stripped = n.split("/", 1)[1] if "/" in n else n
+                        zf.writestr(f"{arc}{stripped}", zfsrc.read(n))
+            else:
+                zf.write(str(src), arcname=arc)
+        # Mods the CurseForge app already downloads via the manifest files[]
+        # must not be duplicated in overrides/mods. Only mods that were added
+        # outside the CF pack (e.g. auto-fetched deps, client-only mods) go into
+        # overrides/mods as extra files.
+        known = set()
+        for f in mod_files:
+            known.add((f.get("projectID"), f.get("fileID")))
+        extra_jars = []
+        seen_names = set()
         for arcname, path in _collect_jars():
+            if arcname in known_asset_names:
+                continue
+            pid, fid = _cf_id_for_jar(arcname)
+            if (pid, fid) in known:
+                continue
+            if arcname in seen_names:
+                continue
+            seen_names.add(arcname)
+            extra_jars.append((arcname, path))
+        for arcname, path in extra_jars:
             zf.write(path, arcname=f"overrides/mods/{arcname}")
         for folder, path in _extra_folder_entries():
             for f in sorted(path.rglob("*")):
@@ -164,22 +397,48 @@ def _build_curseforge_zip() -> io.BytesIO:
     return buf
 
 
+def _asset_cf_keys(assets: list) -> set:
+    """Return set of (projectID, fileID) for the given non-mod assets."""
+    id_map = _cf_id_map()
+    reverse = {}
+    for fname, ids in id_map.items():
+        reverse[fname] = (ids.get("projectID"), ids.get("fileID"))
+    keys = set()
+    for fname, _ in assets:
+        key = reverse.get(fname)
+        if key:
+            keys.add(key)
+    return keys
+
+
+def _cf_id_for_jar(filename: str) -> tuple:
+    """Best-effort map of an installed jar filename back to CF project/file IDs.
+
+    Uses the cached jar->CF map built from the installed modpack zip. Returns
+    ``(None, None)`` when unknown (jar then ships via overrides/mods).
+    """
+    info = _cf_id_map().get(filename)
+    if info:
+        return (info.get("projectID"), info.get("fileID"))
+    return (None, None)
+
+
 @app.route("/")
 def index():
     """Landing page: download options for players."""
     info = _server_info()
-    server_link = f"https://{info['server_address']}"
-    launcher_url = "https://mc.w8.mom/download/launcher.zip"
-    cf_url = "https://mc.w8.mom/download/curseforge.zip"
-    bat_url = "https://mc.w8.mom/download/install-mods.bat"
-    jar_url = "https://mc.w8.mom/download/installer.jar"
+    host = _public_host()
+    launcher_url = f"https://{host}/download/launcher.zip"
+    cf_url = f"https://{host}/download/curseforge.zip"
+    bat_url = f"https://{host}/download/install-mods.bat"
+    jar_url = f"https://{host}/download/installer.jar"
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Join the modded server — mc.w8.mom</title>
+<title>Join the modded server — {host}</title>
 <style>
   * {{ margin:0; padding:0; box-sizing:border-box; }}
   body {{ font-family:'Segoe UI',system-ui,sans-serif; background:#0d1117; color:#e6e6e6;
@@ -281,7 +540,7 @@ def download_installer_jar():
         info = _server_info()
         server_addr = info.get("server_address") or "127.0.0.1"
         buf = build_installer_jar_bytes(
-            cfg, base_url=f"https://{PUBLIC_HOST}", server_address=server_addr,
+            cfg, base_url=f"https://{_public_host()}", server_address=server_addr,
         )
         return send_file(
             buf, mimetype="application/java-archive", as_attachment=True,
@@ -343,8 +602,8 @@ def download_all_zip():
 
 
 _BAT_TEMPLATE = r"""@echo off
-title NeoRunner Mod Sync - mc.w8.mom
-set "BASE=https://mc.w8.mom"
+title NeoRunner Mod Sync - {host}
+set "BASE=https://{host}"
 echo ============================================
 echo   NeoRunner Mod Sync
 echo   Downloading manifest from %BASE% ...
@@ -367,32 +626,16 @@ timeout /t 5
 
 :fail
 echo.
-echo Failed to download the modpack. Check https://mc.w8.mom
+echo Failed to download the modpack. Check https://{host}
 timeout /t 10 >nul
 """
 
 
 @app.route("/download/install-mods.bat")
 def download_install_bat():
-    return Response(_BAT_TEMPLATE, mimetype="text/plain", headers={
+    return Response(_BAT_TEMPLATE.format(host=_public_host()), mimetype="text/plain", headers={
         "Content-Disposition": 'attachment; filename="install-mods.bat"'
     })
-
-
-@app.route("/download/install")
-def download_install_ps1():
-    script = (
-        "$baseUrl = 'https://mc.w8.mom'\n"
-        "$mcDir = \"$env:APPDATA\\.minecraft\"\n"
-        "$modsDir = Join-Path $mcDir 'mods'\n"
-        "New-Item -ItemType Directory -Force -Path $modsDir | Out-Null\n"
-        "Write-Host '[1/2] Downloading modpack...'\n"
-        "Invoke-WebRequest -Uri \"$baseUrl/download/all\" -OutFile \"$env:TEMP\\neorunner_mods.zip\" -UseBasicParsing\n"
-        "Write-Host '[2/2] Extracting mods...'\n"
-        "Expand-Archive -Force -Path \"$env:TEMP\\neorunner_mods.zip\" -DestinationPath $modsDir\n"
-        "Write-Host 'Done! Now launch the loader for the version and connect.'\n"
-    )
-    return Response(script, mimetype="text/plain")
 
 
 @app.route("/api/info")

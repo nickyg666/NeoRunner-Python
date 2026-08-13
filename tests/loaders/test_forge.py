@@ -1,13 +1,13 @@
 """Tests for Forge loader crash detection."""
 
-import sys
 import os
+import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from neorunner_pkg.loaders.forge import ForgeLoader
 from neorunner_pkg.config import ServerConfig
+from neorunner_pkg.loaders.forge import ForgeLoader
 
 
 def _make_loader():

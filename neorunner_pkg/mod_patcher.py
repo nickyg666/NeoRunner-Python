@@ -1,11 +1,10 @@
 """Automated mod patching system for maximum mixin compatibility"""
-import os
 import json
-import zipfile
-import tempfile
+import os
 import shutil
-import re
-from typing import Dict, List, Optional
+import tempfile
+import zipfile
+
 
 class ModPatcher:
     """Automated mod patching for mixin compatibility"""
@@ -13,9 +12,9 @@ class ModPatcher:
     def __init__(self, mods_dir: str, mc_version: str):
         self.mods_dir = mods_dir
         self.mc_version = mc_version
-        self.patched_log: List[str] = []
+        self.patched_log: list[str] = []
         
-    def scan_mixin_configs(self, jar_path: str) -> List[Dict]:
+    def scan_mixin_configs(self, jar_path: str) -> list[dict]:
         """Extract mixin configuration data from a JAR"""
         configs = []
         
@@ -33,14 +32,14 @@ class ModPatcher:
                                 "targets": config.get("targets", []),
                                 "mixins": config.get("mixins", [])
                             })
-                        except:
+                        except Exception:
                             pass
-        except Exception as e:
+        except Exception:
             pass
         
         return configs
     
-    def detect_conflict_risk(self, mod_name: str) -> Dict:
+    def detect_conflict_risk(self, mod_name: str) -> dict:
         """Analyze a mod for potential mixin conflict risks"""
         jar_path = os.path.join(self.mods_dir, mod_name)
         
@@ -96,7 +95,7 @@ class ModPatcher:
                                     with open(file_path, 'w') as fh:
                                         json.dump(patched_data, fh)
                                     patched = True
-                            except:
+                            except Exception:
                                 pass
                 
                 if patched:
@@ -108,7 +107,7 @@ class ModPatcher:
                                 zf.write(file_path, arcname)
                 
                 return patched
-        except Exception as e:
+        except Exception:
             return False
     
     def add_mixin_priority(self, jar_path: str, output_path: str, priority: int) -> bool:
@@ -146,14 +145,14 @@ class ModPatcher:
                                         zf.write(file_path, arcname)
                             
                             return True
-                    except:
+                    except Exception:
                         pass
                 
                 return False
-        except Exception as e:
+        except Exception:
             return False
     
-    def auto_patch_mod(self, mod_name: str) -> Dict:
+    def auto_patch_mod(self, mod_name: str) -> dict:
         """Automatically patch a single mod for compatibility"""
         jar_path = os.path.join(self.mods_dir, mod_name)
         
@@ -193,7 +192,7 @@ class ModPatcher:
             "patched": len(patches_applied) > 0
         }
     
-    def auto_patch_all(self) -> Dict:
+    def auto_patch_all(self) -> dict:
         """Automatically patch all mods for compatibility"""
         if not os.path.isdir(self.mods_dir):
             return {"status": "error", "message": "Mods directory not found"}
@@ -224,7 +223,7 @@ class ModPatcher:
                     results["skipped"] += 1
             except Exception as e:
                 results["errors"] += 1
-                results["details"].append(f"Error patching {filename}: {str(e)}")
+                results["details"].append(f"Error patching {filename}: {e!s}")
         
         return results
 
@@ -237,7 +236,7 @@ class ModCompatibilityManager:
         self.mc_version = mc_version
         self.patcher = ModPatcher(mods_dir, mc_version)
     
-    def full_compatibility_pass(self) -> Dict:
+    def full_compatibility_pass(self) -> dict:
         """Run a full compatibility optimization pass"""
         results = {
             "status": "success",
@@ -259,7 +258,7 @@ class ModCompatibilityManager:
         
         return results
     
-    def analyze_mod_pack(self) -> Dict:
+    def analyze_mod_pack(self) -> dict:
         """Analyze the mod pack for compatibility issues"""
         if not os.path.isdir(self.mods_dir):
             return {"status": "error", "message": "Mods directory not found"}

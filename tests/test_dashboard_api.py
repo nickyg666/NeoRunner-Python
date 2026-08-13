@@ -178,7 +178,7 @@ class TestLoaderSwitch:
         monkeypatch.setattr("neorunner_pkg.server.is_server_running", lambda: False)
         monkeypatch.setattr("neorunner_pkg.server.stop_server", lambda: None)
         monkeypatch.setattr("neorunner_pkg.installer.install_loader", lambda cfg: True)
-        monkeypatch.setattr(dash, "scan_worlds", lambda: [])
+        monkeypatch.setattr(dash, "scan_worlds", list)
 
         response = client.post('/api/loaders/switch', json={
             "loader": "fabric", "mc_version": "1.20.1", "keep_mods": True
@@ -206,7 +206,7 @@ class TestLoaderSwitch:
         monkeypatch.setattr("neorunner_pkg.server.is_server_running", lambda: False)
         monkeypatch.setattr("neorunner_pkg.server.stop_server", lambda: None)
         monkeypatch.setattr("neorunner_pkg.installer.install_loader", lambda cfg: True)
-        monkeypatch.setattr(dash, "scan_worlds", lambda: [])
+        monkeypatch.setattr(dash, "scan_worlds", list)
 
         response = client.post('/api/loaders/switch', json={
             "loader": "fabric", "mc_version": "1.20.1"

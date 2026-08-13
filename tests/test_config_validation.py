@@ -1,9 +1,7 @@
 """Tests for config validation functionality."""
 
-import pytest
-import sys
 import os
-from unittest.mock import patch, MagicMock
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -16,7 +14,7 @@ class TestConfigValidationEdgeCases:
         from neorunner_pkg.config import ServerConfig, validate_config
         
         cfg = ServerConfig(mc_version="")
-        valid, errors = validate_config(cfg, fail_on_error=False)
+        valid, _errors = validate_config(cfg, fail_on_error=False)
         assert valid is False
     
     def test_validate_missing_mc_version(self):
@@ -24,7 +22,7 @@ class TestConfigValidationEdgeCases:
         from neorunner_pkg.config import ServerConfig, validate_config
         
         cfg = ServerConfig(mc_version=None)
-        valid, errors = validate_config(cfg, fail_on_error=False)
+        valid, _errors = validate_config(cfg, fail_on_error=False)
         assert valid is False
     
     def test_validate_invalid_loader(self):
@@ -32,7 +30,7 @@ class TestConfigValidationEdgeCases:
         from neorunner_pkg.config import ServerConfig, validate_config
         
         cfg = ServerConfig(loader="invalid")
-        valid, errors = validate_config(cfg, fail_on_error=False)
+        valid, _errors = validate_config(cfg, fail_on_error=False)
         assert valid is False
 
 
@@ -47,7 +45,7 @@ class TestConfigMemoryValidation:
         # The loader validation happens separately
         for mem in ["1G", "2G", "4G", "8G", "512M"]:
             cfg = ServerConfig(xmx=mem)
-            valid, errors = validate_config(cfg, fail_on_error=False)
+            valid, _errors = validate_config(cfg, fail_on_error=False)
             # Just verify it doesn't crash
             assert isinstance(valid, bool)
 
@@ -106,7 +104,7 @@ class TestConfigDefaults:
     
     def test_default_values_known(self):
         """Default values are correctly set."""
-        from neorunner_pkg.config import ServerConfig, _get_default_version
+        from neorunner_pkg.config import ServerConfig
         
         cfg = ServerConfig()
         

@@ -1,0 +1,359 @@
+"""External access configuration: dynamic DNS + automatic SSL.
+
+Provides a Pythonic way to expose the NeoRunner dashboard/download endpoints
+(and optionally the Minecraft port) on a public domain, driven from the
+``neorunner install`` CLI::
+
+    neorunner install --domain play.example.com --external-access caddy
+    neorunner install --domain play.example.com --external-access cloudflare --cf-token <API_TOKEN>
+
+Two providers are supported:
+
+- **Caddy** (``--external-access caddy``) — installs Caddy, writes a Caddyfile
+  that reverse-proxies ``https://<domain>`` to the local dashboard, and relies
+  on Caddy's automatic HTTPS (Let's Encrypt) for SSL. Requires a public A/AAAA
+  record pointing at this machine (see ddclient below for dynamic IPs).
+- **Cloudflare Tunnel** (``--external-access cloudflare``) — installs
+  ``cloudflared`` and runs a named tunnel. No inbound ports or public IP are
+  needed at all: ``cloudflared`` dials out to Cloudflare's edge, which serves
+  HTTPS automatically and can also proxy the Minecraft TCP port. This is the
+  recommended option when the ISP blocks inbound connections.
+
+Dynamic DNS is handled separately:
+
+- **ddclient** (``--ddclient-domain``) — installs ddclient and writes a config
+  so the domain's DNS A/AAAA record tracks this machine's changing public IP.
+  Pair with Caddy (which then obtains certs automatically).
+
+Public access is a first-class feature: every step either succeeds or raises,
+so ``neorunner install`` stops with a clear error instead of silently leaving
+the server unreachable from the internet.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+from .config import ServerConfig, save_cfg
+from .log import log_event
+
+# The dashboard/download server binds 0.0.0.0 and the reverse proxy / tunnel
+# upstreams target the loopback on every interface via 0.0.0.0.
+DASHBOARD_HOST = "0.0.0.0"
+DASHBOARD_PORT = 8000
+
+# Paths
+CADDYFILE = Path("/etc/caddy/Caddyfile")
+CLOUDFLARED_CONFIG = Path("/etc/cloudflared/config.yml")
+CLOUDFLARED_CREDS = Path("/etc/cloudflared/credentials.json")
+DDCLIENT_CONF = Path("/etc/ddclient/ddclient.conf")
+
+
+class ExternalAccessError(RuntimeError):
+    """Raised when external access cannot be configured."""
+
+
+def _run(cmd: list[str], timeout: int = 60) -> str:
+    """Run a command; raise ExternalAccessError on failure. Returns stdout."""
+    try:
+        result = subprocess.run(
+            cmd, check=False, capture_output=True, text=True, timeout=timeout
+        )
+    except FileNotFoundError:
+        raise ExternalAccessError(f"command not found: {cmd[0]}") from None
+    except subprocess.TimeoutExpired:
+        raise ExternalAccessError(f"command timed out after {timeout}s: {' '.join(cmd)}") from None
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise ExternalAccessError(
+            f"command failed ({result.returncode}): {' '.join(cmd)}\n{detail}"
+        )
+    return result.stdout.strip()
+
+
+def _have(binary: str) -> bool:
+    return shutil.which(binary) is not None
+
+
+def _euid() -> int:
+    """Current effective uid, 0 when we can't tell (tests/non-posix)."""
+    return getattr(os, "geteuid", lambda: 0)()
+
+
+def _sudo(cmd: list[str]) -> str:
+    """Run a command with sudo when not root; raise on failure."""
+    if sys.platform != "linux":
+        raise ExternalAccessError(f"unsupported platform for sudo: {sys.platform}")
+    if _euid() == 0:
+        return _run(cmd)
+    return _run(["sudo", "-n", *cmd])
+
+
+def _write(path: Path, content: str) -> None:
+    """Write a config file (via sudo when not root); raise on failure."""
+    tmp = None
+    try:
+        if _euid() == 0:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+            return
+        import tempfile
+
+        fd, tmp_name = tempfile.mkstemp(prefix="neorunner_")
+        with os.fdopen(fd, "w") as f:
+            f.write(content)
+        tmp = tmp_name
+        _sudo(["install", "-D", "-m", "644", tmp_name, str(path)])
+    finally:
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+
+def _install_apt(package: str) -> None:
+    """Install an apt package (or raise)."""
+    _run(["apt-get", "install", "-y", package], timeout=300)
+
+
+# ---------------------------------------------------------------------------
+# Caddy
+# ---------------------------------------------------------------------------
+
+def caddy_config(cfg: ServerConfig, domain: str, mc_port: int | None = None) -> str:
+    """Render a Caddyfile for the given domain.
+
+    ``https://<domain>`` proxies the dashboard (which also serves the mod
+    download endpoints). If ``mc_port`` is given, a TCP reverse proxy is added
+    so clients can also join the Minecraft server through the same domain.
+    """
+    lines = [
+        f"# Auto-generated by NeoRunner - {domain}",
+        f"{domain} {{",
+        "    encode gzip",
+        f"    reverse_proxy {DASHBOARD_HOST}:{DASHBOARD_PORT}",
+        "}",
+    ]
+    if mc_port:
+        lines += [
+            "",
+            f"{domain}:{mc_port} {{",
+            f"    reverse_proxy {DASHBOARD_HOST}:{cfg.mc_port}",
+            "}",
+        ]
+    return "\n".join(lines) + "\n"
+
+
+def setup_caddy(cfg: ServerConfig, domain: str, mc_port: int | None = None) -> dict[str, Any]:
+    """Install Caddy and deploy a reverse-proxy config with automatic HTTPS.
+
+    Raises ExternalAccessError on any failure. Returns the summary dict.
+    """
+    if not domain:
+        raise ExternalAccessError("no domain given for Caddy setup")
+    if not _have("caddy"):
+        _install_apt("caddy")
+    if not _have("caddy"):
+        raise ExternalAccessError("caddy binary missing after apt install")
+    _write(CADDYFILE, caddy_config(cfg, domain, mc_port))
+    _sudo(["systemctl", "reload", "caddy"])
+    log_event("EXTERNAL", f"Caddy configured for https://{domain}")
+    return {"ok": True, "domain": domain, "provider": "caddy"}
+
+
+# ---------------------------------------------------------------------------
+# Cloudflare Tunnel
+# ---------------------------------------------------------------------------
+
+def cloudflared_config(cfg: ServerConfig, domain: str) -> str:
+    """Render a cloudflared config.yml for a named tunnel.
+
+    Ingress: HTTPS for the dashboard/download endpoints, and TCP for the
+    Minecraft port, both keyed off the same hostname.
+    """
+    return f"""\
+# Auto-generated by NeoRunner - {domain}
+tunnel: {domain}
+credentials-file: {CLOUDFLARED_CREDS}
+
+ingress:
+  - hostname: {domain}
+    service: http://{DASHBOARD_HOST}:{DASHBOARD_PORT}
+  - hostname: mc.{domain}
+    service: tcp://{DASHBOARD_HOST}:{cfg.mc_port}
+  - service: http_status:404
+"""
+
+
+def setup_cloudflare(cfg: ServerConfig, domain: str, cf_token: str) -> dict[str, Any]:
+    """Install cloudflared and create a named tunnel for ``domain``.
+
+    Raises ExternalAccessError on any failure. Returns the summary dict.
+    """
+    if not domain:
+        raise ExternalAccessError("no domain given for Cloudflare setup")
+    if not cf_token:
+        raise ExternalAccessError("no Cloudflare API token given (use --cf-token)")
+    if not _have("cloudflared"):
+        _run(
+            [
+                "bash", "-c",
+                ("curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg"
+                " | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null"
+                " && echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] "
+                "https://pkg.cloudflare.com/cloudflared jammy main'"
+                " | sudo tee /etc/apt/sources.list.d/cloudflared.list"
+                " && sudo apt-get update -qq"
+                " && sudo apt-get install -y cloudflared"),
+            ],
+            timeout=300,
+        )
+    if not _have("cloudflared"):
+        raise ExternalAccessError("cloudflared binary missing after install attempt")
+
+    _run(["cloudflared", "tunnel", "login", "--token", cf_token], timeout=120)
+    try:
+        _run(["cloudflared", "tunnel", "create", domain], timeout=60)
+    except ExternalAccessError as e:
+        if "already exists" not in str(e).lower():
+            raise
+    _write(CLOUDFLARED_CONFIG, cloudflared_config(cfg, domain))
+    _sudo(["cloudflared", "service", "install", f"--config={CLOUDFLARED_CONFIG}"])
+    log_event("EXTERNAL", f"Cloudflare tunnel configured for {domain}")
+    return {"ok": True, "domain": domain, "provider": "cloudflare"}
+
+
+# ---------------------------------------------------------------------------
+# ddclient (dynamic DNS)
+# ---------------------------------------------------------------------------
+
+def ddclient_config(domain: str, provider: str = "dyndns2", login: str = "", password: str = "") -> str:
+    """Render a ddclient.conf using the dynamic-DNS protocol for ``provider``."""
+    lines = [
+        "daemon=300",
+        "ssl=yes",
+        "use=web, web=checkip.dyndns.org",
+        "protocol=" + provider,
+    ]
+    if login:
+        lines.append(f"login={login}")
+    if password:
+        lines.append(f"password={password}")
+    lines.append(domain)
+    return "\n".join(lines) + "\n"
+
+
+def setup_ddclient(domain: str, provider: str = "dyndns2", login: str = "", password: str = "") -> dict[str, Any]:
+    """Install ddclient and configure it to keep ``domain``'s DNS updated.
+
+    Raises ExternalAccessError on any failure. Returns the summary dict.
+    """
+    if not domain:
+        raise ExternalAccessError("no domain given for ddclient setup")
+    if not _have("ddclient"):
+        _install_apt("ddclient")
+    if not _have("ddclient"):
+        raise ExternalAccessError("ddclient binary missing after apt install")
+    _write(DDCLIENT_CONF, ddclient_config(domain, provider, login, password))
+    _sudo(["systemctl", "restart", "ddclient"])
+    log_event("EXTERNAL", f"ddclient configured to keep {domain} updated")
+    return {"ok": True, "domain": domain, "provider": f"ddclient/{provider}"}
+
+
+# ---------------------------------------------------------------------------
+# systemd persistence
+# ---------------------------------------------------------------------------
+
+def systemd_unit_content(cfg: ServerConfig, python: str, working_dir: Path) -> str:
+    """Render a systemd unit that keeps the NeoRunner dashboard running."""
+    return f"""\
+[Unit]
+Description=NeoRunner Minecraft server manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={working_dir}
+ExecStart={python} -m neorunner_pkg start
+Restart=always
+RestartSec=10
+Environment=NEORUNNER_HOME={working_dir}
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def setup_systemd(cfg: ServerConfig, python: str | None = None, working_dir: Path | None = None) -> dict[str, Any]:
+    """Install a systemd service for NeoRunner auto-start.
+
+    Raises ExternalAccessError on any failure. Returns the summary dict.
+    """
+    import neorunner_pkg
+
+    if python is None:
+        python = sys.executable
+    if working_dir is None:
+        working_dir = Path(neorunner_pkg.__file__).resolve().parent.parent
+
+    unit_path = Path("/etc/systemd/system/neorunner.service")
+    _write(unit_path, systemd_unit_content(cfg, python, working_dir))
+    _sudo(["systemctl", "daemon-reload"])
+    _sudo(["systemctl", "enable", "neorunner"])
+    _sudo(["systemctl", "restart", "neorunner"])
+    log_event("EXTERNAL", "systemd service installed and started (neorunner.service)")
+    return {"ok": True, "service": "neorunner.service"}
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def setup_external_access(cfg: ServerConfig, opts: dict[str, Any]) -> dict[str, Any]:
+    """Configure external access from ``neorunner install`` options.
+
+    ``opts`` keys: ``domain``, ``external_access`` (caddy|cloudflare),
+    ``cf_token``, ``mc_port`` (extra TCP proxy port for caddy, optional),
+    ``ddclient`` (bool), ``ddclient_provider``, ``ddclient_login``,
+    ``ddclient_password``.
+
+    Raises ExternalAccessError on any failure. Returns a summary dict with
+    per-step results.
+    """
+    domain = (opts.get("domain") or "").strip()
+    if not domain:
+        raise ExternalAccessError("no domain given for external access")
+    results: dict[str, Any] = {}
+
+    provider = opts.get("external_access")
+    if provider == "caddy":
+        results["caddy"] = setup_caddy(cfg, domain, opts.get("mc_port"))
+    elif provider == "cloudflare":
+        results["cloudflare"] = setup_cloudflare(cfg, domain, opts.get("cf_token", ""))
+    else:
+        raise ExternalAccessError(f"unsupported external access provider: {provider!r}")
+
+    if opts.get("ddclient"):
+        results["ddclient"] = setup_ddclient(
+            domain,
+            opts.get("ddclient_provider", "dyndns2"),
+            opts.get("ddclient_login", ""),
+            opts.get("ddclient_password", ""),
+        )
+
+    # Persist the public hostname so the modpack link and kick messages use it.
+    if cfg.hostname != domain:
+        cfg.hostname = domain
+        save_cfg(cfg)
+        log_event("EXTERNAL", f"hostname set to {domain}")
+
+    log_event("EXTERNAL", "External access configured successfully")
+    results["hostname"] = domain
+    return {"ok": True, "steps": results}

@@ -1,16 +1,13 @@
 """Mod browser for searching and installing mods from various sources."""
 
-#
 
 import json
-import urllib.request
 import urllib.parse
+import urllib.request
 from dataclasses import dataclass
-from typing import List, Optional, Dict, Any
-from pathlib import Path
+from typing import Any
 
 from . import curseforge
-
 
 MODRINTH_LOADER_MAP = {
     "neoforge": "neoforge",
@@ -32,7 +29,7 @@ class ModResult:
     mc_version: str
     loader: str
     url: str
-    icon_url: Optional[str] = None
+    icon_url: str | None = None
 
 
 class ModBrowser:
@@ -42,7 +39,7 @@ class ModBrowser:
         self.mc_version = mc_version
         self.loader = loader.lower()
     
-    def search(self, query: str, limit: int = 50, sources: List[str] = None) -> List[ModResult]:
+    def search(self, query: str, limit: int = 50, sources: list[str] | None = None) -> list[ModResult]:
         """Search for mods.
         
         Args:
@@ -70,7 +67,7 @@ class ModBrowser:
         results.sort(key=lambda x: x.downloads, reverse=True)
         return results[:limit]
     
-    def _search_modrinth(self, query: str, limit: int) -> List[ModResult]:
+    def _search_modrinth(self, query: str, limit: int) -> list[ModResult]:
         """Search Modrinth API with proper filtering."""
         results = []
         
@@ -98,7 +95,7 @@ class ModBrowser:
                 for hit in data.get("hits", []):
                     # Filter out libraries and API mods
                     title_lower = hit.get("title", "").lower()
-                    slug_lower = hit.get("slug", "").lower()
+                    hit.get("slug", "").lower()
                     
                     # Skip common library/API patterns
                     skip_patterns = ["library", "api", "core", "lib", "common", "util"]
@@ -122,7 +119,7 @@ class ModBrowser:
         
         return results
     
-    def _search_curseforge(self, query: str, limit: int) -> List[ModResult]:
+    def _search_curseforge(self, query: str, limit: int) -> list[ModResult]:
         """Search CurseForge using their website (scraper approach).
         
         Falls back to Playwright-based search if HTTP returns 403 (Cloudflare).
@@ -131,7 +128,6 @@ class ModBrowser:
         
         Loader IDs: neoforge=6, forge=1, fabric=4, quilt=5
         """
-        results = []
         
         # Try HTTP first
         http_results = self._search_curseforge_http(query, limit)
@@ -143,7 +139,7 @@ class ModBrowser:
         playwright_results = self._search_curseforge_playwright(query, limit)
         return playwright_results
     
-    def _search_curseforge_http(self, query: str, limit: int) -> List[ModResult]:
+    def _search_curseforge_http(self, query: str, limit: int) -> list[ModResult]:
         """Search CurseForge using HTTP requests."""
         results = []
         
@@ -185,7 +181,7 @@ class ModBrowser:
             # Find all mod entries in the search results
             # Pattern: data-index="X" with mod-name and mod-slug
             mod_pattern = r'data-index="\d+"\s+data-mod-id="(\d+)"\s+data-project-id="(\d+)"'
-            matches = re.findall(mod_pattern, html)
+            re.findall(mod_pattern, html)
             
             # Also extract names and slugs from links
             name_pattern = r'<a[^>]+href="/minecraft/mc-mods/([^"]+)"[^>]*>\s*<span[^>]*>([^<]+)</span>'
@@ -240,7 +236,7 @@ class ModBrowser:
         
         return results
     
-    def get_versions(self, mod_id: str, source: str) -> List[Dict[str, Any]]:
+    def get_versions(self, mod_id: str, source: str) -> list[dict[str, Any]]:
         """Get available versions for a mod.
         
         Args:
@@ -254,17 +250,17 @@ class ModBrowser:
             return self._get_modrinth_versions(mod_id)
         return []
     
-    def get_mod_details(self, mod_id: str, source: str) -> Optional[Dict[str, Any]]:
+    def get_mod_details(self, mod_id: str, source: str) -> dict[str, Any] | None:
         """Get detailed information about a mod."""
         if source == "modrinth":
             return self._get_modrinth_details(mod_id)
         return None
     
-    def get_mod_versions(self, mod_id: str, source: str) -> List[Dict[str, Any]]:
+    def get_mod_versions(self, mod_id: str, source: str) -> list[dict[str, Any]]:
         """Get available versions for a mod."""
         return self.get_versions(mod_id, source)
     
-    def _get_modrinth_details(self, mod_id: str) -> Optional[Dict[str, Any]]:
+    def _get_modrinth_details(self, mod_id: str) -> dict[str, Any] | None:
         """Get mod details from Modrinth."""
         url = f"https://api.modrinth.com/v2/project/{urllib.parse.quote(mod_id)}"
         
@@ -288,7 +284,7 @@ class ModBrowser:
             print(f"Modrinth details error: {e}")
             return None
     
-    def _get_modrinth_versions(self, mod_id: str) -> List[Dict[str, Any]]:
+    def _get_modrinth_versions(self, mod_id: str) -> list[dict[str, Any]]:
         """Get versions from Modrinth API."""
         url = f"https://api.modrinth.com/v2/project/{urllib.parse.quote(mod_id)}/version"
         
@@ -326,7 +322,7 @@ class ModBrowser:
             print(f"Modrinth versions error: {e}")
             return []
     
-    def _search_curseforge_playwright(self, query: str, limit: int) -> List[ModResult]:
+    def _search_curseforge_playwright(self, query: str, limit: int) -> list[ModResult]:
         """Search CurseForge using Playwright (fallback when HTTP 403 detected)."""
         results = []
         

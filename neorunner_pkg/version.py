@@ -2,9 +2,8 @@
 
 import json
 import logging
-import urllib.request
 import urllib.parse
-from typing import Optional, List
+import urllib.request
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -39,10 +38,9 @@ def get_latest_minecraft_version(force_refresh: bool = False) -> str:
             
             for v in data.get("versions", []):
                 vid = v.get("id", "")
-                if v.get("type") == "release":
-                    if vid[0].isdigit() and '.' in vid:
-                        latest = vid
-                        break
+                if v.get("type") == "release" and vid and vid[0].isdigit() and '.' in vid:
+                    latest = vid
+                    break
             
             cache_data = {"latest_release": latest, "versions": [v["id"] for v in data.get("versions", [])]}
             VERSIONS_CACHE.write_text(json.dumps(cache_data, indent=2))
@@ -53,7 +51,7 @@ def get_latest_minecraft_version(force_refresh: bool = False) -> str:
         return DEFAULT_MC_VERSION
 
 
-def get_all_minecraft_versions() -> List[str]:
+def get_all_minecraft_versions() -> list[str]:
     """Get all available Minecraft versions."""
     if VERSIONS_CACHE.exists():
         try:
@@ -77,7 +75,7 @@ def get_all_minecraft_versions() -> List[str]:
         return [DEFAULT_MC_VERSION]
 
 
-def get_loaders_for_minecraft(mc_version: str = None) -> dict:
+def get_loaders_for_minecraft(mc_version: str | None = None) -> dict:
     """Get all compatible loader versions for Minecraft."""
     if mc_version is None:
         mc_version = get_latest_minecraft_version()
@@ -96,7 +94,7 @@ def get_loaders_for_minecraft(mc_version: str = None) -> dict:
     return loaders
 
 
-def _get_all_neoforge_versions() -> List[dict]:
+def _get_all_neoforge_versions() -> list[dict]:
     """Get NeoForge versions - latest 5 (including beta)."""
     try:
         url = "https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge"
@@ -124,7 +122,7 @@ def _get_all_neoforge_versions() -> List[dict]:
         return []
 
 
-def _get_fabric_versions() -> List[dict]:
+def _get_fabric_versions() -> list[dict]:
     """Get Fabric versions."""
     try:
         url = "https://meta.fabricmc.net/v2/versions/loader"
@@ -135,11 +133,9 @@ def _get_fabric_versions() -> List[dict]:
             
             # Get latest 5 versions
             latest_5 = []
-            count = 0
-            for d in data:
+            for count, d in enumerate(data):
                 latest_5.append({"version": d.get("version"), "type": "latest"})
-                count += 1
-                if count >= 5:
+                if count >= 4:
                     break
             
             return latest_5
@@ -148,7 +144,7 @@ def _get_fabric_versions() -> List[dict]:
         return []
 
 
-def get_latest_for_loader(loader: str = "neoforge") -> Optional[str]:
+def get_latest_for_loader(loader: str = "neoforge") -> str | None:
     """Get latest version for a loader."""
     loaders = get_loaders_for_minecraft()
     
@@ -194,7 +190,7 @@ def get_java_version_for_mc(mc_version: str) -> str:
 
     if ver.startswith("1.20"):
         return "17"
-    if ver.startswith("1.19") or ver.startswith("1.18"):
+    if ver.startswith(("1.19", "1.18")):
         return "17"
     if ver.startswith("1.17"):
         return "16"
@@ -202,10 +198,10 @@ def get_java_version_for_mc(mc_version: str) -> str:
 
 
 __all__ = [
-    "get_latest_minecraft_version",
-    "get_all_minecraft_versions",
-    "get_loaders_for_minecraft",
-    "get_latest_for_loader",
-    "get_java_version_for_mc",
     "DEFAULT_MC_VERSION",
+    "get_all_minecraft_versions",
+    "get_java_version_for_mc",
+    "get_latest_for_loader",
+    "get_latest_minecraft_version",
+    "get_loaders_for_minecraft",
 ]

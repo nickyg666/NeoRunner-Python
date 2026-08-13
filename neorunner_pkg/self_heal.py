@@ -3,20 +3,18 @@
 Uses ferium for mod management, with CurseForge scraper for mod_id resolution.
 """
 
-#
 
-import os
-import re
 import json
-import zipfile
 import logging
+import random
+import re
 import subprocess
 import time
-import random
-import urllib.request
 import urllib.parse
+import urllib.request
+import zipfile
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any
 
 from .constants import CWD
 from .log import log_event
@@ -94,8 +92,6 @@ KNOWN_SAFE_DEPS = {
     "respawningpets",
     "roughlyenoughitems",
     "shulkerboxtooltip",
-    "supermartijn642corelib",
-    "supermartijn642configlib",
     "sophisticatedbackpacks",
     "sophisticatedcore",
     "sophisticatedstorage",
@@ -123,7 +119,6 @@ CF_LOADER_IDS = {
 PLAYWRIGHT_AVAILABLE = False
 try:
     from playwright.sync_api import sync_playwright
-    from playwright._impl._api_types import TimeoutError as PlaywrightTimeout
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     pass
@@ -157,7 +152,7 @@ CF_TIMEZONES = ["America/New_York", "America/Los_Angeles", "America/Chicago", "E
 
 def _run_cmd(cmd: str) -> subprocess.CompletedProcess:
     """Execute shell command."""
-    return subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    return subprocess.run(cmd, check=False, shell=True, capture_output=True, text=True)
 
 
 def _cf_rate_limit() -> None:
@@ -165,7 +160,7 @@ def _cf_rate_limit() -> None:
     time.sleep(random.uniform(1.0, 2.5))
 
 
-def preflight_dep_check(cfg: Dict[str, Any]) -> Dict[str, Any]:
+def preflight_dep_check(cfg: dict[str, Any]) -> dict[str, Any]:
     """Proactive pre-flight: scan all installed mod JARs for required dependencies,
     check if they're installed, and auto-fetch missing ones via ferium.
     
@@ -195,10 +190,16 @@ def preflight_dep_check(cfg: Dict[str, Any]) -> Dict[str, Any]:
     # Create clientonly dir if it doesn't exist
     clientonly_dir.mkdir(parents=True, exist_ok=True)
     
-    result: Dict[str, Any] = {"fetched": 0, "optional_interop": [], "quarantined": [], "clientonly_moved": [], "warnings": []}
+    result: dict[str, Any] = {"fetched": 0, "optional_interop": [], "quarantined": [], "clientonly_moved": [], "warnings": []}
     
     if not mods_dir.exists():
         return result
+
+    # Ensure the ferium profile exists so dependency auto-fetch always works.
+    try:
+        _ferium_ensure_profile(mc_version, loader_name, mods_dir)
+    except Exception as e:
+        log_event("PREFLIGHT", f"ferium profile init failed (non-fatal): {e}")
     
     # NeoForge 1.21.11 beta has entity_texture_features mixin BAKED into the patched server jar
     # This is a known bug in NeoForge 21.11.38-beta - cannot be fixed by moving mods
@@ -221,58 +222,72 @@ def preflight_dep_check(cfg: Dict[str, Any]) -> Dict[str, Any]:
     # Scan live.log for "client only mod" warnings from NeoForge and auto-move
     _scan_live_log_for_client_only_mods(mods_dir, clientonly_dir, result)
     
-    # Move client-only mods to clientonly folder
+    # Move client-only mods to clientonly folder.
+    # Detection uses AUTHORITATIVE metadata, never naive class-path scanning:
+    #   1. explicit toml `side="CLIENT"` on a mod entry,
+    #   2. fabric.mod.json `environment: client`,
+    #   3. known client-only mod name list.
     from .constants import FORCE_CLIENT_ONLY_MODS
-    
-    # Known client-side class patterns that indicate a mod is client-only
-    CLIENT_CLASS_PATTERNS = [
-        "net/minecraft/client/",
-        "com/mojang/blaze3d/",
-        "net/optifine/",
-        "net/iris/",
-        " client/renderer",
-        "client/gui",
-        "client/options",
-        "client/settings",
-    ]
-    
+
+    def _toml_mod_sides(fn: Path) -> list:
+        """Return the declared `side` values of the mod's toml mod entries."""
+        sides = []
+        try:
+            with zipfile.ZipFile(fn, "r") as zf:
+                names = zf.namelist()
+                toml_file = next(
+                    (n for n in ("META-INF/neoforge.mods.toml", "META-INF/mods.toml") if n in names),
+                    None,
+                )
+                if toml_file:
+                    try:
+                        import tomllib
+                    except ImportError:
+                        import tomli as tomllib
+                    data = tomllib.loads(zf.read(toml_file).decode("utf-8", "replace"))
+                    for mod_entry in data.get("mods", []):
+                        side = (mod_entry.get("side") or "BOTH").strip().upper()
+                        if side not in ("BOTH", "UNIVERSAL"):
+                            sides.append(side)
+        except Exception:
+            pass
+        return sides
+
+    def _fabric_environment_client(fn: Path) -> bool:
+        """True when fabric.mod.json declares a client-only environment."""
+        try:
+            import json
+            with zipfile.ZipFile(fn, "r") as zf:
+                if "fabric.mod.json" not in zf.namelist():
+                    return False
+                data = json.loads(zf.read("fabric.mod.json").decode("utf-8", "replace"))
+            env = data.get("environment", {})
+            if isinstance(env, str):
+                return env.lower() == "client"
+            if isinstance(env, dict):
+                return "client" in env.get("*", "") or env.get("client") == "*"
+        except Exception:
+            pass
+        return False
+
     for fn in mods_dir.glob("*.jar"):
         fn_lower = fn.stem.lower()
-        
-        # First check against known client-only mod list
-        moved = False
-        for client_mod in FORCE_CLIENT_ONLY_MODS:
-            if client_mod.lower() in fn_lower:
-                dest = clientonly_dir / fn.name
+
+        known_client = any(cm in fn_lower for cm in FORCE_CLIENT_ONLY_MODS)
+        toml_client_only = "CLIENT" in _toml_mod_sides(fn)
+        fabric_client_only = _fabric_environment_client(fn)
+
+        # A mod is only treated as client-only when it is a KNOWN client mod
+        # OR its own metadata declares it client-only.
+        is_client_only = known_client or toml_client_only or fabric_client_only
+
+        if is_client_only:
+            dest = clientonly_dir / fn.name
+            if fn.exists():
                 fn.rename(dest)
                 result["clientonly_moved"].append(fn.name)
-                log_event("PREFLIGHT", f"Moved to clientonly: {fn.name} (known client-side mod)")
-                moved = True
-                break
-        
-        # If not moved by name, scan JAR for client-side classes
-        if not moved:
-            try:
-                with zipfile.ZipFile(fn, 'r') as zf:
-                    names = zf.namelist()
-                    # Check for client-side class patterns
-                    has_client_class = any(
-                        any(pattern.replace("/", ".") in n or pattern in n.lower() 
-                            for pattern in CLIENT_CLASS_PATTERNS)
-                        for n in names[:200]  # Check first 200 entries
-                    )
-                    # Also check for mixin targets referencing client classes
-                    has_client_mixin = any(
-                        "client" in n.lower() and ("mixin" in n.lower() or ".json" in n.lower())
-                        for n in names[:50]
-                    )
-                    if has_client_class or has_client_mixin:
-                        dest = clientonly_dir / fn.name
-                        fn.rename(dest)
-                        result["clientonly_moved"].append(fn.name)
-                        log_event("PREFLIGHT", f"Moved to clientonly: {fn.name} (detected client-side classes)")
-            except Exception:
-                pass
+                reason = "known client-side mod" if known_client else "declared client-only"
+                log_event("PREFLIGHT", f"Moved to clientonly: {fn.name} ({reason})")
     
     if not mods_dir.exists():
         return result
@@ -281,7 +296,7 @@ def preflight_dep_check(cfg: Dict[str, Any]) -> Dict[str, Any]:
     import subprocess
     try:
         java_version_output = subprocess.run(
-            ["java", "-version"], capture_output=True, text=True, timeout=10
+            ["java", "-version"], check=False, capture_output=True, text=True, timeout=10
         )
         java_version_match = re.search(r'version "?(\d+)', java_version_output.stderr)
         installed_java_ver = int(java_version_match.group(1)) if java_version_match else 21
@@ -290,10 +305,10 @@ def preflight_dep_check(cfg: Dict[str, Any]) -> Dict[str, Any]:
     
     # Track all installed mod IDs and their files
     # NOTE: Only scan main mods_dir, NOT clientonly - clientonly mods are client-only
-    installed_mod_ids: Dict[str, List[str]] = {}
+    installed_mod_ids: dict[str, list[str]] = {}
     
     # Check for Java version mismatches
-    java_version_mismatches: Dict[str, int] = {}  # mod_file -> required_java_version
+    java_version_mismatches: dict[str, int] = {}  # mod_file -> required_java_version
     
     for fn in mods_dir.glob("*.jar"):
             try:
@@ -322,7 +337,6 @@ def preflight_dep_check(cfg: Dict[str, Any]) -> Dict[str, Any]:
                                         if isinstance(dep, dict) and dep.get("modId", "").lower() in ["javafml", "fml"]:
                                             java_version_range = dep.get("versionRange", "")
                                             if java_version_range:
-                                                import re
                                                 java_match = re.search(r'\[(\d+)', java_version_range)
                                                 if java_match:
                                                     required_java = int(java_match.group(1))
@@ -369,9 +383,9 @@ def preflight_dep_check(cfg: Dict[str, Any]) -> Dict[str, Any]:
     log_event("PREFLIGHT", f"Scanning {len(installed_mod_ids)} installed mods for dependencies...")
     
     # Track dependencies with proper categorization
-    required_deps: Dict[str, set] = {}  # dep_id -> set of requesting mod files
-    optional_deps: Dict[str, set] = {}  # dep_id -> set of requesting mod files
-    dependents: Dict[str, List[str]] = {}  # dep_id -> list of mod_ids that depend on it (for confirmation)
+    required_deps: dict[str, set] = {}  # dep_id -> set of requesting mod files
+    optional_deps: dict[str, set] = {}  # dep_id -> set of requesting mod files
+    dependents: dict[str, list[str]] = {}  # dep_id -> list of mod_ids that depend on it (for confirmation)
     
     for scan_dir in [mods_dir, clientonly_dir]:
         if not scan_dir.exists():
@@ -405,7 +419,7 @@ def preflight_dep_check(cfg: Dict[str, Any]) -> Dict[str, Any]:
                         
                         all_deps = toml_data.get("dependencies", {})
                         if isinstance(all_deps, dict):
-                            for dep_parent, dep_list in all_deps.items():
+                            for dep_list in all_deps.values():
                                 if not isinstance(dep_list, list):
                                     continue
                                 for dep in dep_list:
@@ -432,7 +446,7 @@ def preflight_dep_check(cfg: Dict[str, Any]) -> Dict[str, Any]:
                             fabric_data = json.loads(fabric_raw)
                             mod_id_for_file = fabric_data.get("id", "").lower()
                             
-                            for dep_id in fabric_data.get("depends", {}).keys():
+                            for dep_id in fabric_data.get("depends", {}):
                                 dep_id_lower = dep_id.lower()
                                 if dep_id_lower not in BUILTIN_MODS:
                                     if mod_id_for_file:
@@ -460,13 +474,13 @@ def preflight_dep_check(cfg: Dict[str, Any]) -> Dict[str, Any]:
             log_event("PREFLIGHT", f"[DEPENDENTS] {dep_id} has {len(dependent_mods)} dependents: {dependent_mods[:5]}")
     
     # Find missing required dependencies
-    missing_required: Dict[str, set] = {}
+    missing_required: dict[str, set] = {}
     for dep_id, requesters in required_deps.items():
         if dep_id not in installed_mod_ids:
             missing_required[dep_id] = requesters
     
     # Find missing optional dependencies (optional, but track them)
-    missing_optional: Dict[str, set] = {}
+    missing_optional: dict[str, set] = {}
     for dep_id, requesters in optional_deps.items():
         if dep_id not in installed_mod_ids:
             missing_optional[dep_id] = requesters
@@ -510,6 +524,21 @@ def preflight_dep_check(cfg: Dict[str, Any]) -> Dict[str, Any]:
     result["missing_required"] = list(missing_required.keys())
     result["missing_optional"] = list(missing_optional.keys())
     
+    # Re-classify any client-only mods that were just fetched as dependencies
+    # (e.g. sodium fetched for iris). They land in mods/, but client-only mods
+    # belong in clientonly/ so the server never loads them and the client gets them.
+    for fn in list(mods_dir.glob("*.jar")):
+        fn_lower = fn.stem.lower()
+        known_client = any(cm in fn_lower for cm in FORCE_CLIENT_ONLY_MODS)
+        toml_client_only = "CLIENT" in _toml_mod_sides(fn)
+        fabric_client_only = _fabric_environment_client(fn)
+        if known_client or toml_client_only or fabric_client_only:
+            dest = clientonly_dir / fn.name
+            if fn.exists() and not dest.exists():
+                fn.rename(dest)
+                result["clientonly_moved"].append(fn.name)
+                log_event("PREFLIGHT", f"Moved to clientonly after fetch: {fn.name}")
+    
     # Write cache timestamp for dashboard preflight_status
     import time
     cache_file = CWD / ".preflight_cache"
@@ -524,7 +553,7 @@ def preflight_dep_check(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
 
 
-def _search_curseforge_scraper(dep_name: str, mc_version: str, loader_name: str) -> Optional[str]:
+def _search_curseforge_scraper(dep_name: str, mc_version: str, loader_name: str) -> str | None:
     """Use Playwright to search CurseForge and get the mod slug."""
     if not PLAYWRIGHT_AVAILABLE:
         return None
@@ -644,7 +673,7 @@ def _search_curseforge_scraper(dep_name: str, mc_version: str, loader_name: str)
                 try:
                     context.close()
                     browser.close()
-                except:
+                except Exception:
                     pass
                 
         else:
@@ -725,7 +754,7 @@ def _search_curseforge_scraper(dep_name: str, mc_version: str, loader_name: str)
     return None
 
 
-def _search_modrinth_api(mod_name: str, mc_version: str, loader: str, dependents: Optional[List[str]] = None) -> Optional[str]:
+def _search_modrinth_api(mod_name: str, mc_version: str, loader: str, dependents: list[str] | None = None) -> str | None:
     """Search Modrinth API using the mod_name directly.
     
     Just use mod_name as-is for search query. No dashifying or splitting.
@@ -751,12 +780,11 @@ def _search_modrinth_api(mod_name: str, mc_version: str, loader: str, dependents
     return None
 
 
-def _lookup_slug_from_cache(mod_id: str, mc_version: str) -> Optional[str]:
+def _lookup_slug_from_cache(mod_id: str, mc_version: str) -> str | None:
     """Look up slug from curator cache using mod_id or its dependencies.
     
     Also populates a global dep_slug_map for future lookups.
     """
-    global _dep_slug_map
     
     # Check if we already mapped this mod_id
     if mod_id in _dep_slug_map:
@@ -806,10 +834,10 @@ def _lookup_slug_from_cache(mod_id: str, mc_version: str) -> Optional[str]:
 
 
 # Global map for mod_id -> slug
-_dep_slug_map: Dict[str, str] = {}
+_dep_slug_map: dict[str, str] = {}
 
 
-def _modrinth_direct_lookup(mod_name: str, mc_version: str, loader: str) -> Optional[str]:
+def _modrinth_direct_lookup(mod_name: str, mc_version: str, loader: str) -> str | None:
     """Try curator cache first, then direct Modrinth lookup."""
     from urllib.parse import quote as url_quote
     
@@ -844,78 +872,162 @@ def _modrinth_direct_lookup(mod_name: str, mc_version: str, loader: str) -> Opti
     return None
 
 
-def _fetch_dependency(dep_id: str, mc_version: str, loader_name: str, mods_dir: Path, dependents: Optional[List[str]] = None) -> bool:
+def _ferium_ensure_profile(mc_version: str, loader_name: str, mods_dir: Path) -> str | None:
+    """Make sure a ferium profile matching the server config exists.
+
+    Creates one if missing. Returns the ferium binary path (or None).
+    """
+    ferium_bin = CWD / ".local" / "bin" / "ferium"
+    if not ferium_bin.exists():
+        return None
+
+    def _run(*args: str, timeout: int = 60) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [str(ferium_bin), *args], check=False, capture_output=True, text=True, timeout=timeout
+        )
+
+    # Validate the binary actually works.
+    try:
+        probe = _run("--version", timeout=10)
+        if probe.returncode != 0:
+            return None
+    except Exception:
+        return None
+
+    try:
+        cfg_json_path = Path.home() / ".config" / "ferium" / "config.json"
+        has_profile = False
+        if cfg_json_path.exists():
+            data = json.loads(cfg_json_path.read_text("utf-8"))
+            for prof in data.get("profiles", []):
+                if prof.get("name") == "neoserver":
+                    has_profile = True
+                    break
+        if not has_profile:
+            loader_map = {
+                "neoforge": "neo-forge",
+                "forge": "forge",
+                "fabric": "fabric",
+            }
+            _run(
+                "profile", "create",
+                "--name", "neoserver",
+                "--game-version", mc_version,
+                "--mod-loader", loader_map.get(loader_name.lower(), "neo-forge"),
+                "--output-dir", str(mods_dir),
+                timeout=60,
+            )
+            log_event("PREFLIGHT", f"Created ferium profile 'neoserver' for {mc_version}/{loader_name}")
+    except Exception as e:
+        log_event("PREFLIGHT", f"ferium profile setup failed (non-fatal): {e}")
+
+    return str(ferium_bin)
+
+
+def _fetch_dependency(dep_id: str, mc_version: str, loader_name: str, mods_dir: Path, dependents: list[str] | None = None) -> bool:
     """Fetch a missing dependency.
-    
-    Flow:
-    1. Try CurseForge scraper FIRST (better coverage)
-    2. Try Modrinth API search
-    3. Try ferium as last resort
+
+    Flow (ferium-first, matching the "always auto-fetch via ferium" policy):
+    1. Ensure the ferium profile exists and ``ferium add`` + ``upgrade`` the dep.
+    2. Fall back to a direct Modrinth API search + download.
+    3. Fall back to the CurseForge scraper.
     """
     if dependents is None:
         dependents = []
-    
+
     if dependents:
         log_event("PREFLIGHT", f"[DEPENDENTS] Searching for {dep_id}, confirmed by: {dependents[:3]}")
-    
-    # 1. Try CurseForge scraper FIRST
-    log_event("PREFLIGHT", f"Checking CurseForge for {dep_id}...")
-    cf_slug = _search_curseforge_scraper(dep_id, mc_version, loader_name)
-    
-    if cf_slug:
-        log_event("PREFLIGHT", f"Found {dep_id} as '{cf_slug}' on CurseForge, downloading...")
-        if _download_from_curseforge_by_slug(cf_slug, mods_dir, mc_version, loader_name):
-            log_event("PREFLIGHT", f"Downloaded {cf_slug} from CurseForge")
-            return True
-    
-    # 2. Try Modrinth search
+
+    # 1. ferium FIRST (always-on auto-fetch path)
+    ferium_bin = _ferium_ensure_profile(mc_version, loader_name, mods_dir)
+    if ferium_bin:
+        add = subprocess.run(
+            [ferium_bin, "add", dep_id], check=False, capture_output=True, text=True, timeout=60
+        )
+        out_lower = (add.stdout + add.stderr).lower()
+        if add.returncode == 0 or "already" in out_lower or "already in" in out_lower:
+            log_event("PREFLIGHT", f"Added {dep_id} via ferium, upgrading...")
+            # Snapshot files present before upgrade so we can restore exactly
+            # those that ferium archives (never restore unrelated .old files).
+            pre_upgrade = {f.name for f in mods_dir.iterdir() if f.is_file()}
+            up = subprocess.run(
+                [ferium_bin, "upgrade"], check=False, capture_output=True, text=True, timeout=180
+            )
+            # ferium's `upgrade` moves ANY non-profile file in the output dir
+            # into `<output_dir>/.old/` (treating it as an unmanaged leftover).
+            # Since our profile only tracks the dependency being fetched, this
+            # would archive the entire modpack. Restore only what we had.
+            _restore_ferium_archived_files(mods_dir, pre_upgrade)
+            if up.returncode == 0:
+                # Verify a matching jar actually landed in mods_dir.
+                new_files = [f for f in mods_dir.glob("*.jar")]
+                if new_files:
+                    log_event("PREFLIGHT", f"Downloaded {dep_id} via ferium")
+                    return True
+                log_event("PREFLIGHT", f"ferium added {dep_id} but no file appeared")
+            else:
+                log_event("PREFLIGHT", f"ferium upgrade had issues: {up.stderr[:200]}")
+        else:
+            log_event("PREFLIGHT", f"ferium could not resolve {dep_id}: {add.stderr[:150]}")
+
+    # 2. Direct Modrinth API search
     log_event("PREFLIGHT", f"Checking Modrinth for {dep_id}...")
     slug = _search_modrinth_api(dep_id, mc_version, loader_name)
-    
+
     if slug:
         log_event("PREFLIGHT", f"Found {dep_id} as '{slug}' on Modrinth, downloading...")
         if _download_from_modrinth(slug, mods_dir, mc_version, loader_name):
             log_event("PREFLIGHT", f"Downloaded {slug} from Modrinth")
             return True
-    
-    # 3. Try ferium as fallback
-    ferium_bin = CWD / ".local" / "bin" / "ferium"
-    if ferium_bin.exists():
-        log_event("PREFLIGHT", f"Trying ferium add for {dep_id}...")
-        
-        result = subprocess.run(
-            [str(ferium_bin), "add", dep_id],
-            capture_output=True,
-            text=True,
-            timeout=60
-        )
-        
-        if result.returncode == 0 or "already" in result.stderr.lower():
-            log_event("PREFLIGHT", f"Added {dep_id} via ferium (may need upgrade)")
-            # Trigger ferium upgrade to actually download
-            subprocess.run(
-                [str(ferium_bin), "upgrade"],
-                capture_output=True,
-                text=True,
-                timeout=120
-            )
-            return True
-    
-    # Try CurseForge scraper
+
+    # 3. CurseForge scraper fallback
     cf_slug = _search_curseforge_scraper(dep_id, mc_version, loader_name)
     if cf_slug:
-        log_event("PREFLIGHT", f"Found {dep_id} as {cf_slug} on CurseForge...")
+        log_event("PREFLIGHT", f"Found {dep_id} as '{cf_slug}' on CurseForge, downloading...")
         if _download_from_curseforge_by_slug(cf_slug, mods_dir, mc_version, loader_name):
+            log_event("PREFLIGHT", f"Downloaded {cf_slug} from CurseForge")
             return True
-    
+
     log_event("PREFLIGHT", f"Could not fetch dependency: {dep_id}")
     return False
 
 
+def _restore_ferium_archived_files(mods_dir: Path, pre_upgrade: set | None = None) -> None:
+    """Restore files ferium moved into <mods_dir>/.old/ during an upgrade.
+
+    Ferium's ``upgrade`` archives every file in its output directory that is
+    not part of the active profile into a ``.old`` subfolder. Because the
+    ferium profile only tracks the dependency we're fetching (not the whole
+    modpack), this would otherwise wipe all manually-installed mods.
+
+    Only files that existed in ``mods_dir`` before the upgrade (``pre_upgrade``)
+    are restored; any unrelated files already sitting in ``.old`` are left alone.
+    """
+    archived_dir = mods_dir / ".old"
+    if not archived_dir.is_dir():
+        return
+    restored = 0
+    for fn in sorted(archived_dir.iterdir()):
+        if not fn.is_file():
+            continue
+        if pre_upgrade is not None and fn.name not in pre_upgrade:
+            continue
+        dest = mods_dir / fn.name
+        if dest.exists():
+            continue
+        try:
+            fn.rename(dest)
+            restored += 1
+        except OSError:
+            pass
+    if restored:
+        log_event("PREFLIGHT", f"Restored {restored} mods archived by ferium into {archived_dir.name}/")
+
+
 def _download_from_modrinth(mod_slug: str, mods_dir: Path, mc_version: str, loader: str) -> bool:
     """Download mod directly from Modrinth API."""
-    import urllib.request
     import urllib.parse
+    import urllib.request
     
     try:
         # First get project ID
@@ -925,7 +1037,7 @@ def _download_from_modrinth(mod_slug: str, mods_dir: Path, mc_version: str, load
         with urllib.request.urlopen(req, timeout=15) as response:
             project = json.loads(response.read().decode())
             mod_id = project.get("id")
-            mod_name = project.get("title", mod_slug)
+            project.get("title", mod_slug)
         
         if not mod_id:
             return False
@@ -983,13 +1095,26 @@ def _download_from_modrinth(mod_slug: str, mods_dir: Path, mc_version: str, load
 
 
 def _download_from_curseforge_by_slug(slug: str, mods_dir: Path, mc_version: str, loader: str) -> bool:
-    """Download mod from CurseForge by slug."""
-    # This would require the CurseForge scraper to get the download URL
-    # For now, return False and let the scraper handle it separately
-    return False
+    """Download mod from CurseForge by slug, resolving via the scraper."""
+    try:
+        from .curseforge import (
+            _download_from_curseforge,
+            get_mod_info_by_id_or_slug,
+            is_available,
+        )
+
+        if not is_available():
+            return False
+        mod_info = get_mod_info_by_id_or_slug(slug, mc_version, loader)
+        if not mod_info:
+            return False
+        return _download_from_curseforge(mod_info, mods_dir, mc_version, loader)
+    except Exception as e:
+        log_event("SELF_HEAL", f"CurseForge download by slug failed for {slug}: {e}")
+        return False
 
 
-def quarantine_mod(mods_dir: Path, mod_id_or_file: str, reason: str) -> Optional[Path]:
+def quarantine_mod(mods_dir: Path, mod_id_or_file: str, reason: str) -> Path | None:
     """Move a mod to quarantine directory."""
     quarantine_dir = mods_dir / "quarantine"
     quarantine_dir.mkdir(parents=True, exist_ok=True)
@@ -1016,7 +1141,7 @@ def quarantine_mod(mods_dir: Path, mod_id_or_file: str, reason: str) -> Optional
     return None
 
 
-def load_crash_history() -> Dict[str, int]:
+def load_crash_history() -> dict[str, int]:
     """Load crash history from persistent file."""
     history_file = CWD / ".crash_history.json"
     if history_file.exists():
@@ -1028,7 +1153,7 @@ def load_crash_history() -> Dict[str, int]:
     return {}
 
 
-def save_crash_history(history: Dict[str, int]) -> None:
+def save_crash_history(history: dict[str, int]) -> None:
     """Save crash history to persistent file."""
     history_file = CWD / ".crash_history.json"
     try:
@@ -1039,11 +1164,11 @@ def save_crash_history(history: Dict[str, int]) -> None:
 
 
 def resolve_dependency_tree(
-    mod_ids: List[str],
+    mod_ids: list[str],
     mc_version: str,
     loader_name: str,
     mods_dir: Path,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Resolve the full dependency tree for mods using CurseForge scraper.
     
     This uses the CurseForge relationships API via Playwright to get:
@@ -1067,9 +1192,9 @@ def resolve_dependency_tree(
         - 'all_resolved': Dict of resolved mod info
         - 'fetched': Count of newly fetched mods
     """
-    from .curseforge import fetch_full_dependency_tree, get_mod_info_by_id_or_slug
+    from .curseforge import fetch_full_dependency_tree
     
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "required": [],
         "optional": [],
         "interops": [],
@@ -1096,7 +1221,7 @@ def resolve_dependency_tree(
     result["dependents"] = tree.get("dependents", {})
     result["all_resolved"] = tree.get("all_mods", {})
     
-    installed_mod_ids: Dict[str, str] = {}
+    installed_mod_ids: dict[str, str] = {}
     
     for fn in mods_dir.glob("*.jar"):
         try:
@@ -1159,7 +1284,7 @@ def check_and_fix_dependency_chain(
     mc_version: str,
     loader_name: str,
     mods_dir: Path,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Check a single mod's dependencies and fetch missing ones.
     
     This is useful when you know a mod ID (from a crash log) but need to
@@ -1176,7 +1301,7 @@ def check_and_fix_dependency_chain(
     """
     from .curseforge import get_mod_info_by_id_or_slug, get_mod_relationships
     
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "found": False,
         "slug": None,
         "cf_mod_id": None,
@@ -1207,7 +1332,7 @@ def check_and_fix_dependency_chain(
     result["interops"] = [i["slug"] for i in relationships.get("interops", [])]
     result["dependents"] = [d["slug"] for d in relationships.get("dependents", [])]
     
-    installed_mod_ids: Dict[str, str] = {}
+    installed_mod_ids: dict[str, str] = {}
     for fn in mods_dir.glob("*.jar"):
         try:
             with zipfile.ZipFile(fn, 'r') as zf:
@@ -1260,7 +1385,7 @@ def check_and_fix_dependency_chain(
     return result
 
 
-def _scan_live_log_for_client_only_mods(mods_dir: Path, clientonly_dir: Path, result: Dict[str, Any]) -> None:
+def _scan_live_log_for_client_only_mods(mods_dir: Path, clientonly_dir: Path, result: dict[str, Any]) -> None:
     """Scan live.log for NeoForge warnings about client-only mods and auto-move them.
     
     Patterns detected:
@@ -1269,7 +1394,6 @@ def _scan_live_log_for_client_only_mods(mods_dir: Path, clientonly_dir: Path, re
     - "will do nothing on server"
     - "launchTarget: server"
     """
-    import re
     
     log_file = CWD / "live.log"
     if not log_file.exists():
@@ -1322,10 +1446,10 @@ def _scan_live_log_for_client_only_mods(mods_dir: Path, clientonly_dir: Path, re
 
 
 __all__ = [
+    "check_and_fix_dependency_chain",
+    "load_crash_history",
     "preflight_dep_check",
     "quarantine_mod",
-    "load_crash_history",
-    "save_crash_history",
     "resolve_dependency_tree",
-    "check_and_fix_dependency_chain",
+    "save_crash_history",
 ]

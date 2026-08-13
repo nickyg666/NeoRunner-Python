@@ -1,12 +1,13 @@
 """Tests for crash log analyzer."""
 
-import pytest
-import sys
 import os
+import sys
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from neorunner_pkg.crash_analyzer import CrashAnalyzer, CrashAnalysis
+from neorunner_pkg.crash_analyzer import CrashAnalysis, CrashAnalyzer
 
 
 class TestCrashAnalyzer:
@@ -76,7 +77,7 @@ Caused by: org.spongepowered.asm.mixin.injection.exception.InvalidInjectionExcep
         """Extracts mod name from crash."""
         log = "at com.example.examplemod.CommonClass.init(ExampleMod.java:100)"
         
-        analyzer = CrashAnalyzer()
+        CrashAnalyzer()
         
         assert "examplemod" in log
 

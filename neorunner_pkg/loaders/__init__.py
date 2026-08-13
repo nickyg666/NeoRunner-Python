@@ -1,19 +1,18 @@
 """Base loader abstraction for Minecraft server modloaders."""
 
-#
 
-from abc import ABC, abstractmethod
-import os
 import logging
+import os
+from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Dict, Optional, List, Union, Any
+from typing import Any
 
 from ..constants import CWD
 
 log = logging.getLogger(__name__)
 
 
-def _get_cfg_value(cfg: Union[Any, dict], key: str, default: Any = None) -> Any:
+def _get_cfg_value(cfg: Any | dict, key: str, default: Any = None) -> Any:
     """Get config value from either object or dict with validation for memory values."""
     if isinstance(cfg, dict):
         val = cfg.get(key, default)
@@ -27,7 +26,7 @@ def _get_cfg_value(cfg: Union[Any, dict], key: str, default: Any = None) -> Any:
         if "echo" in val_str.lower() or "dashboard" in val_str.lower() or "http" in val_str.lower():
             return default
         # Must be a valid memory format like "4G", "2G", "512M"
-        if not (val_str.endswith("G") or val_str.endswith("M")):
+        if not (val_str.endswith(("G", "M"))):
             return default
     
     return val if val is not None else default
@@ -36,7 +35,7 @@ def _get_cfg_value(cfg: Union[Any, dict], key: str, default: Any = None) -> Any:
 class LoaderBase(ABC):
     """Abstract base class for modloader implementations."""
     
-    def __init__(self, cfg: Any, cwd: Optional[Path] = None):
+    def __init__(self, cfg: Any, cwd: Path | None = None):
         self.cfg = cfg
         self.cwd = cwd or CWD
         self.loader_name = _get_cfg_value(cfg, "loader", "unknown").lower()
@@ -49,7 +48,7 @@ class LoaderBase(ABC):
         """Setup server environment (EULA, server.properties, @args files, etc)."""
     
     @abstractmethod
-    def build_java_command(self) -> List[str]:
+    def build_java_command(self) -> list[str]:
         """Build Java command to launch server.
         
         Returns:
@@ -57,7 +56,7 @@ class LoaderBase(ABC):
         """
     
     @abstractmethod
-    def detect_crash_reason(self, log_output: str) -> Dict[str, Any]:
+    def detect_crash_reason(self, log_output: str) -> dict[str, Any]:
         """Parse server output/error to detect crash cause.
         
         Returns:
@@ -79,15 +78,15 @@ class LoaderBase(ABC):
         return names.get(self.loader_name, self.loader_name.title())
 
 
-def get_loader(cfg: Any, cwd: Optional[Path] = None) -> LoaderBase:
+def get_loader(cfg: Any, cwd: Path | None = None) -> LoaderBase:
     """Factory function to get the appropriate loader instance."""
-    from .neoforge import NeoForgeLoader
-    from .forge import ForgeLoader
     from .fabric import FabricLoader
+    from .forge import ForgeLoader
+    from .neoforge import NeoForgeLoader
     
     loader_name = _get_cfg_value(cfg, "loader", "neoforge").lower()
     
-    loaders: Dict[str, type] = {
+    loaders: dict[str, type] = {
         "neoforge": NeoForgeLoader,
         "forge": ForgeLoader,
         "fabric": FabricLoader,
@@ -101,9 +100,9 @@ def get_loader(cfg: Any, cwd: Optional[Path] = None) -> LoaderBase:
 
 
 __all__ = [
-    "LoaderBase",
-    "get_loader",
-    "NeoForgeLoader",
-    "ForgeLoader", 
     "FabricLoader",
+    "ForgeLoader",
+    "LoaderBase",
+    "NeoForgeLoader",
+    "get_loader",
 ]

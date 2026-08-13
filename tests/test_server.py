@@ -1,18 +1,17 @@
 """Tests for server management."""
 
-import pytest
-import sys
 import os
-from unittest.mock import patch, MagicMock
+import sys
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from neorunner_pkg.server import (
+    _add_event,
+    get_events,
     get_server,
     is_server_running,
     send_command,
-    get_events,
-    _add_event,
 )
 
 
@@ -21,13 +20,12 @@ class TestServer:
     
     def test_get_server_returns_tmuxserver(self):
         """get_server returns a TmuxServer instance."""
-        from neorunner_pkg.server import _server_instance
         with patch('neorunner_pkg.server._server_instance', None), \
              patch('neorunner_pkg.server.TmuxServer') as mock:
             mock_instance = MagicMock()
             mock.return_value = mock_instance
             
-            server = get_server()
+            get_server()
             
             assert mock.called
     

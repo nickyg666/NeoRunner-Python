@@ -1,30 +1,39 @@
 """Network channel analyzer for detecting client/server mod mismatches."""
 
-#
 
 import re
 from dataclasses import dataclass
-from typing import List, Optional, Dict, Any
-from pathlib import Path
+from typing import ClassVar
 
 from .log import log_event
+
+
+def _installer_link(cfg=None) -> str:
+    """Public installer download URL (via the shared mod_hosting helper)."""
+    from .mod_hosting import public_download_link
+    if cfg is None:
+        from .config import load_cfg
+        cfg = load_cfg()
+    return public_download_link(cfg)
 
 
 @dataclass
 class ChannelMismatch:
     """Represents a network channel mismatch between client and server."""
-    client_ip: Optional[str]
+    client_ip: str | None
     channel: str
-    direction: str  # "client_has_server_missing" or "server_has_client_missing"
-    mod_suggestion: Optional[str]
+    direction: str  # "client_has_server_missing", "server_has_client_missing", "connection_rejected"
+    mod_suggestion: str | None
     severity: str  # critical, high, medium
+    player: str | None = None
+    reason: str | None = None
 
 
 class NetworkChannelAnalyzer:
     """Analyze server logs for network channel mismatches."""
     
     # Patterns for detecting channel issues
-    CHANNEL_MISMATCH_PATTERNS = [
+    CHANNEL_MISMATCH_PATTERNS: ClassVar[list[str]] = [
         # Unknown custom packet identifier
         r"Unknown custom packet identifier: ([a-zA-Z0-9_.:]+)",
         r"Unknown custom packet identifier \(channel: ([a-zA-Z0-9_.]+)\)",
@@ -41,15 +50,39 @@ class NetworkChannelAnalyzer:
         r"CustomPayload.*channel=([a-zA-Z0-9_.]+)",
         r"Failed to handle custom payload.*channel ([a-zA-Z0-9_.]+)",
     ]
+
+    # Config-phase connection rejections. NeoForge/Forge reject the handshake
+    # before the player joins; the player name + reason identify who to kick
+    # with a download link.
+    CONFIG_REJECTION_PATTERNS: ClassVar[list[str]] = [
+        # dadoflorenzog (21dc29b4-...) lost connection: Incompatible client! Please use NeoForge 26.1.2.87
+        r"([A-Za-z0-9_]{1,16}) \([0-9a-fA-F-]{36}\) lost connection: (.+)",
+        # Modern NeoForge: "lost connection: Incompatible client!" style
+        r"([A-Za-z0-9_]{1,16}) \([0-9a-fA-F-]{36}\) lost connection: (Incompatible client.*)",
+    ]
+
+    REJECTION_REASONS = (
+        "incompatible client",
+        "missing mod",
+        "mod mismatch",
+        "channel",
+        "please use neoforge",
+        "please use forge",
+        "please use fabric",
+        "version mismatch",
+        "mod version",
+        "required mod",
+    )
     
-    # IP extraction patterns
-    IP_PATTERNS = [
-        r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})",
+    # IP extraction patterns. Require an IP-ish prefix ("from ", "/", ":") so we
+    # don't mistake NeoForge version strings like "26.1.2.87" for an address.
+    IP_PATTERNS: ClassVar[list[str]] = [
+        r"(?:from |/)(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})",
         r"/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):",
     ]
     
     # Common mod channels - map to mod names
-    CHANNEL_TO_MOD = {
+    CHANNEL_TO_MOD: ClassVar[dict[str, str | None]] = {
         "minecraft:register": None,  # Vanilla, ignore
         "minecraft:brand": None,  # Vanilla, ignore
         "fml:play": None,  # Forge/NeoForge protocol
@@ -78,10 +111,11 @@ class NetworkChannelAnalyzer:
         "kyrptonaught": "kyrptonaught",
     }
     
-    def __init__(self):
-        pass
+    def __init__(self, cfg=None):
+        self.cfg = cfg
+        self._link = _installer_link(cfg)
     
-    def analyze_log(self, log_text: str) -> List[ChannelMismatch]:
+    def analyze_log(self, log_text: str) -> list[ChannelMismatch]:
         """Analyze log text for channel mismatches."""
         results = []
         log_lines = log_text.split('\n')
@@ -115,6 +149,27 @@ class NetworkChannelAnalyzer:
                         mod_suggestion=mod_suggestion,
                         severity=severity
                     ))
+
+            # Config-phase rejection: player kicked during handshake with a mod/loader mismatch
+            for pattern in self.CONFIG_REJECTION_PATTERNS:
+                match = re.search(pattern, line, re.IGNORECASE)
+                if match:
+                    player, reason = match.group(1), match.group(2)
+                    if not any(term in reason.lower() for term in self.REJECTION_REASONS):
+                        continue
+                    # Server-side logs never include the client IP here; the
+                    # generic IP matcher can also grab loader version strings
+                    # like "26.1.2.87", so don't attempt IP extraction.
+                    results.append(ChannelMismatch(
+                        client_ip=None,
+                        channel="connection",
+                        direction="connection_rejected",
+                        mod_suggestion=None,
+                        severity="critical",
+                        player=player,
+                        reason=reason.strip()
+                    ))
+                    break
         
         return results
     
@@ -128,7 +183,7 @@ class NetworkChannelAnalyzer:
         ]
         return any(channel.startswith(p) for p in vanilla_prefixes)
     
-    def _extract_client_ip(self, line: str) -> Optional[str]:
+    def _extract_client_ip(self, line: str) -> str | None:
         """Extract client IP from log line."""
         for pattern in self.IP_PATTERNS:
             match = re.search(pattern, line)
@@ -148,7 +203,7 @@ class NetworkChannelAnalyzer:
         # Default to client has more mods than server
         return "client_has_server_missing"
     
-    def _channel_to_mod(self, channel: str) -> Optional[str]:
+    def _channel_to_mod(self, channel: str) -> str | None:
         """Map channel name to likely mod."""
         channel_lower = channel.lower()
         
@@ -172,7 +227,7 @@ class NetworkChannelAnalyzer:
         
         return None
     
-    def generate_events(self, mismatches: List[ChannelMismatch]) -> None:
+    def generate_events(self, mismatches: list[ChannelMismatch]) -> None:
         """Generate log events for channel mismatches."""
         seen = set()
         
@@ -183,7 +238,14 @@ class NetworkChannelAnalyzer:
                 continue
             seen.add(key)
             
-            if mismatch.direction == "client_has_server_missing":
+            if mismatch.direction == "connection_rejected":
+                msg = (f"Connection rejected: player '{mismatch.player}' during handshake "
+                       f"({mismatch.reason or 'mod/version mismatch'}). "
+                       f"Client should download: {self._link}")
+                if mismatch.client_ip:
+                    msg = f"Connection rejected: {mismatch.client_ip} ('{mismatch.player}') during handshake ({mismatch.reason or 'mod/version mismatch'}). Client should download: {self._link}"
+                log_event("PLAYER_REJECTED", msg)
+            elif mismatch.direction == "client_has_server_missing":
                 msg = f"Channel mismatch: client has mod '{mismatch.mod_suggestion or mismatch.channel}' that server doesn't"
                 if mismatch.client_ip:
                     msg = f"Connection rejected: client {mismatch.client_ip} has mod '{mismatch.mod_suggestion or mismatch.channel}' that server doesn't"
@@ -194,11 +256,23 @@ class NetworkChannelAnalyzer:
             
             log_event("CHANNEL_MISMATCH", msg)
 
+    def kick_reason(self, mismatch: ChannelMismatch) -> str | None:
+        """Build the kick message to send a mismatched player.
 
-def analyze_network_channels(log_text: str) -> List[ChannelMismatch]:
+        Returns a message for every mismatch direction so the server can kick
+        clients whose mod set diverges from the server's, pointing them at the
+        modpack download link. Returns None only when there is no player to kick.
+        """
+        if not mismatch.player:
+            return None
+        return ("Your client mods do not match the server. "
+                f"Download the modpack: {self._link}")
+
+
+def analyze_network_channels(log_text: str) -> list[ChannelMismatch]:
     """Convenience function to analyze network channels."""
     analyzer = NetworkChannelAnalyzer()
     return analyzer.analyze_log(log_text)
 
 
-__all__ = ["NetworkChannelAnalyzer", "ChannelMismatch", "analyze_network_channels"]
+__all__ = ["ChannelMismatch", "NetworkChannelAnalyzer", "analyze_network_channels"]

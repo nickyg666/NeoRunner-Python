@@ -2,12 +2,11 @@
 NBT Parser for reading Minecraft world data.
 """
 
-#
 
 import struct
-from pathlib import Path
-from typing import Dict, Any, Optional, Union
 from io import BytesIO
+from pathlib import Path
+from typing import Any
 
 
 def read_nbt_string(data: BytesIO) -> str:
@@ -96,7 +95,7 @@ def read_nbt_list(data: BytesIO) -> list:
     return items
 
 
-def read_nbt_compound(data: BytesIO, depth: int = 0) -> Dict[str, Any]:
+def read_nbt_compound(data: BytesIO, depth: int = 0) -> dict[str, Any]:
     """Read a compound tag."""
     if depth > 512:  # Prevent stack overflow
         return {}
@@ -136,7 +135,7 @@ def read_nbt_compound(data: BytesIO, depth: int = 0) -> Dict[str, Any]:
                 result[name] = read_nbt_int_array(data)
             elif tag_type == 12:  # Long Array
                 result[name] = read_nbt_long_array(data)
-        except:
+        except Exception:
             break
     
     return result
@@ -148,21 +147,21 @@ def decompress_nbt(data: bytes) -> BytesIO:
     try:
         import gzip
         return BytesIO(gzip.decompress(data))
-    except:
+    except Exception:
         pass
     
     # Try zlib
     try:
         import zlib
         return BytesIO(zlib.decompress(data))
-    except:
+    except Exception:
         pass
     
     # Assume uncompressed
     return BytesIO(data)
 
 
-def parse_nbt(data: bytes) -> Dict[str, Any]:
+def parse_nbt(data: bytes) -> dict[str, Any]:
     """Parse NBT data and return the root compound."""
     stream = decompress_nbt(data)
     
@@ -180,7 +179,7 @@ def parse_nbt(data: bytes) -> Dict[str, Any]:
     }
 
 
-def get_world_version(level_dat_path: Union[str, Path]) -> Dict[str, Any]:
+def get_world_version(level_dat_path: str | Path) -> dict[str, Any]:
     """
     Extract world version information from level.dat file.
     """

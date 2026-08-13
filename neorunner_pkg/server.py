@@ -1,23 +1,27 @@
 """Server management for NeoRunner with tmux-based process monitoring."""
 
-#
 
-import subprocess
-import signal
-import os
-import time
-import threading
 import logging
-import re
-import zipfile
-from pathlib import Path
-from typing import Optional, Dict, Any, Callable
+import os
+import subprocess
+import threading
+import time
+from datetime import UTC
+from typing import Any
 
-from .constants import CWD, MAX_RESTART_ATTEMPTS, MAX_TOTAL_RESTARTS, CRASH_COOLDOWN_SECONDS
 from .config import ServerConfig, load_cfg
-from .log import log_event
+from .constants import (
+    CWD,
+)
 from .loaders import get_loader
-from .self_heal import preflight_dep_check, quarantine_mod, load_crash_history, save_crash_history
+from .log import log_event
+from .self_heal import (
+    _fetch_dependency,
+    load_crash_history,
+    preflight_dep_check,
+    quarantine_mod,
+    save_crash_history,
+)
 
 log = logging.getLogger(__name__)
 
@@ -37,7 +41,7 @@ def _add_event(event_type: str, message: str) -> None:
     _in_memory_events.append({
         "type": event_type,
         "message": message,
-        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        "time": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
     })
     while len(_in_memory_events) > _max_events:
         _in_memory_events.pop(0)
@@ -53,7 +57,7 @@ class TmuxServer:
         self.tmux_socket = f"/tmp/tmux-{os.getuid()}/default"
         self.log_file = CWD / "live.log"
         self.running = False
-        self.monitor_thread: Optional[threading.Thread] = None
+        self.monitor_thread: threading.Thread | None = None
         self.stop_flag = threading.Event()
     
     def _ensure_tmux_socket(self) -> None:
@@ -75,6 +79,26 @@ class TmuxServer:
         self._ensure_tmux_socket()
         
         log_event("SERVER_START", f"Starting {self.loader.get_loader_display_name()} server (MC {self.cfg.mc_version})")
+
+        # Remediate level.dat permissions/stale locks before boot so the world
+        # can be opened, and move any version-incompatible world aside so a
+        # fresh one generates instead of crashing on startup.
+        try:
+            from .worlds import (
+                auto_move_incompatible_world,
+                remediate_world_lock,
+            )
+            lock_result = remediate_world_lock()
+            if lock_result.get("fixed_permissions") or lock_result.get("removed_stale_lock"):
+                log_event("WORLD_LOCK", f"World lock remediation: perms={lock_result.get('fixed_permissions')} stale_lock={lock_result.get('removed_stale_lock')}")
+            move_result = auto_move_incompatible_world(
+                server_mc_version=self.cfg.mc_version,
+                loader=self.cfg.loader,
+            )
+            if move_result.get("moved"):
+                log_event("SERVER_START", f"World was incompatible (MC {move_result.get('world_version')}) - moved aside, fresh world will generate")
+        except Exception as e:
+            log_event("SERVER_START", f"World pre-check failed (non-fatal): {e}")
         
         java_cmd = self._get_java_command()
         log_event("SERVER_START", f"Java command: {java_cmd}")
@@ -96,8 +120,8 @@ class TmuxServer:
             if preflight_cache.exists():
                 import datetime
                 cache_time = float(preflight_cache.read_text().strip())
-                cache_dt = datetime.datetime.fromtimestamp(cache_time)
-                now = datetime.datetime.now()
+                cache_dt = datetime.datetime.fromtimestamp(cache_time, tz=datetime.UTC)
+                now = datetime.datetime.now(datetime.UTC)
                 if (now - cache_dt).total_seconds() < 600:  # 10 min cooldown
                     skip_preflight = True
                     log_event("DEBUG", "Skipping preflight - recently ran")
@@ -123,17 +147,7 @@ class TmuxServer:
             self.stop()
             time.sleep(2)
         
-        log_size_before = 0
-        if self.log_file.exists():
-            try:
-                log_size_before = self.log_file.stat().st_size
-            except Exception:
-                pass
-        
-        tmux_cmd = f"cd '{CWD}' && stdbuf -oL -eL {java_cmd}"
-        
-        result = subprocess.run(
-            f"tmux -S {self.tmux_socket} new-session -d -s {self.tmux_session} \"cd '{CWD}' && stdbuf -oL -eL {java_cmd} 2>&1 | tee -a {self.log_file}\"",
+        result = subprocess.run(            f"tmux -S {self.tmux_socket} new-session -d -s {self.tmux_session} \"cd '{CWD}' && stdbuf -oL -eL {java_cmd} 2>&1 | tee -a {self.log_file}\"", check=False,
             shell=True,
             capture_output=True,
             text=True
@@ -187,12 +201,22 @@ class TmuxServer:
                         mismatches = channel_analyzer.analyze_log(new_log_content)
                         if mismatches:
                             channel_analyzer.generate_events(mismatches)
+                            # Try to kick players rejected during handshake with
+                            # the modpack download link (no-op if already gone).
+                            for mm in mismatches:
+                                reason = channel_analyzer.kick_reason(mm)
+                                if reason and mm.player:
+                                    self.send_command(f"kick {mm.player} {reason}")
                 except Exception as e:
                     log_event("CHANNEL_ERROR", f"Failed to analyze network channels: {e}")
             
             time.sleep(5)
         
-        self.running = False
+        # Only clear `running` if we're still the active monitor thread. A
+        # self-heal path may have called restart(), spawning a new monitor
+        # thread and setting running=True; the stale thread must not clobber it.
+        if self.monitor_thread is threading.current_thread():
+            self.running = False
         log_event("MONITOR", "Server monitor stopped")
     
     def _analyze_crash(self) -> None:
@@ -223,7 +247,7 @@ class TmuxServer:
         
         if has_recent_crash:
             # Recent crash found - continue with analysis
-            pass
+            log_event("CRASH_DETECT", "Recent crash indicator found; analyzing")
         elif "Stopping server" in new_log or "Stopping the server" in new_log:
             # No recent crash AND "Stopping server" found - likely a clean shutdown
             log_event("SERVER_STOPPED", "Clean shutdown detected")
@@ -232,6 +256,52 @@ class TmuxServer:
             # No recent crash indicators - this might be stale log data
             log_event("SERVER_STOPPED", "No recent crash detected - possible stale log")
             return
+
+        # Detect world-level boot failures (incompatible/corrupt world, level.dat
+        # lock/permission issues) and auto-remediate before mod analysis.
+        world_indicators = [
+            "failed to load world",
+            "unable to open level",
+            "failed to open level",
+            "unable to load level.dat",
+            "cannot load level",
+            "incompatible world",
+            "world version mismatch",
+            "level.dat",
+            "session.lock",
+            "could not create level.dat",
+            "failed to start the minecraft server",
+            "encountered an unexpected exception",
+        ]
+        log_lower = new_log.lower()
+        if any(w in log_lower for w in world_indicators):
+            # Narrow to actual world errors: crash text that mentions world/level
+            # AND is not a mod-dependency failure.
+            world_mentions = any(w in log_lower for w in ["level", "world"])
+            bind_fail = "address already in use" in log_lower or "failed to bind" in log_lower
+            if world_mentions and not bind_fail:
+                log_event("CRASH_DETECT", "World-level boot failure detected - attempting remediation")
+                try:
+                    from .worlds import (
+                        auto_move_incompatible_world,
+                        remediate_world_lock,
+                    )
+                    lock_result = remediate_world_lock()
+                    move_result = auto_move_incompatible_world(
+                        server_mc_version=self.cfg.mc_version,
+                        loader=self.cfg.loader,
+                    )
+                    if lock_result.get("fixed_permissions") or lock_result.get("removed_stale_lock"):
+                        log_event("WORLD_LOCK", f"Remediated world lock: perms={lock_result.get('fixed_permissions')} stale_lock={lock_result.get('removed_stale_lock')}")
+                    if move_result.get("moved"):
+                        log_event("SELF_HEAL", f"Auto-moved incompatible world to {move_result.get('destination')}")
+                    elif move_result.get("errors"):
+                        log_event("SELF_HEAL", f"World remediation errors: {move_result['errors'][:3]}")
+                    log_event("SELF_HEAL", "Attempting restart after world remediation...")
+                    self.restart()
+                    return
+                except Exception as e:
+                    log_event("SELF_HEAL", f"World remediation failed (non-fatal): {e}")
         
         crash_info = self.loader.detect_crash_reason(new_log)
         crash_type = crash_info.get("type", "unknown")
@@ -248,11 +318,13 @@ class TmuxServer:
         
         self._try_self_heal(crash_info, crash_history)
     
-    def _try_self_heal(self, crash_info: Dict[str, Any], crash_history: Dict[str, int]) -> None:
+    def _try_self_heal(self, crash_info: dict[str, Any], crash_history: dict[str, int]) -> None:
         """Attempt to fix crash by fetching deps or quarantining bad mods."""
         crash_type = crash_info.get("type", "unknown")
         culprit = crash_info.get("culprit")
         mods_dir = CWD / self.cfg.mods_dir
+        clientonly_dir = CWD / self.cfg.clientonly_dir
+        clientonly_dir.mkdir(parents=True, exist_ok=True)
         
         # Check for Java version incompatibility errors
         new_log = self._get_recent_log(300)
@@ -273,7 +345,7 @@ class TmuxServer:
             try:
                 import subprocess
                 java_version_output = subprocess.run(
-                    ["java", "-version"], capture_output=True, text=True, timeout=10
+                    ["java", "-version"], check=False, capture_output=True, text=True, timeout=10
                 )
                 import re
                 java_match = re.search(r'version "?(\d+)', java_version_output.stderr)
@@ -374,13 +446,33 @@ class TmuxServer:
                 crash_history[dep_key] = crash_history.get(dep_key, 0) + 1
                 save_crash_history(crash_history)
                 
-                if crash_history[dep_key] > 2:
+                if crash_history[dep_key] > self.cfg.max_crashes_before_quarantine:
                     # If dep can't be resolved, check if culprit is a bad mod
                     if culprit:
                         log_event("SELF_HEAL", f"Dep {dep_name} not resolved after {crash_history[dep_key]} attempts. Quarantining {culprit}")
                         quarantine_mod(mods_dir, culprit, f"Missing dep {dep_name} after {crash_history[dep_key]} attempts")
                 else:
                     log_event("SELF_HEAL", f"Attempting to fetch missing dep: {dep_name}")
+                    try:
+                        # Client-only mods (e.g. sodium fetched for iris) belong in
+                        # clientonly/, not the server mods folder. Detect by the
+                        # known client-only name list before choosing the target dir.
+                        from .constants import FORCE_CLIENT_ONLY_MODS
+                        dep_lower = dep_name.lower()
+                        target_dir = clientonly_dir if any(cm in dep_lower for cm in FORCE_CLIENT_ONLY_MODS) else mods_dir
+                        fetched = _fetch_dependency(
+                            dep_id=dep_name,
+                            mc_version=self.cfg.mc_version,
+                            loader_name=self.cfg.loader,
+                            mods_dir=target_dir,
+                            dependents=[culprit] if culprit else None,
+                        )
+                        if fetched:
+                            log_event("SELF_HEAL", f"Fetched missing dep {dep_name} -> {target_dir.name}")
+                        else:
+                            log_event("SELF_HEAL", f"Could not fetch missing dep {dep_name}")
+                    except Exception as e:
+                        log_event("SELF_HEAL", f"Error fetching dep {dep_name}: {e}")
         
         elif crash_type == "mod_error":
             subtype = crash_info.get("subtype", "")
@@ -395,7 +487,7 @@ class TmuxServer:
                 crash_history[culprit] = crash_history.get(culprit, 0) + 1
                 save_crash_history(crash_history)
                 
-                if crash_history[culprit] >= 2:
+                if crash_history[culprit] >= self.cfg.max_crashes_before_quarantine:
                     log_event("SELF_HEAL", f"Quarantining {culprit} after {crash_history[culprit]} crashes")
                     quarantine_mod(mods_dir, culprit, f"Caused {crash_history[culprit]} crashes")
         
@@ -433,8 +525,8 @@ class TmuxServer:
             with open(self.log_file, "r") as f:
                 lines = f.readlines()
                 recent_lines = lines[-500:]  # Last 500 lines
-                
-            # Find the crash indicator
+            
+            # Scan newest-first: the first match is the most recent occurrence.
             for line in reversed(recent_lines):
                 if crash_indicator.lower() in line.lower():
                     # Try to extract timestamp from line
@@ -443,12 +535,12 @@ class TmuxServer:
                     ts_match = re.match(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})', line)
                     if ts_match:
                         ts_str = ts_match.group(1)
-                        ts = datetime.datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
-                        now = datetime.datetime.now()
-                        # Only consider crashes within last 5 minutes
-                        if (now - ts).total_seconds() < 300:
-                            return True
-                    # If no timestamp found but crash indicator exists, be conservative
+                        ts = datetime.datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=datetime.UTC)
+                        now = datetime.datetime.now(datetime.UTC)
+                        # Most recent match is timestamped: recent iff within 5 min.
+                        # Older matches are even older, so this decides it.
+                        return (now - ts).total_seconds() < 300
+                    # No timestamp on the most recent match: be conservative.
                     return True
             return False
         except Exception:
@@ -457,7 +549,7 @@ class TmuxServer:
     def is_running(self) -> bool:
         """Check if tmux session exists."""
         result = subprocess.run(
-            f"tmux -S {self.tmux_socket} has-session -t {self.tmux_session} 2>/dev/null",
+            f"tmux -S {self.tmux_socket} has-session -t {self.tmux_session} 2>/dev/null", check=False,
             shell=True
         )
         return result.returncode == 0
@@ -469,7 +561,7 @@ class TmuxServer:
         
         cmd_safe = cmd.replace("'", "'\\''")
         result = subprocess.run(
-            f"tmux -S {self.tmux_socket} send-keys -t {self.tmux_session} '{cmd_safe}' Enter",
+            f"tmux -S {self.tmux_socket} send-keys -t {self.tmux_session} '{cmd_safe}' Enter", check=False,
             shell=True,
             capture_output=True
         )
@@ -486,7 +578,7 @@ class TmuxServer:
             
             if self.is_running():
                 subprocess.run(
-                    f"tmux -S {self.tmux_socket} kill-session -t {self.tmux_session}",
+                    f"tmux -S {self.tmux_socket} kill-session -t {self.tmux_session}", check=False,
                     shell=True
                 )
         
@@ -501,7 +593,7 @@ class TmuxServer:
         return self.start()
 
 
-_server_instance: Optional[TmuxServer] = None
+_server_instance: TmuxServer | None = None
 
 
 def get_server() -> TmuxServer:
@@ -515,16 +607,13 @@ def get_server() -> TmuxServer:
 
 def is_server_running() -> bool:
     """Check if the Minecraft server is running."""
-    global _server_instance
-    
     # Check tmux session first
-    if _server_instance and _server_instance.running:
-        if _server_instance.is_running():
-            return True
+    if _server_instance and _server_instance.running and _server_instance.is_running():
+        return True
     
     # Check for java processes
     result = subprocess.run(
-        ["pgrep", "-f", "neoforge.*nogui|forge.*nogui|fabric.*nogui|minecraft.*server"],
+        ["pgrep", "-f", "neoforge.*nogui|forge.*nogui|fabric.*nogui|minecraft.*server"], check=False,
         capture_output=True,
         text=True,
     )
@@ -532,7 +621,7 @@ def is_server_running() -> bool:
         return True
     
     result = subprocess.run(
-        ["pgrep", "-a", "java"],
+        ["pgrep", "-a", "java"], check=False,
         capture_output=True,
         text=True,
     )
@@ -570,7 +659,7 @@ def wait_for_server(timeout: int = 60) -> bool:
     return False
 
 
-def run_server(cfg: Optional[ServerConfig] = None, max_retries: int = 3) -> bool:
+def run_server(cfg: ServerConfig | None = None, max_retries: int = 3) -> bool:
     """Start the Minecraft server.
     
     Args:
@@ -586,26 +675,31 @@ def run_server(cfg: Optional[ServerConfig] = None, max_retries: int = 3) -> bool
         cfg = load_cfg()
     
     _server_instance = TmuxServer(cfg)
-    return _server_instance.start()
+    for attempt in range(max_retries + 1):
+        if _server_instance.start():
+            return True
+        if attempt < max_retries:
+            log_event("SERVER_ERROR", f"Server start failed (attempt {attempt + 1}/{max_retries}), retrying...")
+            time.sleep(3)
+    return False
 
 
 def stop_server() -> bool:
     """Stop the Minecraft server."""
-    global _server_instance
-    
     # If we have an instance, use it
     if _server_instance:
         return _server_instance.stop()
     
-    # Otherwise, try to stop via tmux directly (dashboard process)
+    # Otherwise, try to stop via tmux directly (dashboard process). The session
+    # name and socket must match TmuxServer's ("MC" + per-uid socket path).
     from .config import load_cfg
-    cfg = load_cfg()
-    tmux_session = f"neorunner-{cfg.mc_version}-{cfg.loader}"
-    tmux_socket = "/tmp/tmux-1000/default"  # Default socket
+    load_cfg()
+    tmux_session = "MC"
+    tmux_socket = f"/tmp/tmux-{os.getuid()}/default"
     
     # Try to send stop command via tmux
     subprocess.run(
-        f"tmux -S {tmux_socket} send-keys -t {tmux_session} 'stop' Enter",
+        f"tmux -S {tmux_socket} send-keys -t {tmux_session} 'stop' Enter", check=False,
         shell=True,
         capture_output=True
     )
@@ -613,7 +707,7 @@ def stop_server() -> bool:
     
     # Kill if still running
     subprocess.run(
-        f"tmux -S {tmux_socket} kill-session -t {tmux_session}",
+        f"tmux -S {tmux_socket} kill-session -t {tmux_session}", check=False,
         shell=True,
         capture_output=True
     )
@@ -621,25 +715,20 @@ def stop_server() -> bool:
     return True
 
 
-def restart_server(cfg: Optional[ServerConfig] = None) -> bool:
+def restart_server(cfg: ServerConfig | None = None) -> bool:
     """Restart the Minecraft server."""
-    global _server_instance
-    
-    # Stop first
-    stop_server()
-    time.sleep(3)
-    
-    # Then start
+    # If we hold an instance, restart() already stops + starts in one shot.
     if _server_instance:
         return _server_instance.restart()
     
-    # Or start fresh
+    # Otherwise, stop via tmux and start fresh.
+    stop_server()
+    time.sleep(3)
     return run_server(cfg)
 
 
 def send_command(cmd: str) -> bool:
     """Send a command to the running server."""
-    global _server_instance
     if _server_instance:
         return _server_instance.send_command(cmd)
     return False
@@ -651,13 +740,13 @@ def get_events() -> list:
 
 
 __all__ = [
-    "run_server",
-    "stop_server",
-    "restart_server",
-    "send_command",
-    "is_server_running",
-    "wait_for_server",
-    "get_server",
-    "get_events",
     "TmuxServer",
+    "get_events",
+    "get_server",
+    "is_server_running",
+    "restart_server",
+    "run_server",
+    "send_command",
+    "stop_server",
+    "wait_for_server",
 ]

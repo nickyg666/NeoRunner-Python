@@ -1,9 +1,7 @@
 """Load order management for NeoRunner - uses load.order file instead of renaming mods."""
 
-import os
 import re
 from pathlib import Path
-from typing import List, Dict
 
 from .constants import CWD
 
@@ -13,7 +11,7 @@ def strip_prefix(filename: str) -> str:
     return re.sub(r'^![a-z]{2}_\d+_', '', filename)
 
 
-def restore_mod_names(mods_dir: Path = None) -> Dict:
+def restore_mod_names(mods_dir: Path | None = None) -> dict:
     """Restore all mods to original names (strip prefixes)."""
     if mods_dir is None:
         mods_dir = CWD / "mods"
@@ -42,7 +40,7 @@ def restore_mod_names(mods_dir: Path = None) -> Dict:
     }
 
 
-def generate_load_order(mods_dir: Path = None) -> List[str]:
+def generate_load_order(mods_dir: Path | None = None) -> list[str]:
     """Generate load order based on mod categories (API -> regular -> addons)."""
     if mods_dir is None:
         mods_dir = CWD / "mods"
@@ -75,7 +73,7 @@ def generate_load_order(mods_dir: Path = None) -> List[str]:
     return api_mods + regular_mods + addon_mods
 
 
-def save_load_order(mods_dir: Path = None) -> Path:
+def save_load_order(mods_dir: Path | None = None) -> Path:
     """Save load order to load.order file. Returns path to the file."""
     if mods_dir is None:
         mods_dir = CWD / "mods"
@@ -89,7 +87,7 @@ def save_load_order(mods_dir: Path = None) -> Path:
     return load_order_file
 
 
-def read_load_order(mods_dir: Path = None) -> List[str]:
+def read_load_order(mods_dir: Path | None = None) -> list[str]:
     """Read load order from load.order file."""
     if mods_dir is None:
         mods_dir = CWD / "mods"
@@ -102,7 +100,7 @@ def read_load_order(mods_dir: Path = None) -> List[str]:
     return [line.strip() for line in load_order_file.read_text().split("\n") if line.strip()]
 
 
-def get_mod_load_order(mods_dir: Path = None) -> List[Path]:
+def get_mod_load_order(mods_dir: Path | None = None) -> list[Path]:
     """Get mods in correct load order as Path objects."""
     if mods_dir is None:
         mods_dir = CWD / "mods"

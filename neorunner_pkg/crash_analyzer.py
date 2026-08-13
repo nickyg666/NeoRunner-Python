@@ -1,27 +1,27 @@
 """Crash log analyzer for diagnosing client-side issues."""
 
-#
 
 import re
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Dict, Any
-import zipfile
+from typing import Any, ClassVar
 
 from .config import load_cfg
-from .self_heal import _fetch_dependency, log_event
+from .log import log_event
+from .self_heal import _fetch_dependency
 
 
 @dataclass
 class CrashAnalysis:
     """Result of crash log analysis."""
     error_type: str  # java_version, mixin, missing_dep, crash, client_only, version_mismatch
-    culprit: Optional[str]
+    culprit: str | None
     message: str
     severity: str  # critical, high, medium
-    recommendations: List[str]
-    mod_to_fetch: Optional[str] = None  # Mod ID to auto-fetch
-    fetch_to_folder: Optional[str] = None  # "clientonly" or "mods"
+    recommendations: list[str]
+    mod_to_fetch: str | None = None  # Mod ID to auto-fetch
+    fetch_to_folder: str | None = None  # "clientonly" or "mods"
 
 
 class CrashAnalyzer:
@@ -30,27 +30,27 @@ class CrashAnalyzer:
     # Error patterns
     # Java class file major version -> Java release number
     # (e.g. "Class version 69 required" means the mod was built for Java 25)
-    CLASS_FILE_VERSION_TO_JAVA = {
+    CLASS_FILE_VERSION_TO_JAVA: ClassVar[dict[int, int]] = {
         52: 8, 53: 9, 54: 10, 55: 11, 56: 12, 57: 13, 58: 14, 59: 15, 60: 16,
         61: 17, 62: 18, 63: 19, 64: 20, 65: 21, 66: 22, 67: 23, 68: 24, 69: 25,
         70: 26,
     }
 
-    JAVA_VERSION_PATTERNS = [
+    JAVA_VERSION_PATTERNS: ClassVar[list[str]] = [
         r"Class version (\d+) required",
         r"UnsupportedClassVersionError",
         r"requires Java (\d+)",
         r"Java(\d+) is not supported",
     ]
     
-    MIXIN_PATTERNS = [
+    MIXIN_PATTERNS: ClassVar[list[str]] = [
         r"MixinPreProcessorException",
         r"MixinTransformerError",
         r"mixin.*incompatibility",
         r"Mixin.*failed to transform",
     ]
     
-    MISSING_DEP_PATTERNS = [
+    MISSING_DEP_PATTERNS: ClassVar[list[str]] = [
         r"requires mod ([a-zA-Z0-9_]+)",
         r"mod ([a-zA-Z0-9_]+) not found",
         r"Missing dependency: ([a-zA-Z0-9_]+)",
@@ -58,7 +58,7 @@ class CrashAnalyzer:
         r"-- Mod loading issue for: ([a-zA-Z0-9_]+)",
     ]
     
-    MOD_CRASH_PATTERNS = [
+    MOD_CRASH_PATTERNS: ClassVar[list[str]] = [
         r"-- Mod loading issue for: ([a-zA-Z0-9_]+)",
         r"Failure message:.*?\( ([a-zA-Z0-9_]+) \)",
         r"Caused by:?\s+([a-zA-Z0-9_]+\.[a-zA-Z0-9_.]+)",
@@ -67,24 +67,24 @@ class CrashAnalyzer:
         r"Exception in mod ([a-zA-Z0-9_]+)",
     ]
     
-    CLIENT_ONLY_PATTERNS = [
+    CLIENT_ONLY_PATTERNS: ClassVar[list[str]] = [
         r"net\.minecraft\.client\.",
         r"client\.renderer\.",
         r"client\.gui\.",
         r"com\.mojang\.blaze3d\.",
     ]
     
-    VERSION_MISMATCH_PATTERNS = [
+    VERSION_MISMATCH_PATTERNS: ClassVar[list[str]] = [
         r"mod.*version.*mismatch",
         r"incompatible.*version",
         r"expected.*but found",
     ]
     
-    def __init__(self, mods_dir: Optional[Path] = None):
+    def __init__(self, mods_dir: Path | None = None):
         self.cfg = load_cfg()
         self.mods_dir = mods_dir or Path(self.cfg.mods_dir)
     
-    def analyze(self, log_text: str) -> List[CrashAnalysis]:
+    def analyze(self, log_text: str) -> list[CrashAnalysis]:
         """Analyze crash log and return list of issues found."""
         results = []
         
@@ -116,9 +116,9 @@ class CrashAnalyzer:
         
         return results
     
-    def _detect_java_version_error(self, log_text: str) -> Optional[CrashAnalysis]:
+    def _detect_java_version_error(self, log_text: str) -> CrashAnalysis | None:
         """Detect Java version incompatibility."""
-        log_lower = log_text.lower()
+        log_text.lower()
         
         for pattern in self.JAVA_VERSION_PATTERNS:
             match = re.search(pattern, log_text, re.IGNORECASE)
@@ -137,7 +137,7 @@ class CrashAnalyzer:
                 # Try to find which mod requires this
                 culprit = self._extract_mod_from_context(log_text, match.start())
                 
-                message = f"Java version incompatibility detected"
+                message = "Java version incompatibility detected"
                 if culprit:
                     message += f" - Mod '{culprit}' requires Java {required_java}"
                 else:
@@ -156,7 +156,7 @@ class CrashAnalyzer:
         
         return None
     
-    def _detect_mixin_error(self, log_text: str) -> Optional[CrashAnalysis]:
+    def _detect_mixin_error(self, log_text: str) -> CrashAnalysis | None:
         """Detect mixin incompatibility errors."""
         for pattern in self.MIXIN_PATTERNS:
             match = re.search(pattern, log_text, re.IGNORECASE)
@@ -169,7 +169,7 @@ class CrashAnalyzer:
                 if mixin_match:
                     mixin_class = mixin_match.group(1)
                 
-                message = f"Mixin incompatibility detected"
+                message = "Mixin incompatibility detected"
                 if culprit:
                     message += f" - Mod '{culprit}' has mixin issues"
                 elif mixin_class:
@@ -188,7 +188,7 @@ class CrashAnalyzer:
         
         return None
     
-    def _detect_missing_dep(self, log_text: str) -> List[CrashAnalysis]:
+    def _detect_missing_dep(self, log_text: str) -> list[CrashAnalysis]:
         """Detect missing dependencies."""
         results = []
         
@@ -228,7 +228,7 @@ class CrashAnalyzer:
         
         return results
     
-    def _detect_mod_crash(self, log_text: str) -> List[CrashAnalysis]:
+    def _detect_mod_crash(self, log_text: str) -> list[CrashAnalysis]:
         """Detect mods that have crashed."""
         results = []
         
@@ -253,7 +253,7 @@ class CrashAnalyzer:
         
         return results
     
-    def _detect_client_only_mod(self, log_text: str) -> List[CrashAnalysis]:
+    def _detect_client_only_mod(self, log_text: str) -> list[CrashAnalysis]:
         """Detect client-only mods in crash log."""
         results = []
         
@@ -277,7 +277,7 @@ class CrashAnalyzer:
         
         return results
     
-    def _detect_version_mismatch(self, log_text: str) -> List[CrashAnalysis]:
+    def _detect_version_mismatch(self, log_text: str) -> list[CrashAnalysis]:
         """Detect Minecraft version mismatches."""
         results = []
         
@@ -303,7 +303,7 @@ class CrashAnalyzer:
         
         return results
     
-    def _extract_mod_from_context(self, log_text: str, pos: int, context_chars: int = 500) -> Optional[str]:
+    def _extract_mod_from_context(self, log_text: str, pos: int, context_chars: int = 500) -> str | None:
         """Extract mod name from context around the error position."""
         start = max(0, pos - context_chars)
         end = min(len(log_text), pos + context_chars)
@@ -326,7 +326,7 @@ class CrashAnalyzer:
         
         return None
     
-    def _check_server_has_mod(self, mod_id: str) -> tuple[bool, Optional[str]]:
+    def _check_server_has_mod(self, mod_id: str) -> tuple[bool, str | None]:
         """Check if server has this mod installed."""
         mod_id_lower = mod_id.lower()
         
@@ -354,17 +354,19 @@ class CrashAnalyzer:
                         try:
                             import tomllib
                         except ImportError:
-                            import tomli as tomllib
-                            tomllib = None
+                            try:
+                                import tomli as tomllib
+                            except ImportError:
+                                tomllib = None
                         if tomllib:
                             try:
                                 raw = zf.read('META-INF/neoforge.mods.toml').decode('utf-8', errors='ignore')
                                 data = tomllib.loads(raw)
                                 for mod in data.get("mods", []):
                                     if mod.get("modId", "").lower() == mod_id_lower:
-                                        deps = data.get("dependencies", {})
+                                        data.get("dependencies", {})
                                         return True, None
-                            except:
+                            except Exception:
                                 pass
                     
                     # Check fabric.mod.json
@@ -374,14 +376,14 @@ class CrashAnalyzer:
                             data = json.loads(zf.read('fabric.mod.json').decode('utf-8', errors='ignore'))
                             if data.get("id", "").lower() == mod_id_lower:
                                 return True, None
-                        except:
+                        except Exception:
                             pass
-            except:
+            except Exception:
                 continue
         
         return False, None
     
-    def auto_fetch_missing(self, analysis_results: List[CrashAnalysis]) -> Dict[str, Any]:
+    def auto_fetch_missing(self, analysis_results: list[CrashAnalysis]) -> dict[str, Any]:
         """Auto-fetch missing mods based on analysis results."""
         fetched = []
         errors = []
@@ -433,10 +435,10 @@ class CrashAnalyzer:
         }
 
 
-def analyze_crash_log(log_text: str) -> List[CrashAnalysis]:
+def analyze_crash_log(log_text: str) -> list[CrashAnalysis]:
     """Convenience function to analyze crash log."""
     analyzer = CrashAnalyzer()
     return analyzer.analyze(log_text)
 
 
-__all__ = ["CrashAnalyzer", "CrashAnalysis", "analyze_crash_log"]
+__all__ = ["CrashAnalysis", "CrashAnalyzer", "analyze_crash_log"]

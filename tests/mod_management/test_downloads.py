@@ -1,17 +1,16 @@
 """Tests for mod downloads: Modrinth download, ferium, version matching."""
 
-import sys
-import os
 import json
+import os
+import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from neorunner_pkg.ferium import FeriumManager
-from neorunner_pkg.self_heal import _download_from_modrinth, _modrinth_direct_lookup
-from neorunner_pkg.config import ServerConfig
+from neorunner_pkg.self_heal import _download_from_modrinth
 
 
 class TestDownloads:

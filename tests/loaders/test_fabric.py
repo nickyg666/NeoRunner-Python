@@ -1,13 +1,13 @@
 """Tests for Fabric loader crash detection."""
 
-import sys
 import os
+import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from neorunner_pkg.loaders.fabric import FabricLoader
 from neorunner_pkg.config import ServerConfig
+from neorunner_pkg.loaders.fabric import FabricLoader
 
 
 def _make_loader():

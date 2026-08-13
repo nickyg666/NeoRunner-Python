@@ -1,8 +1,7 @@
 """Logging utilities for NeoRunner with rotating file handler."""
 
 import logging
-from datetime import datetime
-from pathlib import Path
+from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 
 from .constants import CWD
@@ -75,11 +74,28 @@ def log_event(event_type: str, msg: str) -> None:
     
     # Also write to live.log for backward compatibility
     live_log_file = CWD / "live.log"
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
     log_line = f"{timestamp} | [{event_type}] {msg}\n"
     
     with open(live_log_file, "a") as f:
         f.write(log_line)
+    
+    # Mirror into the server's in-memory event store so the dashboard timeline
+    # (/api/server-events) reflects every logged event. Lazy import avoids a
+    # circular dependency (server -> log -> server).
+    try:
+        from . import server as _server_mod
+
+        _store = _server_mod._in_memory_events
+        _store.append({
+            "type": event_type,
+            "message": msg,
+            "time": timestamp,
+        })
+        while len(_store) > _server_mod._max_events:
+            _store.pop(0)
+    except Exception:
+        pass
 
 
 # For direct use: from log import log_event

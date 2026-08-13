@@ -8,6 +8,7 @@ import json
 import logging
 import random
 import re
+import shutil
 import subprocess
 import time
 import urllib.parse
@@ -220,13 +221,14 @@ def preflight_dep_check(cfg: dict[str, Any]) -> dict[str, Any]:
                 pass
     
     # Scan live.log for "client only mod" warnings from NeoForge and auto-move
-    _scan_live_log_for_client_only_mods(mods_dir, clientonly_dir, result)
-    
     # Move client-only mods to clientonly folder.
     # Detection uses AUTHORITATIVE metadata, never naive class-path scanning:
     #   1. explicit toml `side="CLIENT"` on a mod entry,
     #   2. fabric.mod.json `environment: client`,
     #   3. known client-only mod name list.
+    # (The old live.log heuristic was removed: it matched a mod name appearing
+    # anywhere in a log that also happened to contain a generic "client only"
+    # warning, which misclassified server mods like Jade/CrashAssistant.)
     from .constants import FORCE_CLIENT_ONLY_MODS
 
     def _toml_mod_sides(fn: Path) -> list:
@@ -872,10 +874,14 @@ def _modrinth_direct_lookup(mod_name: str, mc_version: str, loader: str) -> str 
     return None
 
 
-def _ferium_ensure_profile(mc_version: str, loader_name: str, mods_dir: Path) -> str | None:
+def _ferium_ensure_profile(mc_version: str, loader_name: str, output_dir: Path) -> str | None:
     """Make sure a ferium profile matching the server config exists.
 
     Creates one if missing. Returns the ferium binary path (or None).
+
+    The profile's output dir is a *staging* directory (never the live mods
+    dir): ferium's ``upgrade`` archives every non-profile file in its output
+    dir into ``.old/``, which would otherwise wipe the whole modpack.
     """
     ferium_bin = CWD / ".local" / "bin" / "ferium"
     if not ferium_bin.exists():
@@ -895,29 +901,32 @@ def _ferium_ensure_profile(mc_version: str, loader_name: str, mods_dir: Path) ->
         return None
 
     try:
+        output_dir.mkdir(parents=True, exist_ok=True)
         cfg_json_path = Path.home() / ".config" / "ferium" / "config.json"
-        has_profile = False
         if cfg_json_path.exists():
             data = json.loads(cfg_json_path.read_text("utf-8"))
             for prof in data.get("profiles", []):
                 if prof.get("name") == "neoserver":
-                    has_profile = True
-                    break
-        if not has_profile:
-            loader_map = {
-                "neoforge": "neo-forge",
-                "forge": "forge",
-                "fabric": "fabric",
-            }
-            _run(
-                "profile", "create",
-                "--name", "neoserver",
-                "--game-version", mc_version,
-                "--mod-loader", loader_map.get(loader_name.lower(), "neo-forge"),
-                "--output-dir", str(mods_dir),
-                timeout=60,
-            )
-            log_event("PREFLIGHT", f"Created ferium profile 'neoserver' for {mc_version}/{loader_name}")
+                    # Point the profile at the staging dir (recreate if it was
+                    # previously configured with a different output dir).
+                    if prof.get("output_dir") != str(output_dir):
+                        _run("profile", "delete", "neoserver", timeout=30)
+                    else:
+                        return str(ferium_bin)
+        loader_map = {
+            "neoforge": "neo-forge",
+            "forge": "forge",
+            "fabric": "fabric",
+        }
+        _run(
+            "profile", "create",
+            "--name", "neoserver",
+            "--game-version", mc_version,
+            "--mod-loader", loader_map.get(loader_name.lower(), "neo-forge"),
+            "--output-dir", str(output_dir),
+            timeout=60,
+        )
+        log_event("PREFLIGHT", f"Created ferium profile 'neoserver' for {mc_version}/{loader_name} (staging)")
     except Exception as e:
         log_event("PREFLIGHT", f"ferium profile setup failed (non-fatal): {e}")
 
@@ -938,8 +947,11 @@ def _fetch_dependency(dep_id: str, mc_version: str, loader_name: str, mods_dir: 
     if dependents:
         log_event("PREFLIGHT", f"[DEPENDENTS] Searching for {dep_id}, confirmed by: {dependents[:3]}")
 
-    # 1. ferium FIRST (always-on auto-fetch path)
-    ferium_bin = _ferium_ensure_profile(mc_version, loader_name, mods_dir)
+    # 1. ferium FIRST (always-on auto-fetch path). Runs against a staging dir
+    # so ferium's `upgrade` (which archives non-profile files into .old/) can
+    # never touch the live mods dir; downloaded jars are copied over afterwards.
+    staging = mods_dir.parent / ".ferium_staging"
+    ferium_bin = _ferium_ensure_profile(mc_version, loader_name, staging)
     if ferium_bin:
         add = subprocess.run(
             [ferium_bin, "add", dep_id], check=False, capture_output=True, text=True, timeout=60
@@ -947,19 +959,22 @@ def _fetch_dependency(dep_id: str, mc_version: str, loader_name: str, mods_dir: 
         out_lower = (add.stdout + add.stderr).lower()
         if add.returncode == 0 or "already" in out_lower or "already in" in out_lower:
             log_event("PREFLIGHT", f"Added {dep_id} via ferium, upgrading...")
-            # Snapshot files present before upgrade so we can restore exactly
-            # those that ferium archives (never restore unrelated .old files).
-            pre_upgrade = {f.name for f in mods_dir.iterdir() if f.is_file()}
             up = subprocess.run(
                 [ferium_bin, "upgrade"], check=False, capture_output=True, text=True, timeout=180
             )
-            # ferium's `upgrade` moves ANY non-profile file in the output dir
-            # into `<output_dir>/.old/` (treating it as an unmanaged leftover).
-            # Since our profile only tracks the dependency being fetched, this
-            # would archive the entire modpack. Restore only what we had.
-            _restore_ferium_archived_files(mods_dir, pre_upgrade)
-            if up.returncode == 0:
-                # Verify a matching jar actually landed in mods_dir.
+            # Copy whatever ferium downloaded in the staging dir into mods/.
+            copied = 0
+            for f in staging.glob("*.jar"):
+                dest = mods_dir / f.name
+                try:
+                    shutil.move(str(f), str(dest))
+                    copied += 1
+                except OSError:
+                    pass
+            if up.returncode == 0 or copied:
+                if copied:
+                    log_event("PREFLIGHT", f"Downloaded {dep_id} via ferium")
+                    return True
                 new_files = [f for f in mods_dir.glob("*.jar")]
                 if new_files:
                     log_event("PREFLIGHT", f"Downloaded {dep_id} via ferium")
@@ -1383,66 +1398,6 @@ def check_and_fix_dependency_chain(
             result["failed"].append(dep_slug)
     
     return result
-
-
-def _scan_live_log_for_client_only_mods(mods_dir: Path, clientonly_dir: Path, result: dict[str, Any]) -> None:
-    """Scan live.log for NeoForge warnings about client-only mods and auto-move them.
-    
-    Patterns detected:
-    - "is client only mod"
-    - "client-side only"
-    - "will do nothing on server"
-    - "launchTarget: server"
-    """
-    
-    log_file = CWD / "live.log"
-    if not log_file.exists():
-        return
-    
-    try:
-        # Read last 100KB of log to find recent warnings
-        with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
-            f.seek(0, 2)  # Go to end
-            file_size = f.tell()
-            # Read last 100KB
-            start_pos = max(0, file_size - 102400)
-            f.seek(start_pos)
-            log_content = f.read()
-        
-        # Patterns to detect client-only mod warnings from NeoForge
-        client_only_patterns = [
-            r'is client only mod',
-            r'client-side only',
-            r'will do nothing on server',
-            r'launchTarget:\s*server.*client only',
-        ]
-        
-        # Track which mods we've already moved this run
-        already_moved = set(result.get("clientonly_moved", []))
-        
-        for fn in mods_dir.glob("*.jar"):
-            if fn.name in already_moved:
-                continue
-            
-            fn_lower = fn.stem.lower()
-            
-            # Check if this mod is mentioned in a client-only warning
-            for pattern in client_only_patterns:
-                if re.search(pattern, log_content, re.IGNORECASE):
-                    # Check if the mod name appears near the warning
-                    # Extract mod name from log line
-                    mod_name_match = re.search(rf'({fn.name.replace("-", "[_-]")}|{fn.stem.replace("-", "[_-]")})', log_content, re.IGNORECASE)
-                    if mod_name_match or fn_lower in log_content.lower():
-                        # Move to clientonly
-                        dest = clientonly_dir / fn.name
-                        if not dest.exists():
-                            fn.rename(dest)
-                            result["clientonly_moved"].append(fn.name)
-                            log_event("PREFLIGHT", f"Moved to clientonly: {fn.name} (detected client-only in logs)")
-                        break
-    
-    except Exception as e:
-        log_event("PREFLIGHT", f"Error scanning live.log for client-only mods: {e}")
 
 
 __all__ = [

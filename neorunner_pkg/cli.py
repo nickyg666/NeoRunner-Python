@@ -262,16 +262,17 @@ def cmd_start(args):
             
             # Run preflight/dependency check in background thread
             # NOTE: Server.py now handles dependency resolution - don't double-fetch
-            print("Running preflight checks...")
-            def run_preflight():
-                try:
-                    from .self_heal import preflight_dep_check
-                    preflight_dep_check(cfg)
-                except Exception as e:
-                    log_event("WARN", f"Preflight error: {e}")
-            
-            preflight_thread = threading.Thread(target=run_preflight, daemon=True)
-            preflight_thread.start()
+            if not args.no_preflight:
+                print("Running preflight checks...")
+                def run_preflight():
+                    try:
+                        from .self_heal import preflight_dep_check
+                        preflight_dep_check(cfg)
+                    except Exception as e:
+                        log_event("WARN", f"Preflight error: {e}")
+
+                preflight_thread = threading.Thread(target=run_preflight, daemon=True)
+                preflight_thread.start()
             
             print("Starting Minecraft server...")
             server_started = run_server(cfg)

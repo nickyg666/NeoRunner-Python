@@ -25,7 +25,7 @@ from .backup import (
 
 # World upload / conversion
 from .chunker import (
-    CHUNKER_DOWNLOAD_URL,
+    CHUNKER_RELEASE_API,
     MIN_JAVA_REQUIRED,
     convert_world,
     ensure_chunker,
@@ -255,7 +255,7 @@ from .worlds import (
 )
 
 __all__ = [
-    "CHUNKER_DOWNLOAD_URL",
+    "CHUNKER_RELEASE_API",
     "CRASH_COOLDOWN_SECONDS",
     "CWD",
     "FORCED_SERVER_MODS",

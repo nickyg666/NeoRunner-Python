@@ -21,9 +21,7 @@ from .config import load_cfg
 from .constants import CWD
 from .log import log_event
 
-CHUNKER_DOWNLOAD_URL = (
-    "https://github.com/HiveGamesOSS/Chunker/releases/latest/download/chunker-cli.jar"
-)
+CHUNKER_RELEASE_API = "https://api.github.com/repos/HiveGamesOSS/Chunker/releases/latest"
 USER_AGENT = "NeoRunner/2.4.0 chunker"
 FORMAT_RE = re.compile(r"^(JAVA|BEDROCK)_[\d_]+$")
 MIN_JAVA_REQUIRED = 17  # Chunker CLI requires Java 17+
@@ -42,6 +40,28 @@ def get_chunker_jar(cfg: Any | None = None) -> Path:
         path = Path(jar)
         return path if path.is_absolute() else CWD / path
     return CWD / "tools" / "chunker-cli.jar"
+
+
+def _latest_cli_asset_url() -> str | None:
+    """Resolve the latest ``chunker-cli-*.jar`` download URL from GitHub.
+
+    The release asset is versioned (e.g. ``chunker-cli-1.19.1.jar``), so the
+    ``releases/latest/download/chunker-cli.jar`` shortcut 404s. We query the
+    releases API and pick the first ``chunker-cli-*.jar`` asset instead.
+    """
+    import json as _json
+
+    req = urllib.request.Request(CHUNKER_RELEASE_API, headers={"User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = _json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+    for asset in data.get("assets", []):
+        name = asset.get("name", "")
+        if name.startswith("chunker-cli-") and name.endswith(".jar"):
+            return asset.get("browser_download_url")
+    return None
 
 
 def _download(url: str, dest: Path) -> None:
@@ -69,9 +89,12 @@ def ensure_chunker(cfg: Any | None = None, force: bool = False) -> Path:
     if force and jar.exists():
         jar.unlink()
 
-    log_event("CHUNKER", f"Downloading Chunker CLI from {CHUNKER_DOWNLOAD_URL}")
+    url = _latest_cli_asset_url()
+    if not url:
+        raise RuntimeError("Could not resolve the latest chunker-cli.jar download URL")
+    log_event("CHUNKER", f"Downloading Chunker CLI from {url}")
     try:
-        _download(CHUNKER_DOWNLOAD_URL, jar)
+        _download(url, jar)
     except Exception as e:
         if not jar.exists():
             raise RuntimeError(f"Failed to download chunker-cli.jar: {e}") from e
@@ -175,7 +198,7 @@ def convert_world(
 
 
 __all__ = [
-    "CHUNKER_DOWNLOAD_URL",
+    "CHUNKER_RELEASE_API",
     "MIN_JAVA_REQUIRED",
     "convert_world",
     "ensure_chunker",

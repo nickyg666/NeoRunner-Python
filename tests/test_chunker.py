@@ -46,6 +46,7 @@ class TestEnsureChunker:
             dest.write_bytes(b"x" * 200_000)
 
         monkeypatch.setattr(chunker, "_download", fake_download)
+        monkeypatch.setattr(chunker, "_latest_cli_asset_url", lambda: "https://example.com/chunker-cli.jar")
         result = chunker.ensure_chunker(cfg)
         assert result == jar
         assert jar.exists()
@@ -66,6 +67,7 @@ class TestEnsureChunker:
             dest.write_bytes(b"tiny")
 
         monkeypatch.setattr(chunker, "_download", tiny_download)
+        monkeypatch.setattr(chunker, "_latest_cli_asset_url", lambda: "https://example.com/chunker-cli.jar")
         with pytest.raises(RuntimeError):
             chunker.ensure_chunker(cfg)
 

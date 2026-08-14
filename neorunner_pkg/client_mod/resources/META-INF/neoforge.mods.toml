@@ -1,0 +1,17 @@
+modLoader = "javafml"
+loaderVersion = "[2,)"
+license = "MIT"
+
+[[mods]]
+modId = "neorunner_client_link"
+version = "1.0.0"
+displayName = "NeoRunner Client Link"
+
+[[mixins]]
+config = "neorunner-client-link.mixins.json"
+
+[[dependencies.neorunner_client_link]]
+modId = "neoforge"
+type = "required"
+versionRange = "[26.1,)"
+side = "CLIENT"

@@ -99,6 +99,14 @@ def build_installer_jar(cfg: ServerConfig, base_url: str | None = None, host: st
     if not _JAVA_SRC.exists():
         raise FileNotFoundError(f"Installer source not found: {_JAVA_SRC}")
 
+    # Ensure the clickable-link client mod is built and present in clientonly/
+    # so it ships inside the embedded pack.
+    try:
+        from .client_mod import build_client_link_mod
+        build_client_link_mod()
+    except Exception as e:
+        logger.warning("client-link mod build skipped: %s", e)
+
     properties_text = build_installer_properties(cfg, base_url, host, http_port, server_address)
     pack_bytes = _build_pack_zip(cfg)
     cache_key = hashlib.sha256(

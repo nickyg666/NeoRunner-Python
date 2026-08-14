@@ -21,7 +21,11 @@ import struct
 from pathlib import Path
 
 from ._clickable_message import CLASS_NAME as CLICKABLE_CLASS_NAME
-from ._clickable_message import clickable_message_class
+from ._clickable_message import CLASS_NAME_NEOFORGE as CLICKABLE_CLASS_NAME_NEOFORGE
+from ._clickable_message import (
+    clickable_message_class,
+    clickable_message_class_neoforge,
+)
 from .config import load_cfg
 from .constants import CWD
 from .log import log_event
@@ -452,7 +456,7 @@ def _find_translatable_methodref(entries: list) -> int | None:
     return None
 
 
-def _clickable_constant_pool(entries: list, text: str, link: str, key: bytes) -> tuple[list, int, int]:
+def _clickable_constant_pool(entries: list, text: str, link: str, key: bytes, class_name: bytes = b"neorunner_client/ClickableMessage") -> tuple[list, int, int]:
     """Rebuild a constant pool for a clickable-link call site.
 
     Rewrites ``key`` to ``text`` (text-only, no URL) and appends the constants
@@ -473,7 +477,7 @@ def _clickable_constant_pool(entries: list, text: str, link: str, key: bytes) ->
     link_utf8 = link.encode("utf-8")
 
     new_entries = [
-        (1, b"neorunner_client/ClickableMessage"),
+        (1, class_name),
         (7, struct.pack(">H", cls_name_idx)),
         (1, b"textWithLink"),
         (1, b"(Ljava/lang/String;Ljava/lang/String;)Lnet/minecraft/network/chat/MutableComponent;"),
@@ -552,7 +556,9 @@ def _inject_clickable_registry(data: bytes, link: str, text: str = CLICKABLE_TEX
     if not sites:
         return None
 
-    out_entries, url_str_idx, mref_idx = _clickable_constant_pool(entries, text, link, key)
+    out_entries, url_str_idx, mref_idx = _clickable_constant_pool(
+        entries, text, link, key, class_name=b"neorunner_neoforge/ClickableMessage"
+    )
     cp_bytes = bytearray()
     for tag, info in out_entries:
         cp_bytes += _encode_cp_entry(tag, info)
@@ -625,14 +631,17 @@ def _jar_is_clickable(jar: Path) -> bool:
 def _jar_registry_clickable(jar: Path) -> bool:
     """True if the jar's NetworkRegistry class calls the clickable-link helper.
 
-    The helper class itself lives in the server-patched jar (cross-module), so
-    only the ``textWithLink`` reference in NetworkRegistry is checked here.
+    The helper class lives in the same jar (``neorunner_neoforge`` package), so
+    check both its presence and the ``textWithLink`` reference in NetworkRegistry.
     """
     import zipfile
 
     try:
         with zipfile.ZipFile(jar) as z:
-            if NETWORK_REGISTRY_CLASS not in z.namelist():
+            names = z.namelist()
+            if CLICKABLE_CLASS_NAME_NEOFORGE not in names:
+                return False
+            if NETWORK_REGISTRY_CLASS not in names:
                 return False
             return b"textWithLink" in z.read(NETWORK_REGISTRY_CLASS)
     except Exception:
@@ -693,12 +702,14 @@ def _patch_jar(jar: Path, loader: str) -> bool:
             strip_jar_signatures(names, manifest_bytes) if signed else (names, manifest_bytes)
         )
         has_clickable = CLICKABLE_CLASS_NAME in names
-        # The ClickableMessage helper class lives in the *server-patched* jar
-        # (the "minecraft" JPMS module). NetworkRegistry, in the universal
-        # "neoforge" module, references it cross-module (neoforge requires +
-        # minecraft exports the package), so the helper must NOT also be
-        # injected into the universal jar -- Java rejects split packages.
-        hosts_helper = do_clickable
+        has_clickable_neoforge = CLICKABLE_CLASS_NAME_NEOFORGE in names
+        # Each jar hosts its OWN copy of the helper under a distinct package, so
+        # no cross-module (JPMS) reference is needed:
+        #   - server-patched jar ("minecraft" module): neorunner_client.ClickableMessage
+        #     (called by ServerHandshakePacketListenerImpl in the same module)
+        #   - universal jar ("neoforge" module): neorunner_neoforge.ClickableMessage
+        #     (called by NetworkRegistry in the same module)
+        # Java forbids split packages across modules, hence two distinct packages.
         did_clickable = False
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
@@ -718,6 +729,20 @@ def _patch_jar(jar: Path, loader: str) -> bool:
                 if out_data is None and do_registry and name == NETWORK_REGISTRY_CLASS:
                     out_data = _inject_clickable_registry(data, link)
                     did_surgery = out_data is not None
+                    if did_surgery:
+                        # The clickable surgery only rewrites the
+                        # "multiplayer.disconnect.incompatible" key. NetworkRegistry
+                        # also carries other mismatch strings (e.g. the vanilla
+                        # "You are trying to connect to a server that is running
+                        # NeoForge" fallback); string-replace those too.
+                        other_mapping = {
+                            k: v for k, v in mapping.items()
+                            if k != b"multiplayer.disconnect.incompatible"
+                        }
+                        if other_mapping and any(k in out_data for k in other_mapping):
+                            patched = _parse_and_rebuild(out_data, other_mapping)
+                            if patched != out_data:
+                                out_data = patched
                 if out_data is None and any(k in data for k in mapping):
                     # String replacement fallback (loader keys -> modpack message).
                     patched = _parse_and_rebuild(data, mapping)
@@ -730,10 +755,15 @@ def _patch_jar(jar: Path, loader: str) -> bool:
                     changed = True
                     if did_surgery:
                         did_clickable = True
-            if hosts_helper and did_clickable and not has_clickable:
+            if do_clickable and did_clickable and not has_clickable:
                 out = tmp / CLICKABLE_CLASS_NAME
                 out.parent.mkdir(parents=True, exist_ok=True)
                 out.write_bytes(clickable_message_class())
+                changed = True
+            if do_registry and did_clickable and not has_clickable_neoforge:
+                out = tmp / CLICKABLE_CLASS_NAME_NEOFORGE
+                out.parent.mkdir(parents=True, exist_ok=True)
+                out.write_bytes(clickable_message_class_neoforge())
                 changed = True
             if not changed:
                 return False
@@ -748,8 +778,10 @@ def _patch_jar(jar: Path, loader: str) -> bool:
                         zout.writestr(name, patched_path.read_bytes())
                     else:
                         zout.writestr(name, zin.read(name))
-                if hosts_helper and did_clickable and not has_clickable:
+                if do_clickable and did_clickable and not has_clickable:
                     zout.writestr(CLICKABLE_CLASS_NAME, clickable_message_class())
+                if do_registry and did_clickable and not has_clickable_neoforge:
+                    zout.writestr(CLICKABLE_CLASS_NAME_NEOFORGE, clickable_message_class_neoforge())
     shutil.move(str(jar) + ".tmp", jar)
     return changed
 

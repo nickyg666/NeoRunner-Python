@@ -269,7 +269,7 @@ class TestClickableInjection:
         assert jmp._inject_clickable_registry(_fake_class_bytes(), self.LINK) is None
 
     def test_patch_jar_injects_registry_clickable(self, tmp_path, monkeypatch):
-        """Patching a universal jar rewrites NetworkRegistry (helper stays cross-module)."""
+        """Patching a universal jar rewrites NetworkRegistry + injects its own helper."""
         jar = tmp_path / "neoforge-26.1.2.87-universal.jar"
         with zipfile.ZipFile(jar, "w") as z:
             z.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n\n")
@@ -282,11 +282,13 @@ class TestClickableInjection:
         assert jmp._jar_registry_clickable(jar) is True
         with zipfile.ZipFile(jar) as z:
             names = z.namelist()
-            # Helper class is NOT injected into the universal jar (split-package
-            # protection); NetworkRegistry references it cross-module.
+            # The universal jar hosts its own helper under a distinct package
+            # (no cross-module reference, no split package).
+            assert "neorunner_neoforge/ClickableMessage.class" in names
             assert "neorunner_client/ClickableMessage.class" not in names
             data = z.read("net/neoforged/neoforge/network/registration/NetworkRegistry.class")
         assert b"textWithLink" in data
+        assert b"neorunner_neoforge/ClickableMessage" in data
         # Idempotent: second patch reports no change.
         assert jmp._patch_jar(jar, "neoforge") is False
 

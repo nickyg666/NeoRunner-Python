@@ -3,6 +3,8 @@
 
 import json
 import logging
+import shutil
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -98,6 +100,116 @@ def parse_mod_manifest(jar_path: Path) -> dict | None:
                 pass
     
     return None
+
+
+def _extract_mod_id_version(jar_path: Path) -> tuple[str, str] | None:
+    """Return ``(mod_id, version)`` from a mod jar's metadata, or None.
+
+    Reads ``neoforge.mods.toml`` / ``mods.toml`` (proper TOML) and
+    ``fabric.mod.json``; falls back to MANIFEST.MF ``Mod-ID``/``Mod-Version``.
+    """
+    try:
+        with zipfile.ZipFile(jar_path) as zf:
+            names = zf.namelist()
+            toml_file = None
+            if "META-INF/neoforge.mods.toml" in names:
+                toml_file = "META-INF/neoforge.mods.toml"
+            elif "META-INF/mods.toml" in names:
+                toml_file = "META-INF/mods.toml"
+            if toml_file:
+                try:
+                    import tomllib
+                except ImportError:
+                    import tomli as tomllib
+                data = tomllib.loads(zf.read(toml_file).decode("utf-8", "replace"))
+                for entry in data.get("mods", []):
+                    mid = (entry.get("modId") or "").lower()
+                    if mid:
+                        return mid, str(entry.get("version") or "")
+            if "fabric.mod.json" in names:
+                data = json.loads(zf.read("fabric.mod.json").decode("utf-8", "replace"))
+                mid = (data.get("id") or "").lower()
+                if mid:
+                    return mid, str(data.get("version") or "")
+            if "META-INF/MANIFEST.MF" in names:
+                text = zf.read("META-INF/MANIFEST.MF").decode("utf-8", "replace")
+                mid = ver = None
+                for line in text.splitlines():
+                    if line.startswith("Mod-ID:"):
+                        mid = line.split(":", 1)[1].strip()
+                    elif line.startswith("Mod-Version:"):
+                        ver = line.split(":", 1)[1].strip()
+                if mid:
+                    return mid.lower(), ver or ""
+    except Exception:
+        pass
+    return None
+
+
+def _version_rank(version: str) -> tuple:
+    """Rank a version string so the 'best' version sorts highest.
+
+    Stable releases outrank prereleases; higher numeric segments outrank lower.
+    """
+    import re
+
+    v = version.lower()
+    is_prerelease = any(
+        m in v for m in ("alpha", "beta", "rc", "snapshot", "preview", "nightly", "dev")
+    ) or re.search(r"[-.+]?(pre|b)\d", v) is not None
+    base = v.split("-")[0].split("+")[0]
+    nums = re.findall(r"\d+", base)
+    numeric = tuple(int(n) for n in nums) if nums else (0,)
+    return (0 if is_prerelease else 1, numeric)
+
+
+def dedupe_mod_versions(mods_dir: Path, clientonly_dir: Path | None = None) -> dict[str, Any]:
+    """Remove duplicate versions of the same mod, keeping the best version.
+
+    Two jars declaring the same mod ID (e.g. two Sodium builds) conflict when
+    shipped together and can crash clients. For each mod ID, keep the best
+    version (stable > prerelease, higher > lower) and move the others into
+    ``mods/quarantine/`` so they're recoverable but no longer shipped.
+    """
+    result: dict[str, Any] = {"removed": [], "kept": [], "errors": []}
+    dirs = [mods_dir]
+    if clientonly_dir is not None:
+        dirs.append(clientonly_dir)
+
+    by_id: dict[str, list[tuple[Path, str]]] = {}
+    for d in dirs:
+        if not d.exists():
+            continue
+        for jar in sorted(d.glob("*.jar")):
+            info = _extract_mod_id_version(jar)
+            if info is None:
+                continue
+            mid, ver = info
+            by_id.setdefault(mid, []).append((jar, ver))
+
+    quarantine = mods_dir / "quarantine"
+    for mid, jars in by_id.items():
+        if len(jars) <= 1:
+            continue
+        jars_sorted = sorted(jars, key=lambda j: _version_rank(j[1]), reverse=True)
+        keep_jar, keep_ver = jars_sorted[0]
+        result["kept"].append({"mod_id": mid, "file": keep_jar.name, "version": keep_ver})
+        for jar, ver in jars_sorted[1:]:
+            try:
+                quarantine.mkdir(parents=True, exist_ok=True)
+                dest = quarantine / jar.name
+                if dest.exists():
+                    dest = quarantine / f"{jar.stem}_{int(time.time())}{jar.suffix}"
+                shutil.move(str(jar), str(dest))
+                reason_file = quarantine / f"{dest.name}.reason.txt"
+                reason_file.write_text(
+                    f"Duplicate version of {mid} (kept {keep_ver} in {keep_jar.name})"
+                )
+                log_event("MOD_DEDUPE", f"Removed duplicate {mid}: {jar.name} (kept {keep_jar.name})")
+                result["removed"].append({"mod_id": mid, "file": jar.name, "version": ver})
+            except Exception as e:
+                result["errors"].append(f"{jar.name}: {e}")
+    return result
 
 
 def check_if_library_modrinth(mod_id: str) -> bool:

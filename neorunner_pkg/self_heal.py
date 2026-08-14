@@ -592,6 +592,16 @@ def preflight_dep_check(cfg: dict[str, Any]) -> dict[str, Any]:
             if fetched:
                 result["fetched"] += 1
 
+    # Remove duplicate versions of the same mod (a fetch may add a second
+    # build of a mod that's already installed, e.g. a second Sodium jar).
+    try:
+        from .mods import dedupe_mod_versions
+        dedupe_result = dedupe_mod_versions(mods_dir, clientonly_dir)
+        for dup in dedupe_result.get("removed", []):
+            result["quarantined"].append(dup.get("file", ""))
+    except Exception as e:
+        log_event("PREFLIGHT", f"Dedupe skipped: {e}")
+
     # Verify no installed mod has an unsatisfiable *required* dependency. A
     # fetched mod may itself depend on something that could not be fetched;
     # leaving it in mods/ would crash the server on every boot. Quarantine it.

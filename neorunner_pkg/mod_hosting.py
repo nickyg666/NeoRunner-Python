@@ -510,6 +510,14 @@ def update_manifest(mods_dir: Path, cfg: ServerConfig | None = None) -> bool:
     manifest_path = mods_dir / "manifest.json"
     
     try:
+        # Never ship two versions of the same mod (e.g. two Sodium builds): a
+        # conflicting duplicate crashes clients. Resolve before listing.
+        try:
+            from .mods import dedupe_mod_versions
+            dedupe_mod_versions(mods_dir, clientonly_dir)
+        except Exception as e:
+            log_event("MANIFEST", f"Dedupe skipped: {e}")
+
         mods: dict[str, Path] = {}
         
         # Collect server mods (skip .server.jar)

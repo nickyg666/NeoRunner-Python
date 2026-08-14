@@ -1236,6 +1236,36 @@ def download_install_bat():
         return f"Error generating script: {e}", 500
 
 
+@app.route("/download/install.sh")
+def download_install_sh():
+    """Native bootstrap (macOS/Linux) that ensures Java and runs the installer JAR."""
+    try:
+        from .mod_hosting import generate_java_bootstrap_sh
+        cfg = load_cfg()
+        return Response(
+            generate_java_bootstrap_sh(cfg),
+            mimetype="text/x-shellscript",
+            headers={"Content-Disposition": "attachment; filename=install.sh"},
+        )
+    except Exception as e:
+        return f"Error generating script: {e}", 500
+
+
+@app.route("/download/install.bat")
+def download_install_bat_bootstrap():
+    """Native bootstrap (Windows) that ensures Java and runs the installer JAR."""
+    try:
+        from .mod_hosting import generate_java_bootstrap_bat
+        cfg = load_cfg()
+        return Response(
+            generate_java_bootstrap_bat(cfg),
+            mimetype="text/plain",
+            headers={"Content-Disposition": "attachment; filename=install.bat"},
+        )
+    except Exception as e:
+        return f"Error generating script: {e}", 500
+
+
 @app.route("/download/curl")
 def download_curl():
     """Download curl one-liner for quick install."""

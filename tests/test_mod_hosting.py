@@ -270,3 +270,42 @@ class TestModHostingManifestFunctions:
         monkeypatch.setattr(
             "neorunner_pkg.mod_hosting._get_local_ip", lambda: "192.168.1.10")
         assert get_server_ip() == "192.168.1.10"
+
+
+class TestJavaBootstrap:
+    """Native Java-installer bootstrap scripts (ensure Java, run installer)."""
+
+    def _cfg(self):
+        from neorunner_pkg.config import ServerConfig
+        return ServerConfig(hostname="mc.example.com", http_port=8000)
+
+    def test_adoptium_url(self):
+        from neorunner_pkg.mod_hosting import adoptium_jre_url
+        u = adoptium_jre_url("windows", "x64", 21)
+        assert u.startswith("https://api.adoptium.net/v3/binary/latest/21/ga/windows/x64/jre/hotspot/normal/eclipse")
+
+    def test_bash_bootstrap_checks_java(self):
+        from neorunner_pkg.mod_hosting import generate_java_bootstrap_sh
+        s = generate_java_bootstrap_sh(self._cfg())
+        assert "#!/bin/bash" in s
+        assert "command -v java" in s
+        assert "adoptium.net" in s
+        assert 'BASE_URL="https://mc.example.com"' in s
+        assert "/download/installer.jar" in s
+        assert "-jar" in s
+
+    def test_bat_bootstrap_checks_java(self):
+        from neorunner_pkg.mod_hosting import generate_java_bootstrap_bat
+        s = generate_java_bootstrap_bat(self._cfg())
+        assert "@echo off" in s
+        assert "where java" in s
+        assert "adoptium.net" in s
+        assert 'BASE_URL=https://mc.example.com' in s
+        assert "/download/installer.jar" in s
+        assert "-jar" in s
+
+    def test_bash_uses_local_ip_when_no_hostname(self):
+        from neorunner_pkg.mod_hosting import generate_java_bootstrap_sh
+        from neorunner_pkg.config import ServerConfig
+        s = generate_java_bootstrap_sh(ServerConfig(hostname="", http_port=8000))
+        assert "/download/installer.jar" in s

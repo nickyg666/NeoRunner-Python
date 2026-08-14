@@ -432,6 +432,8 @@ def index():
     cf_url = f"https://{host}/download/curseforge.zip"
     bat_url = f"https://{host}/download/install-mods.bat"
     jar_url = f"https://{host}/download/installer.jar"
+    install_bat_url = f"https://{host}/download/install.bat"
+    install_sh_url = f"https://{host}/download/install.sh"
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -474,10 +476,20 @@ def index():
   </div>
 
   <div class="card">
-    <a class="btn" href="{jar_url}" style="border-color:#2ea043;">
+    <a class="btn" href="{install_bat_url}" style="border-color:#2ea043;">
       <span class="arrow">↗</span>
-      <span class="t">One-click installer (recommended) — Java</span>
-      <span class="d">Downloads the {info['loader_label']} installer + all mods &amp; config. Detects your .minecraft folder automatically (Windows/Linux/macOS) and asks for confirmation.</span>
+      <span class="t">One-click installer — Windows</span>
+      <span class="d">Downloads the installer + all mods &amp; config. Installs Java automatically if your PC doesn't have it. Detects your .minecraft folder and asks for confirmation.</span>
+    </a>
+    <a class="btn" href="{install_sh_url}" style="border-color:#2ea043;">
+      <span class="arrow">↗</span>
+      <span class="t">One-click installer — macOS / Linux</span>
+      <span class="d">Downloads the installer + all mods &amp; config. Installs Java automatically if needed. Detects your .minecraft folder and asks for confirmation.</span>
+    </a>
+    <a class="btn" href="{jar_url}">
+      <span class="arrow">↗</span>
+      <span class="t">Installer JAR only (you already have Java)</span>
+      <span class="d">The raw {info['loader_label']} installer JAR — use this only if Java is already installed.</span>
     </a>
     <a class="btn" href="{launcher_url}">
       <span class="arrow">↗</span>

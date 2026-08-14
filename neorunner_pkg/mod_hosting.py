@@ -1059,3 +1059,139 @@ def run_mod_server(host: str = "0.0.0.0", port: int = 8000):
     except KeyboardInterrupt:
         log_event("MOD_SERVER", "Shutting down...")
         server.shutdown()
+
+
+def adoptium_jre_url(os_name: str, arch: str, java_major: int = 21) -> str:
+    """Adoptium (Temurin) JRE download URL for a given OS/arch.
+
+    Returns a ``*.zip`` (Windows) or ``*.tar.gz`` (Linux/macOS) URL. OS names:
+    ``windows``, ``linux``, ``mac``; arch: ``x64``, ``aarch64``, ``x86``, ``arm``.
+    """
+    return (
+        f"https://api.adoptium.net/v3/binary/latest/{java_major}/ga/"
+        f"{os_name}/{arch}/jre/hotspot/normal/eclipse"
+    )
+
+
+def _client_base_url(cfg: ServerConfig) -> str:
+    hostname = _get_server_hostname(cfg)
+    return f"https://{hostname}" if hostname else f"http://{_get_local_ip()}:{cfg.http_port}"
+
+
+def generate_java_bootstrap_sh(cfg: ServerConfig) -> str:
+    """Native (shell) bootstrap for macOS/Linux that ensures Java then runs the
+    self-contained installer JAR.
+
+    A plain JAR cannot run without Java, so this native launcher checks for a
+    JVM first and, if none is present, downloads a portable Temurin JRE, then
+    runs the installer with it.
+    """
+    base = _client_base_url(cfg)
+    return f'''#!/bin/bash
+# NeoRunner modpack installer bootstrap (macOS / Linux)
+set -e
+BASE_URL="{base}"
+
+echo "== NeoRunner modpack installer =="
+
+JAVA_BIN=""
+if command -v java >/dev/null 2>&1; then
+    JAVA_BIN="java"
+else
+    echo "Java not found - downloading a portable JRE..."
+    OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+    case "$(uname -m)" in
+        x86_64|amd64) ARCH=x64 ;;
+        aarch64|arm64) ARCH=aarch64 ;;
+        *) ARCH=x64 ;;
+    esac
+    case "$OS" in
+        darwin) OS_NAME=mac ;;
+        *) OS_NAME=linux ;;
+    esac
+    JRE_URL="https://api.adoptium.net/v3/binary/latest/21/ga/$OS_NAME/$ARCH/jre/hotspot/normal/eclipse"
+    JRE_DIR="${{TMPDIR:-/tmp}}/neorunner-jre"
+    JRE_ARCHIVE="${{TMPDIR:-/tmp}}/neorunner-jre.tar.gz"
+    echo "  Downloading JRE ($OS_NAME/$ARCH)..."
+    if command -v curl >/dev/null 2>&1; then
+        curl -fL "$JRE_URL" -o "$JRE_ARCHIVE"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q "$JRE_URL" -O "$JRE_ARCHIVE"
+    else
+        echo "ERROR: need curl or wget to download Java" >&2
+        exit 1
+    fi
+    rm -rf "$JRE_DIR" && mkdir -p "$JRE_DIR"
+    tar -xzf "$JRE_ARCHIVE" -C "$JRE_DIR" --strip-components=1
+    JAVA_BIN="$JRE_DIR/bin/java"
+fi
+
+echo "Downloading installer..."
+INSTALLER="${{TMPDIR:-/tmp}}/neorunner-installer.jar"
+if command -v curl >/dev/null 2>&1; then
+    curl -fL "$BASE_URL/download/installer.jar" -o "$INSTALLER"
+else
+    wget -q "$BASE_URL/download/installer.jar" -O "$INSTALLER"
+fi
+
+echo "Running installer (Java: $($JAVA_BIN -version 2>&1 | head -1))..."
+"$JAVA_BIN" -jar "$INSTALLER" "$@"
+'''
+
+
+def generate_java_bootstrap_bat(cfg: ServerConfig) -> str:
+    """Native (batch) bootstrap for Windows that ensures Java then runs the
+    self-contained installer JAR (delegates JRE download to PowerShell)."""
+    base = _client_base_url(cfg)
+    return f'''@echo off
+setlocal EnableDelayedExpansion
+REM NeoRunner modpack installer bootstrap (Windows)
+set "BASE_URL={base}"
+
+echo == NeoRunner modpack installer ==
+
+where java >nul 2>&1
+if %errorlevel%==0 (
+    set "JAVA_CMD=java"
+    goto :download
+)
+
+echo Java not found - downloading a portable JRE...
+set "JRE_DIR=%TEMP%\\neorunner-jre"
+set "JRE_ZIP=%TEMP%\\neorunner-jre.zip"
+
+REM Detect arch and download Temurin JRE via PowerShell
+powershell -NoProfile -Command "$u = if ([Environment]::Is64BitOperatingSystem) {{ 'https://api.adoptium.net/v3/binary/latest/21/ga/windows/x64/jre/hotspot/normal/eclipse' }} else {{ 'https://api.adoptium.net/v3/binary/latest/21/ga/windows/x86/jre/hotspot/normal/eclipse' }}; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri $u -OutFile '%JRE_ZIP%' -UseBasicParsing"
+if not exist "%JRE_ZIP%" (
+    echo ERROR: failed to download Java
+    pause
+    exit /b 1
+)
+powershell -NoProfile -Command "Expand-Archive -Path '%JRE_ZIP%' -DestinationPath '%JRE_DIR%' -Force"
+if not exist "%JRE_DIR%" (
+    echo ERROR: failed to extract Java
+    pause
+    exit /b 1
+)
+REM The zip extracts to a single jdk-* directory
+for /d %%D in ("%JRE_DIR%\\jdk*") do set "JAVA_CMD=%%D\\bin\\java.exe"
+if not defined JAVA_CMD (
+    echo ERROR: could not locate java.exe in extracted JRE
+    pause
+    exit /b 1
+)
+
+:download
+echo Downloading installer...
+set "INSTALLER=%TEMP%\\neorunner-installer.jar"
+powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%BASE_URL%/download/installer.jar' -OutFile '%INSTALLER%' -UseBasicParsing"
+if not exist "%INSTALLER%" (
+    echo ERROR: failed to download installer
+    pause
+    exit /b 1
+)
+
+echo Running installer...
+"%JAVA_CMD%" -jar "%INSTALLER%" %*
+pause
+'''

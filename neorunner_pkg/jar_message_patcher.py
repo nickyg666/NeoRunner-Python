@@ -592,7 +592,7 @@ def _baked_link(jar: Path) -> str | None:
 
     global _URL_RE
     if _URL_RE is None:
-        _URL_RE = re.compile(rb"https?://[A-Za-z0-9.\-]+/download/installer\.jar")
+        _URL_RE = re.compile(rb"https?://[A-Za-z0-9.\-]+(?:/download/installer\.jar|/dl/mods\.zip)")
     try:
         import zipfile
 

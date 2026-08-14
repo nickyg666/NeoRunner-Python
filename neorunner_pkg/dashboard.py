@@ -1266,6 +1266,24 @@ def download_install_bat_bootstrap():
         return f"Error generating script: {e}", 500
 
 
+@app.route("/download/mods.zip")
+@app.route("/dl/mods.zip")
+def download_mods_bundle():
+    """All-in-one mods.zip: installer JAR + Java 21 installers for win/mac/linux."""
+    try:
+        from .mod_hosting import build_mods_bundle_zip
+        cfg = load_cfg()
+        bundle = build_mods_bundle_zip(cfg)
+        return send_file(
+            str(bundle),
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name="mods.zip",
+        )
+    except Exception as e:
+        return f"Error building mods.zip bundle: {e}", 500
+
+
 @app.route("/download/curl")
 def download_curl():
     """Download curl one-liner for quick install."""

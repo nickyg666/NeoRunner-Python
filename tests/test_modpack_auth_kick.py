@@ -181,4 +181,4 @@ class TestKickEndpoint:
         r = client.post("/api/broadcast-mods", headers=_auth_header())
         assert r.status_code == 200
         assert len(sent) == 1
-        assert "mc.w8.mom/download/installer.jar" in sent[0]
+        assert "mc.w8.mom/dl/mods.zip" in sent[0]

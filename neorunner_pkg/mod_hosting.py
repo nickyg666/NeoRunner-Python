@@ -7,9 +7,11 @@ Provides secure mod downloads with rate limiting and conditional zip creation.
 import io
 import json
 import os
+import shutil
 import socket
 import threading
 import time
+import urllib.request
 import zipfile
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
@@ -33,8 +35,8 @@ def public_download_base(cfg: ServerConfig) -> str:
     return f"https://{host}"
 
 
-def public_download_link(cfg: ServerConfig, path: str = "/download/installer.jar") -> str:
-    """Full public URL for a download endpoint (installer jar by default)."""
+def public_download_link(cfg: ServerConfig, path: str = "/dl/mods.zip") -> str:
+    """Full public URL for a download endpoint (the mods.zip bundle by default)."""
     return public_download_base(cfg) + path
 
 
@@ -1071,6 +1073,116 @@ def adoptium_jre_url(os_name: str, arch: str, java_major: int = 21) -> str:
         f"https://api.adoptium.net/v3/binary/latest/{java_major}/ga/"
         f"{os_name}/{arch}/jre/hotspot/normal/eclipse"
     )
+
+
+# Java (Temurin) installers bundled into mods.zip so Java-less clients can
+# install a JRE before running the installer JAR. Windows/macOS use the native
+# installers; Linux uses the portable tarball.
+_JAVA_INSTALLER_SPECS: dict[str, tuple[str, str]] = {
+    # name -> (adoptium url, filename in the zip)
+    "windows": (
+        "https://api.adoptium.net/v3/installer/latest/21/ga/windows/x64/jre/hotspot/normal/eclipse",
+        "java-windows-x64.msi",
+    ),
+    "mac": (
+        "https://api.adoptium.net/v3/installer/latest/21/ga/mac/x64/jre/hotspot/normal/eclipse",
+        "java-mac-x64.pkg",
+    ),
+    "linux": (
+        "https://api.adoptium.net/v3/binary/latest/21/ga/linux/x64/jre/hotspot/normal/eclipse",
+        "java-linux-x64.tar.gz",
+    ),
+}
+
+
+def _java_installer_cache_dir() -> Path:
+    return CWD / ".cache" / "java_installers"
+
+
+def _download_binary(url: str, dest: Path) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    req = urllib.request.Request(url, headers={"User-Agent": "NeoRunner/2.4.7 installer"})
+    with urllib.request.urlopen(req, timeout=300) as resp, open(dest, "wb") as f:
+        shutil.copyfileobj(resp, f)
+
+
+def _ensure_java_installers() -> dict[str, Path]:
+    """Download (and cache) the Temurin JRE installers for windows/mac/linux."""
+    cache = _java_installer_cache_dir()
+    cache.mkdir(parents=True, exist_ok=True)
+    out: dict[str, Path] = {}
+    for name, (url, filename) in _JAVA_INSTALLER_SPECS.items():
+        dest = cache / filename
+        if dest.exists() and dest.stat().st_size > 10_000_000:
+            out[name] = dest
+            continue
+        log_event("MOD_ZIP", f"Downloading Java installer ({name})...")
+        try:
+            _download_binary(url, dest)
+            out[name] = dest
+        except Exception as e:
+            log_event("MOD_ZIP", f"Failed to download Java installer ({name}): {e}")
+    return out
+
+
+def _mods_bundle_readme(cfg: ServerConfig, installer_jar_name: str) -> str:
+    from .mod_hosting import _get_server_hostname  # local import avoids cycles
+    host = _get_server_hostname(cfg) or DEFAULT_PUBLIC_HOST
+    address = host
+    try:
+        mc_port = int(getattr(cfg, "mc_port", 25565) or 25565)
+        if mc_port != 25565:
+            address = f"{host}:{mc_port}"
+    except Exception:
+        pass
+    return f"""NeoRunner modpack installer
+================================
+
+This bundle contains:
+  - {installer_jar_name}   (the one-click installer: NeoForge loader + all mods, configs and shaderpacks)
+  - java/                  (Java 21 runtimes for Windows, macOS and Linux)
+
+How to install
+--------------
+1. If you don't already have Java 21 installed, install it:
+     Windows:  run  java\\java-windows-x64.msi
+     macOS:    run  java\\java-mac-x64.pkg
+     Linux:    extract java\\java-linux-x64.tar.gz and add its bin/ folder to your PATH
+2. Run the installer:
+     Double-click {installer_jar_name}  (or run: java -jar {installer_jar_name})
+3. Launch Minecraft and connect to: {address}
+
+Need help? Re-download the latest bundle at any time.
+"""
+
+
+def build_mods_bundle_zip(cfg: ServerConfig) -> Path:
+    """Build (and cache) the all-in-one ``mods.zip`` bundle.
+
+    Contains the self-contained installer JAR plus Java 21 installers for
+    Windows/macOS/Linux, so a client without Java can still get going.
+    """
+    from .installer_jar import build_installer_jar
+
+    jar = build_installer_jar(cfg)
+    jre = _ensure_java_installers()
+
+    cache_dir = _java_installer_cache_dir()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    bundle = cache_dir / f"mods-{jar.stem}.zip"
+
+    if bundle.exists() and bundle.stat().st_size > 0:
+        return bundle
+
+    tmp = bundle.with_suffix(".zip.tmp")
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.write(jar, arcname=jar.name)
+        for name, path in sorted(jre.items()):
+            zf.write(path, arcname=f"java/{path.name}")
+        zf.writestr("README.txt", _mods_bundle_readme(cfg, jar.name))
+    shutil.move(str(tmp), str(bundle))
+    log_event("MOD_ZIP", f"Built mods.zip bundle ({bundle.stat().st_size / 1e6:.1f} MB)")
+    return bundle
 
 
 def _client_base_url(cfg: ServerConfig) -> str:

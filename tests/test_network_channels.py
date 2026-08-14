@@ -166,7 +166,7 @@ class TestNetworkChannelAnalyzer:
                              player="dadoflorenzog", reason="Incompatible client")
         reason = analyzer.kick_reason(mm)
         assert reason is not None
-        assert "installer.jar" in reason
+        assert "mods.zip" in reason
         assert "mc.example.com" in reason
 
         mm2 = ChannelMismatch("192.168.1.10", "emi", "client_has_server_missing", "emi", "critical")
@@ -179,7 +179,7 @@ class TestNetworkChannelAnalyzer:
         mm = ChannelMismatch(None, "connection", "connection_rejected", None, "critical",
                              player="dadoflorenzog", reason="Incompatible client")
         reason = analyzer.kick_reason(mm)
-        assert "play.example.com/download/installer.jar" in reason
+        assert "play.example.com/dl/mods.zip" in reason
         assert "mc.w8.mom" not in reason
 
     def test_rejection_event_generation(self, caplog):
@@ -192,4 +192,4 @@ class TestNetworkChannelAnalyzer:
                                 player="dadoflorenzog", reason="Incompatible client")
             ])
         msgs = [r.message for r in caplog.records if r.message]
-        assert any("dadoflorenzog" in m and "installer.jar" in m for m in msgs)
+        assert any("dadoflorenzog" in m and "mods.zip" in m for m in msgs)

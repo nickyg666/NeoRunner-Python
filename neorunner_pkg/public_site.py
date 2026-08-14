@@ -432,6 +432,7 @@ def index():
     cf_url = f"https://{host}/download/curseforge.zip"
     bat_url = f"https://{host}/download/install-mods.bat"
     jar_url = f"https://{host}/download/installer.jar"
+    mods_zip_url = f"https://{host}/dl/mods.zip"
     install_bat_url = f"https://{host}/download/install.bat"
     install_sh_url = f"https://{host}/download/install.sh"
 
@@ -476,15 +477,20 @@ def index():
   </div>
 
   <div class="card">
-    <a class="btn" href="{install_bat_url}" style="border-color:#2ea043;">
+    <a class="btn" href="{mods_zip_url}" style="border-color:#2ea043;">
+      <span class="arrow">↗</span>
+      <span class="t">Download the modpack — mods.zip (recommended)</span>
+      <span class="d">Everything in one download: the one-click installer + all mods, configs &amp; shaderpacks, plus Java installers for Windows, macOS and Linux in case you don't have Java.</span>
+    </a>
+    <a class="btn" href="{install_bat_url}">
       <span class="arrow">↗</span>
       <span class="t">One-click installer — Windows</span>
-      <span class="d">Downloads the installer + all mods &amp; config. Installs Java automatically if your PC doesn't have it. Detects your .minecraft folder and asks for confirmation.</span>
+      <span class="d">Runs the installer and installs Java automatically if your PC doesn't have it.</span>
     </a>
-    <a class="btn" href="{install_sh_url}" style="border-color:#2ea043;">
+    <a class="btn" href="{install_sh_url}">
       <span class="arrow">↗</span>
       <span class="t">One-click installer — macOS / Linux</span>
-      <span class="d">Downloads the installer + all mods &amp; config. Installs Java automatically if needed. Detects your .minecraft folder and asks for confirmation.</span>
+      <span class="d">Runs the installer and installs Java automatically if needed.</span>
     </a>
     <a class="btn" href="{jar_url}">
       <span class="arrow">↗</span>

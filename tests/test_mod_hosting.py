@@ -309,3 +309,47 @@ class TestJavaBootstrap:
         from neorunner_pkg.config import ServerConfig
         s = generate_java_bootstrap_sh(ServerConfig(hostname="", http_port=8000))
         assert "/download/installer.jar" in s
+
+
+class TestModsBundle:
+    """All-in-one mods.zip bundle (installer JAR + Java installers)."""
+
+    def test_bundle_zip_structure(self, tmp_path, monkeypatch):
+        import zipfile
+        from neorunner_pkg import mod_hosting
+        from neorunner_pkg.config import ServerConfig
+
+        cfg = ServerConfig(hostname="mc.example.com", http_port=8000)
+
+        fake_jar = tmp_path / "installer-fake123.jar"
+        fake_jar.write_bytes(b"JARBYTES")
+        fake_jre = {
+            "windows": tmp_path / "java-windows-x64.msi",
+            "mac": tmp_path / "java-mac-x64.pkg",
+            "linux": tmp_path / "java-linux-x64.tar.gz",
+        }
+        for p in fake_jre.values():
+            p.write_bytes(b"JREBYTES")
+
+        monkeypatch.setattr("neorunner_pkg.installer_jar.build_installer_jar", lambda cfg, **kw: fake_jar)
+        monkeypatch.setattr(mod_hosting, "_ensure_java_installers", lambda: fake_jre)
+        monkeypatch.setattr(mod_hosting, "_java_installer_cache_dir", lambda: tmp_path / ".cache" / "java")
+
+        bundle = mod_hosting.build_mods_bundle_zip(cfg)
+        assert bundle.exists()
+        with zipfile.ZipFile(bundle) as z:
+            names = z.namelist()
+        assert "installer-fake123.jar" in names
+        assert "java/java-windows-x64.msi" in names
+        assert "java/java-mac-x64.pkg" in names
+        assert "java/java-linux-x64.tar.gz" in names
+        assert "README.txt" in names
+
+    def test_readme_mentions_server(self, tmp_path, monkeypatch):
+        from neorunner_pkg import mod_hosting
+        from neorunner_pkg.config import ServerConfig
+        cfg = ServerConfig(hostname="mc.example.com", http_port=8000)
+        r = mod_hosting._mods_bundle_readme(cfg, "installer.jar")
+        assert "installer.jar" in r
+        assert "mc.example.com" in r
+        assert "java" in r.lower()

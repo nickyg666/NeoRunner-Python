@@ -117,11 +117,11 @@ class TestParseAndRebuild:
 class TestDownloadLink:
     def test_uses_hostname_from_cfg(self, monkeypatch):
         cfg = ServerConfig(hostname="play.example.com")
-        assert jmp._download_link(cfg) == "https://play.example.com/download/installer.jar"
+        assert jmp._download_link(cfg) == "https://play.example.com/dl/mods.zip"
 
     def test_default_host(self, monkeypatch):
         cfg = ServerConfig(hostname="")
-        assert jmp._download_link(cfg) == "https://mc.w8.mom/download/installer.jar"
+        assert jmp._download_link(cfg) == "https://mc.w8.mom/dl/mods.zip"
 
 
 class TestPatchJar:
@@ -177,8 +177,8 @@ class TestPatchJar:
 
         with zipfile.ZipFile(jar) as z:
             data = z.read("net/neoforged/neoforge/network/registration/NetworkRegistry.class")
-        assert b"https://new.example.com/download/installer.jar" in data
-        assert b"https://old.example.com/download/installer.jar" not in data
+        assert b"https://new.example.com/dl/mods.zip" in data
+        assert b"https://old.example.com/dl/mods.zip" not in data
         assert jmp.loader_is_patched("neoforge") is True
 
     def test_no_jars_returns_false(self, tmp_path, monkeypatch):
@@ -224,7 +224,7 @@ class TestPatchJar:
 
 
 class TestClickableInjection:
-    LINK = "https://w8.mom/download/installer.jar"
+    LINK = "https://w8.mom/dl/mods.zip"
 
     def test_inject_rewrites_call_site(self):
         data = _make_handshake_class()

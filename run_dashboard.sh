@@ -1,10 +1,6 @@
 #!/bin/bash
 #
-# NeoRunner launch script
-#
-#   - Port 8000  : Admin dashboard (LAN) - http://IP:8000/admin
-#   - Port 8005  : Public download site (local only) - via Cloudflare Tunnel at mc.w8.mom
-#
+# NeoRunner Dashboard Startup Script
 # Production-ready with proper logging and error handling
 #
 
@@ -13,8 +9,6 @@ set -euo pipefail
 NEORUNNER_DIR="/home/host/neorunner"
 VENV_DIR="$NEORUNNER_DIR/venv_314"
 LOG_DIR="$NEORUNNER_DIR/logs"
-PID_DASH="$LOG_DIR/dashboard.pid"
-PID_PUBLIC="$LOG_DIR/public_site.pid"
 
 # Create log directory if it doesn't exist
 mkdir -p "$LOG_DIR"
@@ -22,7 +16,7 @@ mkdir -p "$LOG_DIR"
 cd "$NEORUNNER_DIR"
 
 echo "============================================"
-echo "NeoRunner Services Starting"
+echo "NeoRunner Dashboard Starting"
 echo "Time: $(date '+%Y-%m-%d %H:%M:%S')"
 echo "============================================"
 
@@ -33,60 +27,26 @@ if [ ! -f "$VENV_DIR/bin/gunicorn" ]; then
     exit 1
 fi
 
+# Export environment
 export PATH="$VENV_DIR/bin:$PATH"
 export VIRTUAL_ENV="$VENV_DIR"
 export PYTHONPATH="$NEORUNNER_DIR"
 
-# Stop any existing instances
-for pid_file in "$PID_DASH" "$PID_PUBLIC"; do
-    if [ -f "$pid_file" ]; then
-        pid=$(cat "$pid_file" 2>/dev/null || true)
-        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-            kill "$pid" 2>/dev/null || true
-        fi
-        rm -f "$pid_file"
-    fi
-done
-
-# Start the admin dashboard (LAN only - 0.0.0.0:8000, admin at /admin)
-"$VENV_DIR/bin/gunicorn" \
-    --bind 0.0.0.0:8000 \
+# Start gunicorn with production settings
+# Import from neorunner_pkg (properly structured package)
+exec "$VENV_DIR/bin/gunicorn" \
+    --bind 127.0.0.1:8000 \
     --workers 2 \
     --threads 2 \
     --timeout 120 \
     --access-logfile "$LOG_DIR/access.log" \
     --error-logfile "$LOG_DIR/error.log" \
     --capture-output \
+    --enable-stdio-inheritance \
     --daemon \
-    --pid "$PID_DASH" \
+    --pid "$LOG_DIR/dashboard.pid" \
     "neorunner_pkg.dashboard:app"
 
-# Start the public download site (proxied by caddy from mc.w8.mom)
-"$VENV_DIR/bin/gunicorn" \
-    --bind 127.0.0.1:8005 \
-    --workers 2 \
-    --threads 4 \
-    --timeout 300 \
-    --access-logfile "$LOG_DIR/public_access.log" \
-    --error-logfile "$LOG_DIR/error.log" \
-    --capture-output \
-    --daemon \
-    --pid "$PID_PUBLIC" \
-    "neorunner_pkg.public_site:app"
-
-sleep 2
-
-# Start the Cloudflare tunnel (mc.w8.mom -> 127.0.0.1:8005) if not already running
-CLOUDFLARED_BIN="/usr/local/bin/cloudflared"
-CF_TUNNEL_ID="4fe0dec1-db59-444d-817a-64da790b604c"
-if [ -x "$CLOUDFLARED_BIN" ] && ! pgrep -f "cloudflared tunnel" > /dev/null 2>&1; then
-    nohup "$CLOUDFLARED_BIN" tunnel --config "$HOME/.cloudflared/config.yml" run "$CF_TUNNEL_ID" \
-        >> "$LOG_DIR/cloudflared.log" 2>&1 &
-    echo "Cloudflare Tunnel started."
-else
-    echo "Cloudflare Tunnel already running or unavailable."
-fi
-
-echo "Admin dashboard:  http://localhost:8000/admin"
-echo "Public site:      http://localhost:8005 (via Cloudflare Tunnel -> mc.w8.mom)"
-echo "PIDs stored in:   $LOG_DIR/dashboard.pid, $LOG_DIR/public_site.pid"
+echo "Dashboard started successfully"
+echo "Access at: http://localhost:8000"
+echo "PID stored in: $LOG_DIR/dashboard.pid"

@@ -230,7 +230,7 @@ class TestNeoForgeCrashDetection:
         loader.cwd = tmp_path
         monkeypatch.setattr(
             "neorunner_pkg.version.get_latest_for_loader",
-            lambda name: "21.1.140-foo",
+            lambda name, mc_version=None: "21.1.140-foo",
         )
         assert loader._get_neoforge_version() == "21.1.140"
 

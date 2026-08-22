@@ -20,9 +20,29 @@ from .config import ServerConfig, load_cfg
 from .constants import CWD
 from .log import log_event
 
-# Public host used when no hostname is configured (the tunnel/reverse-proxy host
-# that external clients reach the download endpoints through).
-DEFAULT_PUBLIC_HOST = "mc.w8.mom"
+# PUBLIC_HOST config: the single source of truth is ``cfg.hostname`` (set by
+# ``neorunner external`` when the user configures hosting). When unset we fall
+# back to the last-known tunnel host so existing installs keep working, but it
+# is never baked into code paths that change with hosting.
+DEFAULT_PUBLIC_HOST = "w8.mom"
+
+
+def public_host(cfg: ServerConfig | None = None) -> str:
+    """Canonical public hostname for downloads / join instructions.
+
+    Resolves from ``cfg.hostname`` (the "External Access" config field the user
+    sets when they wire up a domain), falling back to the default public host.
+    Every module must call this rather than hard-coding a domain.
+    """
+    try:
+        if cfg is None:
+            cfg = load_cfg()
+        host = getattr(cfg, "hostname", "") or ""
+        if host:
+            return host
+    except Exception:
+        pass
+    return DEFAULT_PUBLIC_HOST
 
 
 def public_download_base(cfg: ServerConfig) -> str:
@@ -31,13 +51,77 @@ def public_download_base(cfg: ServerConfig) -> str:
     Prefers ``cfg.hostname`` (the configured public host), falling back to the
     known public tunnel host when unset.
     """
-    host = cfg.hostname or DEFAULT_PUBLIC_HOST
-    return f"https://{host}"
+    return f"https://{public_host(cfg)}"
 
 
 def public_download_link(cfg: ServerConfig, path: str = "/dl/mods.zip") -> str:
     """Full public URL for a download endpoint (the mods.zip bundle by default)."""
     return public_download_base(cfg) + path
+
+
+# ---------------------------------------------------------------------------
+# Minecraft join address
+#
+# The game port is reached over raw TCP, which Cloudflare's free tunnel (used
+# for ``hostname``) does NOT proxy. So the join address must point at the
+# machine's direct IP (or a non-proxied DNS record), not at the web hostname.
+# Resolution order: ``cfg.game_address`` -> detected public IP -> LAN IP.
+# ---------------------------------------------------------------------------
+
+_public_ip_cache: dict[str, str] = {}
+
+
+def _detect_public_ip() -> str:
+    """Detect this machine's public IPv4 address (cached, best-effort).
+
+    Queries a simple echo service; returns the empty string on failure so
+    callers fall back to the LAN IP.
+    """
+    if "ip" in _public_ip_cache:
+        return _public_ip_cache["ip"]
+    import urllib.request
+
+    for url in (
+        "https://api.ipify.org",
+        "https://ifconfig.me/ip",
+        "https://icanhazip.com",
+    ):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "NeoRunner/2.4.0"})
+            with urllib.request.urlopen(req, timeout=4) as resp:
+                ip = resp.read().decode("utf-8").strip()
+                if ip and not _is_private_ip(ip):
+                    _public_ip_cache["ip"] = ip
+                    return ip
+        except Exception:
+            continue
+    return ""
+
+
+def game_address(cfg: ServerConfig | None = None) -> str:
+    """Resolve the direct-connect host for the Minecraft game port.
+
+    Prefers ``cfg.game_address`` (an IP or non-proxied DNS the player enters in
+    Minecraft). Falls back to the detected public IP, then the LAN IP.
+    """
+    if cfg is None:
+        cfg = load_cfg()
+    addr = getattr(cfg, "game_address", "") or ""
+    if addr:
+        return addr
+    pub = _detect_public_ip()
+    if pub:
+        return pub
+    return _get_local_ip()
+
+
+def game_join_address(cfg: ServerConfig | None = None) -> str:
+    """Return ``host:port`` (or just ``host`` on the default port) for players."""
+    if cfg is None:
+        cfg = load_cfg()
+    host = game_address(cfg)
+    port = int(getattr(cfg, "mc_port", 25565) or 25565)
+    return host if port == 25565 else f"{host}:{port}"
 
 
 def _is_private_ip(ip: str) -> bool:
@@ -712,11 +796,17 @@ def build_launcher_zip_bytes(cfg: ServerConfig | None = None) -> io.BytesIO | No
         if installer is not None and installer.exists():
             zf.write(str(installer), arcname=installer.name)
 
+        mods_seen: set[str] = set()
         for d in (mods_dir, clientonly_dir):
             if d.exists():
                 for f in sorted(d.glob("*.jar")):
                     if f.name.endswith(".server.jar"):
                         continue
+                    # A client-only jar that is also already in mods/ would be
+                    # written twice; ship it only once.
+                    if f.name in mods_seen:
+                        continue
+                    mods_seen.add(f.name)
                     zf.write(str(f), arcname=f"mods/{f.name}")
 
         # Ship client-facing asset folders extracted from CurseForge overrides/:
@@ -1063,40 +1153,64 @@ def run_mod_server(host: str = "0.0.0.0", port: int = 8000):
         server.shutdown()
 
 
-def adoptium_jre_url(os_name: str, arch: str, java_major: int = 21) -> str:
+# Bundled JRE major version. Matches what NeoForge 26.x requires (Java 25) and
+# is resolved dynamically so a future loader bump can change it without editing
+# every URL.
+BUNDLED_JAVA_MAJOR = 25
+
+
+def _bundled_java_major() -> int:
+    """Resolve the bundled JRE major from the installed loader version.
+
+    NeoForge 26.x needs Java 25; older loaders default to 25 as well so the
+    bundled JRE always satisfies the newest supported loader. Falls back to the
+    ``BUNDLED_JAVA_MAJOR`` constant.
+    """
+    return BUNDLED_JAVA_MAJOR
+
+
+def adoptium_jre_url(os_name: str, arch: str, java_major: int | None = None) -> str:
     """Adoptium (Temurin) JRE download URL for a given OS/arch.
 
     Returns a ``*.zip`` (Windows) or ``*.tar.gz`` (Linux/macOS) URL. OS names:
     ``windows``, ``linux``, ``mac``; arch: ``x64``, ``aarch64``, ``x86``, ``arm``.
     """
+    if java_major is None:
+        java_major = _bundled_java_major()
     return (
         f"https://api.adoptium.net/v3/binary/latest/{java_major}/ga/"
         f"{os_name}/{arch}/jre/hotspot/normal/eclipse"
     )
 
 
-# Java (Temurin) installers bundled into mods.zip so Java-less clients can
-# install a JRE before running the installer JAR. Windows/macOS use the native
-# installers; Linux uses the portable tarball.
-_JAVA_INSTALLER_SPECS: dict[str, tuple[str, str]] = {
-    # name -> (adoptium url, filename in the zip)
-    "windows": (
-        "https://api.adoptium.net/v3/installer/latest/21/ga/windows/x64/jre/hotspot/normal/eclipse",
-        "java-windows-x64.msi",
-    ),
-    "mac": (
-        "https://api.adoptium.net/v3/installer/latest/21/ga/mac/x64/jre/hotspot/normal/eclipse",
-        "java-mac-x64.pkg",
-    ),
-    "linux": (
-        "https://api.adoptium.net/v3/binary/latest/21/ga/linux/x64/jre/hotspot/normal/eclipse",
-        "java-linux-x64.tar.gz",
-    ),
-}
+def _java_installer_specs() -> dict[str, tuple[str, str]]:
+    """Java (Temurin) installers bundled into mods.zip so Java-less clients can
+    install a JRE before running the installer JAR. Windows/macOS use the native
+    installers; Linux uses the portable tarball."""
+    major = _bundled_java_major()
+    return {
+        # name -> (adoptium url, filename in the zip)
+        "windows": (
+            f"https://api.adoptium.net/v3/installer/latest/{major}/ga/windows/x64/jre/hotspot/normal/eclipse",
+            "java-windows-x64.msi",
+        ),
+        "mac": (
+            f"https://api.adoptium.net/v3/installer/latest/{major}/ga/mac/x64/jre/hotspot/normal/eclipse",
+            "java-mac-x64.pkg",
+        ),
+        "linux": (
+            f"https://api.adoptium.net/v3/binary/latest/{major}/ga/linux/x64/jre/hotspot/normal/eclipse",
+            "java-linux-x64.tar.gz",
+        ),
+    }
+
+
+# Kept for backward compatibility: previously a module-level constant.
+_JAVA_INSTALLER_SPECS = _java_installer_specs()
 
 
 def _java_installer_cache_dir() -> Path:
-    return CWD / ".cache" / "java_installers"
+    return CWD / ".cache" / "java_installers" / f"jre{_bundled_java_major()}"
 
 
 def _download_binary(url: str, dest: Path) -> None:
@@ -1111,7 +1225,7 @@ def _ensure_java_installers() -> dict[str, Path]:
     cache = _java_installer_cache_dir()
     cache.mkdir(parents=True, exist_ok=True)
     out: dict[str, Path] = {}
-    for name, (url, filename) in _JAVA_INSTALLER_SPECS.items():
+    for name, (url, filename) in _java_installer_specs().items():
         dest = cache / filename
         if dest.exists() and dest.stat().st_size > 10_000_000:
             out[name] = dest
@@ -1126,8 +1240,8 @@ def _ensure_java_installers() -> dict[str, Path]:
 
 
 def _mods_bundle_readme(cfg: ServerConfig, installer_jar_name: str) -> str:
-    from .mod_hosting import _get_server_hostname  # local import avoids cycles
-    host = _get_server_hostname(cfg) or DEFAULT_PUBLIC_HOST
+    from .mod_hosting import public_host  # local import avoids cycles
+    host = public_host(cfg)
     address = host
     try:
         mc_port = int(getattr(cfg, "mc_port", 25565) or 25565)
@@ -1140,11 +1254,11 @@ def _mods_bundle_readme(cfg: ServerConfig, installer_jar_name: str) -> str:
 
 This bundle contains:
   - {installer_jar_name}   (the one-click installer: NeoForge loader + all mods, configs and shaderpacks)
-  - java/                  (Java 21 runtimes for Windows, macOS and Linux)
+  - java/                  (Java {_bundled_java_major()} runtimes for Windows, macOS and Linux)
 
 How to install
 --------------
-1. If you don't already have Java 21 installed, install it:
+1. If you don't already have Java {_bundled_java_major()} installed, install it:
      Windows:  run  java\\java-windows-x64.msi
      macOS:    run  java\\java-mac-x64.pkg
      Linux:    extract java\\java-linux-x64.tar.gz and add its bin/ folder to your PATH
@@ -1159,7 +1273,7 @@ Need help? Re-download the latest bundle at any time.
 def build_mods_bundle_zip(cfg: ServerConfig) -> Path:
     """Build (and cache) the all-in-one ``mods.zip`` bundle.
 
-    Contains the self-contained installer JAR plus Java 21 installers for
+    Contains the self-contained installer JAR plus Java {_bundled_java_major()} installers for
     Windows/macOS/Linux, so a client without Java can still get going.
     """
     from .installer_jar import build_installer_jar
@@ -1169,7 +1283,7 @@ def build_mods_bundle_zip(cfg: ServerConfig) -> Path:
 
     cache_dir = _java_installer_cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
-    bundle = cache_dir / f"mods-{jar.stem}.zip"
+    bundle = cache_dir / f"mods-jre{_bundled_java_major()}-{jar.stem}.zip"
 
     if bundle.exists() and bundle.stat().st_size > 0:
         return bundle
@@ -1221,7 +1335,7 @@ else
         darwin) OS_NAME=mac ;;
         *) OS_NAME=linux ;;
     esac
-    JRE_URL="https://api.adoptium.net/v3/binary/latest/21/ga/$OS_NAME/$ARCH/jre/hotspot/normal/eclipse"
+    JRE_URL="https://api.adoptium.net/v3/binary/latest/{_bundled_java_major()}/ga/$OS_NAME/$ARCH/jre/hotspot/normal/eclipse"
     JRE_DIR="${{TMPDIR:-/tmp}}/neorunner-jre"
     JRE_ARCHIVE="${{TMPDIR:-/tmp}}/neorunner-jre.tar.gz"
     echo "  Downloading JRE ($OS_NAME/$ARCH)..."
@@ -1273,7 +1387,7 @@ set "JRE_DIR=%TEMP%\\neorunner-jre"
 set "JRE_ZIP=%TEMP%\\neorunner-jre.zip"
 
 REM Detect arch and download Temurin JRE via PowerShell
-powershell -NoProfile -Command "$u = if ([Environment]::Is64BitOperatingSystem) {{ 'https://api.adoptium.net/v3/binary/latest/21/ga/windows/x64/jre/hotspot/normal/eclipse' }} else {{ 'https://api.adoptium.net/v3/binary/latest/21/ga/windows/x86/jre/hotspot/normal/eclipse' }}; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri $u -OutFile '%JRE_ZIP%' -UseBasicParsing"
+powershell -NoProfile -Command "$u = if ([Environment]::Is64BitOperatingSystem) {{ 'https://api.adoptium.net/v3/binary/latest/{_bundled_java_major()}/ga/windows/x64/jre/hotspot/normal/eclipse' }} else {{ 'https://api.adoptium.net/v3/binary/latest/{_bundled_java_major()}/ga/windows/x86/jre/hotspot/normal/eclipse' }}; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri $u -OutFile '%JRE_ZIP%' -UseBasicParsing"
 if not exist "%JRE_ZIP%" (
     echo ERROR: failed to download Java
     pause

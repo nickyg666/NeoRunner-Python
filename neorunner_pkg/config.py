@@ -26,7 +26,7 @@ class ServerConfig:
     rcon_port: str = "25575"
     rcon_host: str = "localhost"
     http_port: int = 8000
-    mc_port: int = 1234
+    mc_port: int = 25565  # Modded server port (default MC port; the waiting room owns the forwarded port)
     mods_dir: str = "mods"
     clientonly_dir: str = "clientonly"
     quarantine_dir: str = "quarantine"
@@ -40,6 +40,13 @@ class ServerConfig:
     curator_max_depth: int = 3
     server_jar: str | None = None
     hostname: str = ""
+    game_address: str = ""  # Direct-connect address for the Minecraft port (IP or non-proxied DNS). Empty = auto-detect public IP.
+    server_description: str = ""  # MOTD for the main (modded) server; empty = loader default
+    holding_cell_description: str = ""  # MOTD for the vanilla waiting room; empty = default
+    holding_cell_enabled: bool = True  # Vanilla "download lobby" room that greets players with the clickable modpack link
+    holding_cell_port: int = 1234     # Waiting-room port = the externally-forwarded entrance players hit first
+    holding_cell_room_size: int = 20   # Room dimensions (N x N x N blocks), capped at 20
+    holding_cell_max_players: int = 10
     broadcast_enabled: bool = True
     broadcast_auto_on_install: bool = True
     nag_show_mod_list_on_join: bool = False
@@ -103,6 +110,13 @@ class ServerConfig:
             curator_max_depth=self.curator_max_depth,
             server_jar=self.server_jar,
             hostname=self.hostname,
+            game_address=self.game_address,
+            server_description=self.server_description,
+            holding_cell_description=self.holding_cell_description,
+            holding_cell_enabled=self.holding_cell_enabled,
+            holding_cell_port=self.holding_cell_port,
+            holding_cell_room_size=self.holding_cell_room_size,
+            holding_cell_max_players=self.holding_cell_max_players,
             broadcast_enabled=self.broadcast_enabled,
             broadcast_auto_on_install=self.broadcast_auto_on_install,
             nag_show_mod_list_on_join=self.nag_show_mod_list_on_join,
@@ -254,6 +268,13 @@ def ensure_config(cfg: ServerConfig) -> ServerConfig:
         curator_max_depth=cfg.curator_max_depth or 3,
         server_jar=cfg.server_jar,
         hostname=cfg.hostname or "",
+        game_address=cfg.game_address or "",
+        server_description=cfg.server_description or "",
+        holding_cell_description=cfg.holding_cell_description or "",
+        holding_cell_enabled=cfg.holding_cell_enabled,
+        holding_cell_port=cfg.holding_cell_port or 25565,
+        holding_cell_room_size=min(cfg.holding_cell_room_size or 20, 20),
+        holding_cell_max_players=cfg.holding_cell_max_players or 10,
         broadcast_enabled=cfg.broadcast_enabled,
         broadcast_auto_on_install=cfg.broadcast_auto_on_install,
         nag_show_mod_list_on_join=cfg.nag_show_mod_list_on_join,

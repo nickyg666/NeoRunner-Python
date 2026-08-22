@@ -81,9 +81,9 @@ class ForgeLoader(LoaderBase):
             "enable-rcon": "true",
             "rcon.password": _get_cfg_value(self.cfg, "rcon_pass", "changeme"),
             "rcon.port": str(_get_cfg_value(self.cfg, "rcon_port", 25575)),
-            "server-port": str(_get_cfg_value(self.cfg, "server_port", 1234)),
-            "motd": "NeoRunner - Forge Server",
-            "online-mode": "false"
+            "server-port": str(_get_cfg_value(self.cfg, "mc_port", _get_cfg_value(self.cfg, "server_port", 1234))),
+            "motd": _get_cfg_value(self.cfg, "server_description", "") or "NeoRunner - Forge Server",
+            "online-mode": "true"
         }
         
         if os.path.exists(props_file):

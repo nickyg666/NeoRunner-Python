@@ -38,8 +38,8 @@ class TestCloudflaredConfig:
         assert "tunnel: play.example.com" in text
         assert "hostname: play.example.com" in text
         assert "service: http://0.0.0.0:8000" in text
-        assert "hostname: mc.play.example.com" in text
-        assert "service: tcp://0.0.0.0:1234" in text
+        assert "tcp://" not in text
+        assert "http_status:404" in text
 
 
 class TestSetupCaddy:

@@ -1,12 +1,13 @@
 """Tests for dashboard API endpoints."""
 
-import os
+import pytest
 import sys
-from unittest.mock import MagicMock, patch
+import os
+from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from neorunner_pkg.server import is_server_running, restart_server, stop_server
+from neorunner.server import stop_server, restart_server, is_server_running
 
 
 class TestServerAPI:
@@ -14,21 +15,22 @@ class TestServerAPI:
     
     def test_stop_server_without_instance(self):
         """stop_server works without _server_instance (dashboard process)."""
-        with patch('neorunner_pkg.server.subprocess.run') as mock_run, patch('neorunner_pkg.server.load_cfg') as mock_cfg:
-            mock_cfg.return_value.mc_version = "1.21.11"
-            mock_cfg.return_value.loader = "neoforge"
-            mock_cfg.return_value.tmux_socket = "/tmp/test"
-            
-            mock_run.return_value = MagicMock()
-            
-            result = stop_server()
-            
-            assert result is True
-            assert mock_run.called
+        with patch('neorunner.server.subprocess.run') as mock_run:
+            with patch('neorunner.server.load_cfg') as mock_cfg:
+                mock_cfg.return_value.mc_version = "1.21.11"
+                mock_cfg.return_value.loader = "neoforge"
+                mock_cfg.return_value.tmux_socket = "/tmp/test"
+                
+                mock_run.return_value = MagicMock()
+                
+                result = stop_server()
+                
+                assert result is True
+                assert mock_run.called
     
     def test_is_server_running_check(self):
         """is_server_running returns bool."""
-        with patch('neorunner_pkg.server.subprocess.run') as mock_run:
+        with patch('neorunner.server.subprocess.run') as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stdout="")
             
             result = is_server_running()
@@ -37,10 +39,10 @@ class TestServerAPI:
     
     def test_stop_server_with_instance(self):
         """stop_server uses instance when available."""
-        with patch('neorunner_pkg.server._server_instance') as mock_instance:
+        with patch('neorunner.server._server_instance') as mock_instance:
             mock_instance.stop.return_value = True
             
-            stop_server()
+            result = stop_server()
             
             assert mock_instance.stop.called
 
@@ -50,26 +52,22 @@ class TestDashboardImports:
     
     def test_dashboard_imports(self):
         """Dashboard can be imported."""
-        from neorunner_pkg.dashboard import app
+        from neorunner.dashboard import app
         assert app is not None
     
     def test_config_imports(self):
         """Config functions work."""
-        from neorunner_pkg.config import (
-            ServerConfig,
-            ensure_config,
-            validate_config,
-        )
+        from neorunner.config import load_cfg, save_cfg, ensure_config, validate_config, ServerConfig
         cfg = ServerConfig()
         cfg = ensure_config(cfg)  # Fill defaults
-        valid, _errors = validate_config(cfg, fail_on_error=False)
+        valid, errors = validate_config(cfg, fail_on_error=False)
         assert valid is True  # With defaults, should be valid
     
     def test_server_imports(self):
         """Server functions can be imported."""
-        from neorunner_pkg.server import (
-            run_server,
-            stop_server,
+        from neorunner.server import (
+            run_server, stop_server, restart_server,
+            send_command, is_server_running, get_server, get_events
         )
         assert callable(run_server)
         assert callable(stop_server)
@@ -81,8 +79,8 @@ class TestModHosting:
     
     def test_generate_bat_script(self):
         """Batch script generation works."""
-        from neorunner_pkg.config import ServerConfig
         from neorunner_pkg.mod_hosting import generate_bat_script
+        from neorunner_pkg.config import ServerConfig
         
         cfg = ServerConfig(mc_version="1.21.11", loader="neoforge", http_port=8000)
         script = generate_bat_script(cfg)
@@ -104,10 +102,10 @@ class TestManifest:
     
     def test_create_mod_zip_function_exists(self):
         """create_mod_zip function exists."""
-        from neorunner_pkg.mod_hosting import create_mod_zip
+        from neorunner.mod_hosting import create_mod_zip
         assert callable(create_mod_zip)
     
     def test_conditional_create_mod_zip_exists(self):
         """conditional_create_mod_zip function exists."""
-        from neorunner_pkg.mod_hosting import conditional_create_mod_zip
+        from neorunner.mod_hosting import conditional_create_mod_zip
         assert callable(conditional_create_mod_zip)

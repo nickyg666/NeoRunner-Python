@@ -193,6 +193,34 @@
         .alert-info { border-color: rgba(79,156,249,0.5); background: rgba(79,156,249,0.1); }
         .alert-warning { border-color: rgba(210,153,34,0.5); background: rgba(210,153,34,0.1); }
 
+        /* ── Live banner (progress + notifications) ─────────────── */
+        /* Frozen 75px from the top of the *visible* area (viewport), far
+           right, with a 10px border. position:fixed keeps it at the top of the
+           user's active viewing region so scrolling the page neither dismisses
+           nor scrolls it away. */
+        #notify-banner {
+            position: fixed;
+            top: 75px;
+            right: 10px;
+            width: min(400px, calc(100vw - 40px));
+            z-index: 10000;
+            border: 10px solid var(--border);
+            border-radius: 8px;
+            background: var(--panel);
+            color: var(--text);
+            box-shadow: 0 8px 28px rgba(0,0,0,0.5);
+            padding: 12px 14px;
+            font-size: 13px;
+            line-height: 1.45;
+            display: none;
+        }
+        #notify-banner .banner-title { font-weight: 650; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        #notify-banner .banner-close { cursor: pointer; color: var(--text-faint); font-size: 14px; }
+        #notify-banner .banner-msg { color: var(--text-dim); word-break: break-word; }
+        #notify-banner .banner-bar { height: 8px; border-radius: 4px; background: var(--border-soft); margin-top: 10px; overflow: hidden; }
+        #notify-banner .banner-bar > span { display: block; height: 100%; width: 0%; background: var(--accent); transition: width 0.25s ease; }
+        #notify-banner .banner-item { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-soft); }
+
         .installer-btn {
             display: inline-flex;
             flex-direction: column;
@@ -378,6 +406,15 @@
         
         <div id="alerts"></div>
         
+        <!-- Live banner: frozen at the top of the visible viewing area, 75px
+             down from the top of the window and far right, with a 10px border.
+             Used for install progress and transient notifications. -->
+        <div id="notify-banner">
+            <div class="banner-title"><span id="banner-title">…</span><span class="banner-close" onclick="hideNotifyBanner()">✕</span></div>
+            <div class="banner-msg" id="banner-msg"></div>
+            <div class="banner-bar" id="banner-bar" style="display:none;"><span id="banner-bar-fill"></span></div>
+        </div>
+        
         <!-- Row 1: Status + Quick Actions + World Management -->
         <div class="grid-3col">
             <!-- Server Status Card -->
@@ -462,6 +499,21 @@
                     <h3>Archived Worlds</h3>
                     <button onclick="loadArchivedWorlds()">Refresh Archives</button>
                     <div id="archived-worlds-list" style="margin-top:10px;font-size:12.5px;color:var(--text-dim);">Loading...</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Holding Cell (vanilla download lobby) -->
+        <div class="card compact" style="margin-top:12px;">
+            <h2>🛰️ Holding Cell (Download Lobby)</h2>
+            <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;">
+                <div id="holding-cell-status" style="font-size:13px;color:var(--text-dim);flex:1;min-width:220px;">
+                    <span class="loading"></span> Checking holding cell...
+                </div>
+                <div style="display:flex;gap:8px;">
+                    <button onclick="roomAction('start')" id="room-start-btn">Start</button>
+                    <button onclick="roomAction('stop')" id="room-stop-btn">Stop</button>
+                    <button onclick="loadRoomStatus()">Refresh</button>
                 </div>
             </div>
         </div>
@@ -630,6 +682,19 @@
                     <input type="text" id="mc-version" value="1.21.11">
                 </div>
                 
+                <h3 style="color:#4CAF50;border-bottom:1px solid #333;padding-bottom:8px;">Server Descriptions</h3>
+                <div class="form-group">
+                    <label>Main Server Description (MOTD)</label>
+                    <input type="text" id="cfg-server-desc" placeholder="e.g. NeoRunner - NeoForge Server" maxlength="64">
+                    <small>Shown in the server-list when players hover/join the modded server. Leave blank for the default.</small>
+                </div>
+                <div class="form-group">
+                    <label>Waiting Room Description (MOTD)</label>
+                    <input type="text" id="cfg-room-desc" placeholder="e.g. NeoRunner Download Lobby" maxlength="64">
+                    <small>Shown in the vanilla waiting room players land in before they install the modpack. Leave blank for the default.</small>
+                </div>
+                <button class="success" onclick="saveDescriptions()" style="margin-bottom:16px;">Save Descriptions</button>
+
                 <h3 style="color:#2196F3;border-bottom:1px solid #333;padding-bottom:8px;">Mod Curator</h3>
                 <div class="form-group">
                     <label>Curator Sort Order</label>
@@ -1040,10 +1105,68 @@
 
 
             function showAlert(msg, type) {
-                const alertsDiv = document.getElementById('alerts');
-                const className = type === 'success' ? 'alert-success' : type === 'error' ? 'alert-error' : type === 'warning' ? 'alert-warning' : 'alert-info';
-                alertsDiv.innerHTML = `<div class="alert ${className}">${msg}</div>`;
-                setTimeout(() => alertsDiv.innerHTML = '', 3000);
+                // Notifications pop in the frozen banner at the top of the
+                // user's active viewing area (position:fixed, 75px down, far
+                // right, 10px border). Scrolling to the top of the page never
+                // dismisses or repositions it.
+                const border = type === 'success' ? 'rgba(46,160,67,0.7)' : type === 'error' ? 'rgba(229,72,77,0.7)' : type === 'warning' ? 'rgba(210,153,34,0.7)' : 'var(--accent)';
+                showNotifyBanner(type === 'success' ? 'Success' : type === 'error' ? 'Error' : type === 'warning' ? 'Warning' : 'Info', msg, {border: border, autoHide: 4000});
+            }
+
+            // ── Live banner: frozen at top of the visible viewing area ──
+            // Shown 75px from the top of the window, far right, 10px border.
+            // position:fixed means scrolling to the top of the page neither
+            // dismisses it nor makes it pop back — it stays at the top of the
+            // user's active viewing region.
+            function showNotifyBanner(title, msg, opts) {
+                opts = opts || {};
+                const banner = document.getElementById('notify-banner');
+                document.getElementById('banner-title').textContent = title;
+                document.getElementById('banner-msg').textContent = msg || '';
+                const bar = document.getElementById('banner-bar');
+                const fill = document.getElementById('banner-bar-fill');
+                if (opts.pct !== undefined && opts.pct !== null) {
+                    bar.style.display = 'block';
+                    fill.style.width = Math.max(0, Math.min(100, opts.pct)) + '%';
+                } else {
+                    bar.style.display = 'none';
+                }
+                banner.style.border = '10px solid ' + (opts.border || 'var(--border)');
+                banner.style.display = 'block';
+                if (opts.autoHide) {
+                    clearTimeout(showNotifyBanner._t);
+                    showNotifyBanner._t = setTimeout(hideNotifyBanner, opts.autoHide);
+                }
+            }
+
+            function hideNotifyBanner() {
+                clearTimeout(showNotifyBanner._t);
+                document.getElementById('notify-banner').style.display = 'none';
+            }
+
+            var _installPollTimer = null;
+            function pollInstallProgress() {
+                if (_installPollTimer) return;
+                showNotifyBanner('Installing modpack…', 'Starting…', {pct: 0});
+                _installPollTimer = setInterval(() => {
+                    fetch('/api/modpack/install-progress')
+                        .then(r => r.json())
+                        .then(p => {
+                            if (_installPollTimer && !p.active) {
+                                clearInterval(_installPollTimer);
+                                _installPollTimer = null;
+                                hideNotifyBanner();
+                                return;
+                            }
+                            const pct = p.total ? Math.round(p.done / p.total * 100) : 0;
+                            showNotifyBanner(
+                                p.stage === 'installing' ? 'Installing modpack…' : 'Modpack install',
+                                `${p.message || 'Working…'}${p.total ? ` — ${p.done}/${p.total} (${pct}%)` : ''}`,
+                                {pct: pct}
+                            );
+                        })
+                        .catch(() => {});
+                }, 600);
             }
             
             function copyToClipboard(element) {
@@ -1097,6 +1220,48 @@
                     }).catch(() => {});
             }
             
+            function loadRoomStatus() {
+                fetch('/api/room/status')
+                    .then(r => r.json())
+                    .then(data => {
+                        const el = document.getElementById('holding-cell-status');
+                        if (!el) return;
+                        if (data.error) {
+                            el.innerHTML = '<span style="color:#f44336;">Error: ' + data.error + '</span>';
+                            return;
+                        }
+                        const badge = data.running
+                            ? '<span class="status-badge status-running">Running</span>'
+                            : '<span class="status-badge status-stopped">Stopped</span>';
+                        el.innerHTML =
+                            '<div style="margin-bottom:4px;">Status: ' + badge + '</div>' +
+                            '<div>Room: <code>' + (data.address || '?') + '</code> &nbsp;•&nbsp; ' +
+                            'Modpack: <a href="' + (data.modpack_link || '#') + '" target="_blank">' + (data.modpack_link || '?') + '</a></div>' +
+                            '<div style="margin-top:2px;">Modded server: <code>' + (data.modded_server || '?') + '</code> &nbsp;•&nbsp; Room: ' +
+                            (data.room_size || 20) + '×' + (data.room_size || 20) + '×' + (data.room_size || 20) + '</div>';
+                        const btnStart = document.getElementById('room-start-btn');
+                        const btnStop = document.getElementById('room-stop-btn');
+                        if (btnStart) btnStart.disabled = !!data.running;
+                        if (btnStop) btnStop.disabled = !data.running;
+                    }).catch(() => {
+                        const el = document.getElementById('holding-cell-status');
+                        if (el) el.innerHTML = '<span style="color:#f44336;">Could not reach holding cell API</span>';
+                    });
+            }
+
+            function roomAction(action) {
+                fetch('/api/room/' + action, {method: 'POST'})
+                    .then(r => r.json())
+                    .then(data => {
+                        if (!data.ok && !data.already_running) {
+                            alert('Holding cell ' + action + ' failed: ' + (data.error || 'unknown error'));
+                        }
+                        loadRoomStatus();
+                    }).catch(() => {
+                        alert('Holding cell ' + action + ' failed (network error)');
+                    });
+            }
+
             function refreshMods() {
                 loadServerMods();
                 loadClientMods();
@@ -1142,6 +1307,9 @@
                     setCheck('cfg-broadcast-auto', cfg.broadcast_auto_on_install);
                     setCheck('cfg-nag-modlist', cfg.nag_show_mod_list_on_join);
                     setCheck('cfg-nag-firstvisit', cfg.nag_first_visit_modal);
+                    // Descriptions (MOTD) for the main + waiting-room servers
+                    setVal('cfg-server-desc', cfg.server_description || '');
+                    setVal('cfg-room-desc', cfg.holding_cell_description || '');
                 }).catch(() => {});
             }
             
@@ -1276,11 +1444,13 @@
                     return;
                 }
                 document.getElementById('convert-install-btn').disabled = true;
+                showNotifyBanner('Installing mods…', 'Resolving and downloading dependencies…');
                 fetch('/api/modpack/install-converted', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({mod_ids: modIds})
                 }).then(r => r.json()).then(data => {
+                    hideNotifyBanner();
                     if (data.success) {
                         showAlert('Installed ' + modIds.length + ' mods', 'success');
                         closeConvertModal();
@@ -2183,6 +2353,20 @@
                 }).catch(err => showAlert('Error: ' + err, 'error'));
             }
             
+            function saveDescriptions() {
+                const server = (document.getElementById('cfg-server-desc') || {}).value || '';
+                const room = (document.getElementById('cfg-room-desc') || {}).value || '';
+                showAlert('Saving descriptions…', 'info');
+                fetch('/api/descriptions', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({server_description: server, holding_cell_description: room})
+                }).then(r => r.json()).then(data => {
+                    if (data.success) showAlert('Descriptions saved', 'success');
+                    else showAlert('Failed to save descriptions: ' + (data.error || 'unknown error'), 'error');
+                }).catch(err => showAlert('Failed to save descriptions', 'error'));
+            }
+
             function saveConfig() {
                 const cfg = {};
                 const set = (id, field, conv = v => v, boolmode = false) => {
@@ -2213,6 +2397,7 @@
             
             // Auto-refresh status every 5 seconds
             setInterval(refreshStatus, 5000);
+            setInterval(loadRoomStatus, 15000);
             setInterval(refreshMods, 30000);
             setInterval(loadQuarantine, 15000);
             setInterval(loadEvents, 10000);
@@ -2543,6 +2728,7 @@
             // Initial load
             document.addEventListener('DOMContentLoaded', function() {
                 refreshStatus();
+                loadRoomStatus();
                 loadServerMods();
                 loadClientMods();
                 loadConfig();
@@ -2932,10 +3118,12 @@
                     .then(r => r.json()).then(data => {
                         if (data.success) {
                             showAlert('Uploaded ' + data.filename + ' — installing...', 'success');
+                            pollInstallProgress();
                             return installModpack(data.filename);
                         }
                         showAlert(data.error || 'Upload failed', 'error');
-                    }).catch(err => showAlert('Error: ' + err, 'error'));
+                        hideNotifyBanner();
+                    }).catch(err => { showAlert('Error: ' + err, 'error'); hideNotifyBanner(); });
             }
 
             function installModpack(filename) {
@@ -2949,6 +3137,7 @@
                     } else {
                         showAlert((data.error || data.message || 'Install failed') + ' — see result log for details.', 'error');
                     }
+                    hideNotifyBanner();
                     const el = document.getElementById('modpack-list');
                     if (data.result) {
                         const r = data.result;

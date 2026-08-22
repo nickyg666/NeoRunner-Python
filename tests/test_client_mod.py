@@ -27,6 +27,17 @@ class TestClientLinkMod:
         assert "ClickEvent.OpenUrl" in src
         assert "mouseClicked" in src
 
+    def test_mixin_targets_mod_mismatch_screen(self):
+        """NeoForge's mod-mismatch screen must also be covered, not just the
+        vanilla DisconnectedScreen."""
+        from neorunner_pkg.client_mod import MOD_DIR
+        src = (MOD_DIR / "src" / "neorunner" / "client" / "link" / "mixin" / "ModMismatchDisconnectedScreenMixin.java").read_text()
+        assert "ModMismatchDisconnectedScreen" in src
+        assert "ClickEvent.OpenUrl" in src
+        mixins = (MOD_DIR / "resources" / "neorunner-client-link.mixins.json").read_text()
+        assert "ModMismatchDisconnectedScreenMixin" in mixins
+        assert "DisconnectedScreenMixin" in mixins
+
     def test_build_skips_without_javac(self, tmp_path, monkeypatch):
         import shutil
 

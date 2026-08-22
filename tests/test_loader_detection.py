@@ -1,10 +1,9 @@
 """Tests for loader detection and factory functions."""
 
-import os
-import sys
-from unittest.mock import patch
-
 import pytest
+import sys
+import os
+from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -14,8 +13,8 @@ class TestLoaderFactory:
     
     def test_get_neoforge_loader(self):
         """NeoForge loader is detected."""
-        from neorunner_pkg.config import ServerConfig
         from neorunner_pkg.loaders import get_loader
+        from neorunner_pkg.config import ServerConfig
         
         cfg = ServerConfig(loader="neoforge", mc_version="1.21.11")
         loader = get_loader(cfg)
@@ -24,8 +23,8 @@ class TestLoaderFactory:
     
     def test_get_forge_loader(self):
         """Forge loader is detected."""
-        from neorunner_pkg.config import ServerConfig
         from neorunner_pkg.loaders import get_loader
+        from neorunner_pkg.config import ServerConfig
         
         cfg = ServerConfig(loader="forge", mc_version="1.20.4")
         loader = get_loader(cfg)
@@ -34,8 +33,8 @@ class TestLoaderFactory:
     
     def test_get_fabric_loader(self):
         """Fabric loader is detected."""
-        from neorunner_pkg.config import ServerConfig
         from neorunner_pkg.loaders import get_loader
+        from neorunner_pkg.config import ServerConfig
         
         cfg = ServerConfig(loader="fabric", mc_version="1.20.4")
         loader = get_loader(cfg)
@@ -44,8 +43,8 @@ class TestLoaderFactory:
     
     def test_unknown_loader_raises(self):
         """Unknown loader raises ValueError."""
-        from neorunner_pkg.config import ServerConfig
         from neorunner_pkg.loaders import get_loader
+        from neorunner_pkg.config import ServerConfig
         
         cfg = ServerConfig(loader="unknown")
         
@@ -58,8 +57,8 @@ class TestLoaderDisplayNames:
     
     def test_neoforge_display_name(self):
         """NeoForge display name is correct."""
-        from neorunner_pkg.config import ServerConfig
         from neorunner_pkg.loaders import get_loader
+        from neorunner_pkg.config import ServerConfig
         
         cfg = ServerConfig(loader="neoforge")
         loader = get_loader(cfg)
@@ -68,8 +67,8 @@ class TestLoaderDisplayNames:
     
     def test_forge_display_name(self):
         """Forge display name is correct."""
-        from neorunner_pkg.config import ServerConfig
         from neorunner_pkg.loaders import get_loader
+        from neorunner_pkg.config import ServerConfig
         
         cfg = ServerConfig(loader="forge")
         loader = get_loader(cfg)
@@ -78,8 +77,8 @@ class TestLoaderDisplayNames:
     
     def test_fabric_display_name(self):
         """Fabric display name is correct."""
-        from neorunner_pkg.config import ServerConfig
         from neorunner_pkg.loaders import get_loader
+        from neorunner_pkg.config import ServerConfig
         
         cfg = ServerConfig(loader="fabric")
         loader = get_loader(cfg)
@@ -115,8 +114,8 @@ class TestLoaderEnvironment:
     
     def test_neoforge_prepare_environment(self):
         """NeoForge prepares environment."""
-        from neorunner_pkg.config import ServerConfig
         from neorunner_pkg.loaders import get_loader
+        from neorunner_pkg.config import ServerConfig
         
         cfg = ServerConfig(loader="neoforge", mc_version="1.21.11")
         loader = get_loader(cfg)
@@ -132,8 +131,8 @@ class TestLoaderJavaCommand:
     
     def test_build_java_command_returns_list(self):
         """build_java_command returns list."""
-        from neorunner_pkg.config import ServerConfig
         from neorunner_pkg.loaders import get_loader
+        from neorunner_pkg.config import ServerConfig
         
         cfg = ServerConfig(loader="neoforge", mc_version="1.21.11")
         loader = get_loader(cfg)
@@ -145,8 +144,8 @@ class TestLoaderJavaCommand:
     
     def test_build_java_command_has_nogui(self):
         """Java command includes nogui."""
-        from neorunner_pkg.config import ServerConfig
         from neorunner_pkg.loaders import get_loader
+        from neorunner_pkg.config import ServerConfig
         
         cfg = ServerConfig(loader="neoforge", mc_version="1.21.11")
         loader = get_loader(cfg)
@@ -161,8 +160,8 @@ class TestLoaderCrashDetection:
     
     def test_detect_crash_returns_dict(self):
         """detect_crash_reason returns dict."""
-        from neorunner_pkg.config import ServerConfig
         from neorunner_pkg.loaders import get_loader
+        from neorunner_pkg.config import ServerConfig
         
         cfg = ServerConfig(loader="neoforge")
         loader = get_loader(cfg)
@@ -187,8 +186,8 @@ class TestLoaderConfigs:
     
     def test_loader_preserves_mc_version(self):
         """Loader preserves minecraft version."""
-        from neorunner_pkg.config import ServerConfig
         from neorunner_pkg.loaders import get_loader
+        from neorunner_pkg.config import ServerConfig
         
         cfg = ServerConfig(loader="fabric", mc_version="1.19.2")
         loader = get_loader(cfg)

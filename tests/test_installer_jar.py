@@ -1,5 +1,6 @@
 """Tests for installer_jar module (client installer JAR builder)."""
 
+import hashlib
 import os
 import sys
 import zipfile
@@ -61,14 +62,23 @@ class TestInstallerProperties:
 
     def test_hostname_uses_https_base_url(self, monkeypatch, tmp_path):
         monkeypatch.setattr("neorunner_pkg.installer_jar.CWD", tmp_path)
+        monkeypatch.setattr(
+            "neorunner_pkg.mod_hosting.game_join_address",
+            lambda cfg: "1.2.3.4:1234",
+        )
         props = build_installer_properties(_cfg(hostname="mc.w8.mom"))
         assert "baseUrl=https://mc.w8.mom" in props
-        assert "serverAddress=mc.w8.mom:1234" in props
+        # serverAddress is the direct game address, not the web hostname.
+        assert "serverAddress=1.2.3.4:1234" in props
 
     def test_no_hostname_falls_back_to_lan_http(self, monkeypatch, tmp_path):
         monkeypatch.setattr("neorunner_pkg.installer_jar.CWD", tmp_path)
         monkeypatch.setattr(
             "neorunner_pkg.installer_jar._get_local_ip", lambda: "192.168.0.50"
+        )
+        monkeypatch.setattr(
+            "neorunner_pkg.mod_hosting.game_join_address",
+            lambda cfg: "192.168.0.50:1234",
         )
         props = build_installer_properties(_cfg(hostname=""))
         assert "baseUrl=http://192.168.0.50:8000" in props
@@ -192,6 +202,13 @@ class TestBuildJarEmbedding:
             return buf
 
         monkeypatch.setattr("neorunner_pkg.mod_hosting.build_launcher_zip_bytes", fake_builder)
+        # The pack cache is keyed on an input fingerprint; mirror the real
+        # behavior by deriving that fingerprint from the pack contents so a
+        # changed pack yields a changed installer cache key.
+        monkeypatch.setattr(
+            "neorunner_pkg.installer_jar._pack_fingerprint",
+            lambda cfg: hashlib.sha256(packs["current"].encode()).hexdigest()[:16],
+        )
 
         cfg = _cfg(hostname="mc.w8.mom")
         packs["current"] = "a"

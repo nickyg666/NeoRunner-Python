@@ -1,17 +1,18 @@
 """Tests for server management."""
 
-import os
+import pytest
 import sys
-from unittest.mock import MagicMock, patch
+import os
+from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from neorunner_pkg.server import (
-    _add_event,
-    get_events,
+from neorunner.server import (
     get_server,
     is_server_running,
     send_command,
+    get_events,
+    _add_event,
 )
 
 
@@ -20,18 +21,17 @@ class TestServer:
     
     def test_get_server_returns_tmuxserver(self):
         """get_server returns a TmuxServer instance."""
-        with patch('neorunner_pkg.server._server_instance', None), \
-             patch('neorunner_pkg.server.TmuxServer') as mock:
+        with patch('neorunner.server.TmuxServer') as mock:
             mock_instance = MagicMock()
             mock.return_value = mock_instance
             
-            get_server()
+            server = get_server()
             
             assert mock.called
     
     def test_is_server_running(self):
         """is_server_running returns bool."""
-        with patch('neorunner_pkg.server.subprocess.run') as mock_run:
+        with patch('neorunner.server.subprocess.run') as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
             
             result = is_server_running()
@@ -40,7 +40,7 @@ class TestServer:
     
     def test_send_command_returns_bool(self):
         """send_command returns bool."""
-        with patch('neorunner_pkg.server._server_instance') as mock_instance:
+        with patch('neorunner.server._server_instance') as mock_instance:
             mock_instance.send_command.return_value = True
             
             result = send_command("test")
@@ -49,7 +49,7 @@ class TestServer:
     
     def test_send_command_returns_false_when_not_running(self):
         """send_command returns False when server not running."""
-        with patch('neorunner_pkg.server._server_instance', None):
+        with patch('neorunner.server._server_instance', None):
             result = send_command("test")
             
             assert result is False

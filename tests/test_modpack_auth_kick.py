@@ -126,7 +126,9 @@ class TestModpackEndpoints:
 
         from neorunner_pkg.modpack_installer import InstallResult
 
-        def fake_install(zip_path, mods_dir, overrides_dir=None):
+        def fake_install(zip_path, mods_dir, overrides_dir=None, on_progress=None):
+            if on_progress:
+                on_progress("installing mod.jar...", 1, 1)
             result = InstallResult(
                 pack_name="default", pack_version="0.1.0",
                 mc_version="26.1.2", loader="neoforge-26.1.2.87",

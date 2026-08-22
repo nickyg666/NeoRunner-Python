@@ -1,6 +1,8 @@
-"""Public download site for mc.w8.mom.
+"""Public download site served from the configured public hostname.
 
-Served by gunicorn on 127.0.0.1:8005, reverse-proxied by Caddy at mc.w8.mom.
+Hostname comes from the External Access config (``cfg.hostname``); see
+``mod_hosting.public_host``. Rendered by the dashboard app (not a separate
+gunicorn/Caddy process).
 Gives unmodded players a painless path onto the modded server:
   1. Launcher zip  - drop into .minecraft/mods (official launcher / any launcher)
   2. CurseForge/Overwolf zip - import directly into the CF app
@@ -25,19 +27,40 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-SERVER_HOST = "w8.mom"
-
 
 def _public_host() -> str:
-    """Public download hostname: prefer config hostname, fall back to SERVER_HOST."""
+    """Canonical public download hostname (favour config, e.g. via the
+    External Access setup). Delegates to mod_hosting so the domain is only ever
+    configured in one place."""
     try:
-        cfg = load_cfg()
-        host = getattr(cfg, "hostname", None)
-        if host:
-            return host
+        from .mod_hosting import public_host
+        return public_host()
     except Exception:
-        pass
-    return SERVER_HOST
+        return ""
+
+
+def _game_address() -> str:
+    """Direct-connect address for the Minecraft port (host:port).
+
+    Distinct from ``_public_host``: the game port is raw TCP, which the
+    Cloudflare tunnel does not proxy, so it resolves to the direct IP (or the
+    configured ``game_address``) rather than the web hostname.
+    """
+    try:
+        from .mod_hosting import game_join_address
+        return game_join_address()
+    except Exception:
+        return ""
+
+
+def _room_address() -> str:
+    """Direct-connect address of the vanilla waiting room (download lobby)."""
+    try:
+        from .holding_cell import room_join_address
+        return room_join_address(load_cfg())
+    except Exception:
+        return ""
+
 
 """Default MC port for join instructions (server.properties server-port)."""
 DEFAULT_SERVER_PORT = 25565
@@ -88,7 +111,8 @@ def _server_info() -> dict:
         "loader_label": _loader_display(loader, loader_version),
         "loader_version": loader_version,
         "mod_count": mod_count,
-        "server_address": SERVER_HOST if int(port) == DEFAULT_SERVER_PORT else f"{SERVER_HOST}:{port}",
+        "server_address": _game_address(),
+        "room_address": _room_address(),
         "port": int(port),
         "generated": datetime.now(UTC).isoformat(timespec="seconds"),
     }
@@ -474,6 +498,7 @@ def index():
     <div><span class="badge">Minecraft {info['mc_version']}</span><span class="badge amber">{info['loader_label']}</span><span class="badge">{info['mod_count']} mods</span></div>
     <p style="color:#8b949e;font-size:13px;margin-top:14px;">Server address:</p>
     <p class="addr">{info['server_address']}</p>
+    <p style="color:#8b949e;font-size:12px;margin-top:6px;"><b>First time?</b> Jump into the waiting room at <code>{info['room_address']}</code> and we'll hand you the download link right in chat.</p>
   </div>
 
   <div class="card">

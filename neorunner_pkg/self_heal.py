@@ -161,8 +161,58 @@ def _cf_rate_limit() -> None:
     time.sleep(random.uniform(1.0, 2.5))
 
 
+def _jij_provided_mod_ids(fn: Path) -> set[str]:
+    """Return mod IDs bundled via JarJar inside a jar (``META-INF/jarjar/*.jar``).
+
+    Jar-in-jar dependencies (e.g. Chisels & Bits bundling ``scena``) are loaded
+    by the loader from within the parent jar, so they must be treated as
+    *present* for the parent's dependency graph even though no standalone jar
+    exists in mods/.
+    """
+    provided: set[str] = set()
+    try:
+        with zipfile.ZipFile(fn, "r") as zf:
+            for name in zf.namelist():
+                if not name.startswith("META-INF/jarjar/") or not name.endswith(".jar"):
+                    continue
+                try:
+                    inner = zf.read(name)
+                    import io as _io
+                    with zipfile.ZipFile(_io.BytesIO(inner), "r") as izf:
+                        inames = izf.namelist()
+                        toml_file = None
+                        if "META-INF/neoforge.mods.toml" in inames:
+                            toml_file = "META-INF/neoforge.mods.toml"
+                        elif "META-INF/mods.toml" in inames:
+                            toml_file = "META-INF/mods.toml"
+                        if toml_file:
+                            try:
+                                import tomllib
+                            except ImportError:
+                                import tomli as tomllib
+                            data = tomllib.loads(izf.read(toml_file).decode("utf-8", "replace"))
+                            for e in data.get("mods", []):
+                                mid = e.get("modId", "").lower()
+                                if mid:
+                                    provided.add(mid)
+                        elif "fabric.mod.json" in inames:
+                            data = json.loads(izf.read("fabric.mod.json").decode("utf-8", "replace"))
+                            mid = data.get("id", "").lower()
+                            if mid:
+                                provided.add(mid)
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return provided
+
+
 def _collect_installed_mod_ids(scan_dirs: list[Path]) -> dict[str, str]:
-    """Return ``{mod_id: filename}`` for every mod jar under the given dirs."""
+    """Return ``{mod_id: filename}`` for every mod jar under the given dirs.
+
+    Includes JarJar-bundled dependencies (see :func:`_jij_provided_mod_ids`) so
+    a mod that ships its own libs is not flagged as missing them.
+    """
     mod_ids: dict[str, str] = {}
     for d in scan_dirs:
         if not d.exists():
@@ -187,6 +237,8 @@ def _collect_installed_mod_ids(scan_dirs: list[Path]) -> dict[str, str]:
                         mid = data.get("id", "").lower()
                         if mid:
                             mod_ids[mid] = fn.name
+                for mid in _jij_provided_mod_ids(fn):
+                    mod_ids.setdefault(mid, fn.name)
             except Exception:
                 continue
     return mod_ids
@@ -435,6 +487,10 @@ def preflight_dep_check(cfg: dict[str, Any]) -> dict[str, Any]:
                                 quarantine_mod(mods_dir, fn.name, "Fabric client-only mod")
                         except Exception:
                             pass
+                # JarJar-bundled dependencies (e.g. chiselsandbits bundling
+                # scena) count as installed, so they aren't mistaken for missing.
+                for mid in _jij_provided_mod_ids(fn):
+                    installed_mod_ids.setdefault(mid, []).append(fn.name)
             except Exception:
                 continue
     
@@ -549,8 +605,7 @@ def preflight_dep_check(cfg: dict[str, Any]) -> dict[str, Any]:
     missing_required: dict[str, set] = {}
     for dep_id, requesters in required_deps.items():
         if dep_id not in installed_mod_ids:
-            missing_required[dep_id] = requesters
-    
+            missing_required[dep_id] = requesters    
     # Find missing optional dependencies (optional, but track them)
     missing_optional: dict[str, set] = {}
     for dep_id, requesters in optional_deps.items():

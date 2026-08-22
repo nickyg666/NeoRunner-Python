@@ -75,6 +75,19 @@ def get_all_minecraft_versions() -> list[str]:
         return [DEFAULT_MC_VERSION]
 
 
+def _neoforge_version_prefix(mc_version: str) -> str:
+    """Map a Minecraft version to the NeoForge version prefix.
+
+    NeoForge version numbers embeds the Minecraft version:
+      - MC 1.21.x (classic) -> NeoForge ``21.x`` (the leading ``1.`` is dropped)
+      - MC 26.x   (year-based) -> NeoForge mirrors the full MC version
+    """
+    parts = (mc_version or "").split(".")
+    if parts and parts[0] == "1" and len(parts) >= 3:
+        return ".".join(parts[1:])
+    return mc_version
+
+
 def get_loaders_for_minecraft(mc_version: str | None = None) -> dict:
     """Get all compatible loader versions for Minecraft."""
     if mc_version is None:
@@ -83,7 +96,7 @@ def get_loaders_for_minecraft(mc_version: str | None = None) -> dict:
     loaders = {}
     
     # NeoForge - get all versions, filter for MC compatible + latest 5
-    loaders["neoforge"] = _get_all_neoforge_versions()
+    loaders["neoforge"] = _get_all_neoforge_versions(mc_version)
     
     # Fabric
     loaders["fabric"] = _get_fabric_versions()
@@ -94,8 +107,26 @@ def get_loaders_for_minecraft(mc_version: str | None = None) -> dict:
     return loaders
 
 
-def _get_all_neoforge_versions() -> list[dict]:
-    """Get NeoForge versions - latest 5 (including beta)."""
+def _neoforge_sort_key(v: str) -> tuple:
+    """Sort key for NeoForge versions (numeric segments, stable before suffix)."""
+    base = v.split("-")[0].split("+")[0]
+    nums = []
+    for x in base.split("."):
+        try:
+            nums.append(int(x))
+        except ValueError:
+            nums.append(0)
+    return tuple(nums)
+
+
+def _get_all_neoforge_versions(mc_version: str | None = None) -> list[dict]:
+    """Get NeoForge versions compatible with ``mc_version`` - latest 5 sorted by build.
+
+    When ``mc_version`` is given the list is filtered to NeoForge builds that
+    embed that Minecraft version (e.g. MC ``26.1.2`` -> ``26.1.2.87``,
+    ``26.1.2.95``), instead of blindly returning the newest builds for whatever
+    MC version (``26.2.0.62``) which target a different Minecraft version.
+    """
     try:
         url = "https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge"
         req = urllib.request.Request(url, headers={"User-Agent": "NeoRunner/2.3.0"})
@@ -104,19 +135,16 @@ def _get_all_neoforge_versions() -> list[dict]:
             data = json.loads(resp.read().decode())
             versions = data.get("versions", [])
             
-            # Get latest 5 (beta versions are basically stable in NeoForge)
-            latest_5 = []
-            count = 0
-            for v in reversed(versions):
-                # Include all except alpha/snapshot
-                if "alpha" in v.lower() or "snapshot" in v.lower():
-                    continue
-                latest_5.append({"version": v, "type": "latest"})
-                count += 1
-                if count >= 5:
-                    break
+            if mc_version:
+                prefix = _neoforge_version_prefix(mc_version)
+                versions = [v for v in versions
+                            if v == prefix or v.startswith(prefix + ".")]
             
-            return latest_5
+            stable = [v for v in versions
+                      if "alpha" not in v.lower() and "snapshot" not in v.lower()]
+            stable.sort(key=_neoforge_sort_key, reverse=True)
+            
+            return [{"version": v, "type": "latest"} for v in stable[:5]]
     except Exception as e:
         logger.warning(f"Failed to fetch NeoForge: {e}")
         return []
@@ -144,15 +172,13 @@ def _get_fabric_versions() -> list[dict]:
         return []
 
 
-def get_latest_for_loader(loader: str = "neoforge") -> str | None:
-    """Get latest version for a loader."""
-    loaders = get_loaders_for_minecraft()
-    
+def get_latest_for_loader(loader: str = "neoforge", mc_version: str | None = None) -> str | None:
+    """Get latest version for a loader (optionally scoped to a Minecraft version)."""
     if loader.lower() == "neoforge":
-        versions = loaders.get("neoforge", [])
+        versions = _get_all_neoforge_versions(mc_version)
         return versions[0].get("version") if versions else None
     elif loader.lower() == "fabric":
-        versions = loaders.get("fabric", [])
+        versions = _get_fabric_versions()
         return versions[0].get("version") if versions else None
     
     return None

@@ -36,10 +36,45 @@ from .version import get_latest_minecraft_version
 # Setup logging
 log = logging.getLogger(__name__)
 
+# Live install progress, polled by the dashboard banner. Guarded by a lock so
+# the Waitress worker threads (install runs in a request thread) and the
+# progress endpoint don't race.
+_INSTALL_PROGRESS = {
+    "active": False,
+    "stage": "",
+    "message": "",
+    "done": 0,
+    "total": 0,
+    "pct": 0.0,
+}
+_INSTALL_PROGRESS_LOCK = threading.Lock()
+
+
+def _set_install_progress(stage: str, message: str, done: int, total: int) -> None:
+    with _INSTALL_PROGRESS_LOCK:
+        _INSTALL_PROGRESS.update(
+            active=bool(total) or True,
+            stage=stage,
+            message=message,
+            done=done,
+            total=total,
+            pct=(done / total * 100.0) if total else 0.0,
+        )
+
+
+def _finish_install_progress() -> None:
+    with _INSTALL_PROGRESS_LOCK:
+        _INSTALL_PROGRESS["active"] = False
+
+
+def _install_progress_cb(message: str, done: int, total: int) -> None:
+    _set_install_progress("installing", message, done, total)
+
 # Create Flask app
 template_dir = Path(__file__).parent / "templates"
 static_dir = Path(__file__).parent / "static"
 app = Flask(__name__, template_folder=str(template_dir), static_folder=str(static_dir))
+app.config["TEMPLATES_AUTO_RELOAD"] = True
 DASHBOARD_PORT = None
 app.secret_key = os.urandom(24)
 
@@ -71,15 +106,17 @@ def _check_auth(user: str, password: str) -> bool:
 def _requires_auth(path: str) -> bool:
     """True when a request path must be authenticated.
 
-    Protected: the admin dashboard UI (/ and /admin), the setup wizard, and the
-    entire /api/* control surface. Public: /download/*, static assets, favicon,
-    and websocket handshakes (so the installer JAR + download scripts stay open).
+    Protected: the admin dashboard UI (/admin), the setup wizard, and the entire
+    /api/* control surface. Public: the root ""/"" download/status page (so a
+    browser hitting the configured public host gets the modpack download
+    immediately), /download/*, static assets, favicon, and websocket handshakes
+    (so the installer JAR + download scripts stay open).
     """
     if any(path.startswith(p) for p in AUTH_PUBLIC_PREFIXES):
         return False
     if path.startswith("/api/"):
         return True
-    return path in ("/", "/admin", "/admin/") or path.startswith("/admin/")
+    return path.startswith("/admin/") or path in ("/admin", "/admin/")
 
 
 @app.before_request
@@ -467,17 +504,40 @@ def get_client_mods() -> list[dict[str, Any]]:
 @app.route("/admin")
 @app.route("/admin/")
 def admin_index():
-    """Alias for the dashboard (IP:8000/admin)."""
-    return redirect(url_for("dashboard"))
+    """Admin dashboard (auth-gated)."""
+    if app.config.get('FIRST_START', False) or not (CWD / "server.properties").exists():
+        return render_template("setup_wizard.html")
+    return render_template("dashboard.html")
+
+
+def _looks_like_minecraft_client() -> bool:
+    """True when the User-Agent belongs to a Minecraft (Java) client rather
+    than a real browser / curl. Vanilla clients quietly hit the recorded
+    server address over the raw MC port, but some launchers and the modded
+    handshake fetch the resolved host, so point those at the game port."""
+    ua = (request.headers.get("User-Agent") or "").lower()
+    # A MC client is a JVM process; browsers/scripts carry recognizable
+    # tokens. Treat Java-wielding UAs (no browser token) as a client so they
+    # get the join address instead of the download page.
+    browser = ("mozilla" in ua or "chrome" in ua or "safari" in ua
+               or "curl" in ua or "wget" in ua or "python" in ua)
+    return ("java" in ua or "minecraft" in ua) and not browser
 
 
 @app.route("/")
 def dashboard():
-    """Main dashboard page."""
-    # Check if first start (no server.properties)
-    if app.config.get('FIRST_START', False) or not (CWD / "server.properties").exists():
-        return render_template("setup_wizard.html")
-    return render_template("dashboard.html")
+    """Public root: Minecraft clients get the join address, everyone else gets
+    the modpack download / status page. The admin UI lives at /admin.
+
+    A Minecraft client hitting the bare host is gated through the waiting room
+    (download lobby) so they see the clickable modpack link before joining the
+    modded server. Browsers get the download landing page showing both the
+    waiting-room entrance and the modded join address.
+    """
+    if _looks_like_minecraft_client():
+        from .holding_cell import room_join_address
+        return Response(room_join_address(load_cfg()), mimetype="text/plain")
+    return download_landing()
 
 
 @app.route("/download")
@@ -517,6 +577,117 @@ def api_config():
     config_dict["server_ip"] = server_ip
     
     return jsonify(config_dict)
+
+
+@app.route("/api/descriptions", methods=["GET"])
+def api_descriptions():
+    """Get current server + holding-cell description (MOTD) settings."""
+    from .config import ensure_config, load_cfg
+
+    cfg = ensure_config(load_cfg())
+    props = parse_server_properties()
+    return jsonify({
+        "server_description": cfg.server_description or props.get("motd", ""),
+        "holding_cell_description": cfg.holding_cell_description or _room_motd(),
+        "server_motd": props.get("motd", ""),
+        "room_motd": _room_motd(),
+    })
+
+
+@app.route("/api/descriptions", methods=["POST"])
+def api_descriptions_update():
+    """Update server / holding-cell descriptions and apply them to the running
+    servers' server.properties (restarting them so the MOTD takes effect).
+
+    Sending an empty string reverts to the built-in default MOTD.
+    """
+    from .config import ensure_config, load_cfg, save_cfg
+
+    try:
+        data = request.json or {}
+        cfg = ensure_config(load_cfg())
+
+        changed = False
+        if "server_description" in data:
+            cfg.server_description = str(data["server_description"]).strip()
+            changed = True
+        if "holding_cell_description" in data:
+            cfg.holding_cell_description = str(data["holding_cell_description"]).strip()
+            changed = True
+
+        if changed:
+            save_cfg(cfg)
+            # Apply to the on-disk server.properties of the main server.
+            apply_main_server_motd(cfg.server_description)
+            # Apply to the holding cell's server.properties.
+            apply_room_motd(cfg.holding_cell_description)
+            log_event("CONFIG_UPDATE",
+                      f"Descriptions updated: server={cfg.server_description!r} room={cfg.holding_cell_description!r}")
+
+        return jsonify({"success": True, **cfg.to_dict()})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
+def _room_motd() -> str:
+    """Read the holding cell's current MOTD from its server.properties."""
+    from .holding_cell import _room_dir
+    from .config import load_cfg
+
+    p = _room_dir(load_cfg()) / "server.properties"
+    try:
+        for line in p.read_text().splitlines():
+            if line.startswith("motd="):
+                return line.split("=", 1)[1]
+    except OSError:
+        pass
+    return ""
+
+
+def apply_main_server_motd(description: str) -> bool:
+    """Write the MOTD into the main server's server.properties.
+
+    Returns True on success. The running server picks it up on next restart
+    (or you can send ``/reload`` via the console for a live update).
+    """
+    from .constants import CWD
+    props_file = CWD / "server.properties"
+
+    try:
+        # Replace the existing online-mode server.properties entry, if present.
+        lines = props_file.read_text().splitlines() if props_file.exists() else []
+        defaults = "NeoRunner - NeoForge Server"  # loader default (neoforge)
+        value = description or defaults
+        out, found = [], False
+        for line in lines:
+            if line.startswith("motd="):
+                out.append(f"motd={value}")
+                found = True
+            else:
+                out.append(line)
+        if not found:
+            out.append(f"motd={value}")
+        props_file.write_text("\n".join(out) + "\n")
+        return True
+    except OSError:
+        return False
+
+
+def apply_room_motd(description: str) -> bool:
+    """Write the MOTD into the holding cell's server.properties."""
+    from .holding_cell import _room_dir, room_properties
+    from .config import ensure_config, load_cfg
+
+    try:
+        cfg = ensure_config(load_cfg())
+        if description:
+            cfg.holding_cell_description = description
+        room_dir = _room_dir(cfg)
+        room_dir.mkdir(parents=True, exist_ok=True)
+        (room_dir / "server.properties").write_text(room_properties(cfg))
+        return True
+    except OSError:
+        return False
 
 
 @app.route("/api/config", methods=["POST"])
@@ -824,11 +995,15 @@ def api_install_modpack():
         mods_dir = CWD / cfg.mods_dir
 
         from .modpack_installer import install_curseforge_pack
-        result = install_curseforge_pack(
-            zip_path,
-            mods_dir,
-            overrides_dir=CWD,
-        )
+        try:
+            result = install_curseforge_pack(
+                zip_path,
+                mods_dir,
+                overrides_dir=CWD,
+                on_progress=_install_progress_cb,
+            )
+        finally:
+            _finish_install_progress()
         log_event(
             "MODPACK_INSTALL",
             f"Installed {filename}: {result.installed} mods, {result.failed} failed, overrides applied",
@@ -854,6 +1029,13 @@ def api_install_modpack():
         })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 400
+
+
+@app.route("/api/modpack/install-progress", methods=["GET"])
+def api_install_progress():
+    """Currrent modpack/install progress for the dashboard progress banner."""
+    with _INSTALL_PROGRESS_LOCK:
+        return jsonify(dict(_INSTALL_PROGRESS))
 
 
 @app.route("/api/modpack/delete", methods=["POST"])
@@ -3003,6 +3185,49 @@ def api_java_install_command():
         return jsonify({"success": False, "error": str(e)}), 400
 
 
+@app.route("/api/room/status")
+def api_room_status():
+    """Holding cell (download lobby) status."""
+    from .holding_cell import VanillaHoldingCell
+    from .config import ensure_config
+
+    try:
+        cell = VanillaHoldingCell(ensure_config(load_cfg()))
+        return jsonify(cell.status())
+    except Exception as e:
+        return jsonify({"error": str(e), "running": False}), 500
+
+
+@app.route("/api/room/start", methods=["POST"])
+def api_room_start():
+    """Start the holding cell (download lobby)."""
+    from .holding_cell import VanillaHoldingCell
+    from .config import ensure_config
+
+    try:
+        cell = VanillaHoldingCell(ensure_config(load_cfg()))
+        if cell.is_running():
+            return jsonify({"ok": True, "already_running": True, **cell.status()})
+        ok = cell.start()
+        return jsonify({"ok": ok, **cell.status()}), (200 if ok else 500)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/room/stop", methods=["POST"])
+def api_room_stop():
+    """Stop the holding cell (download lobby)."""
+    from .holding_cell import VanillaHoldingCell
+    from .config import ensure_config
+
+    try:
+        cell = VanillaHoldingCell(ensure_config(load_cfg()))
+        cell.stop()
+        return jsonify({"ok": True, "running": False})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/health")
 def api_health():
     """Health check endpoint."""
@@ -3244,15 +3469,21 @@ def run_dashboard(host: str = "0.0.0.0", port: int = 8000, debug: bool = False):
         except OSError:
             return False
     
-    # Try ports incrementally if in use
+    # Try ports incrementally if in use (retry the preferred port briefly
+    # first, since a just-stopped previous daemon may still be releasing it)
     original_port = port
-    for try_port in range(port, port + 10):
-        if is_port_free(try_port):
-            port = try_port
+    for _ in range(5):
+        if is_port_free(port):
             break
+        time.sleep(1)
     else:
-        log_event("ERROR", f"No free ports available in range {port}-{port+9}")
-        return
+        for try_port in range(port, port + 10):
+            if is_port_free(try_port):
+                port = try_port
+                break
+        else:
+            log_event("ERROR", f"No free ports available in range {port}-{port+9}")
+            return
     
     if port != original_port:
         log_event("DASHBOARD", f"Port {original_port} in use, using {port} instead")

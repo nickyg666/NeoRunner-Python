@@ -99,25 +99,22 @@ def install_neoforge(cfg: ServerConfig) -> bool:
     
     log_event("INFO", f"Installing NeoForge for MC {mc_version}...")
     
-    # Determine NeoForge version - handle both 1.21.x and 26.x formats
-    mc_parts = mc_version.split(".")
-    # For MC 1.21.x use "21.x", for 26.x use "26.x"
-    if len(mc_parts) >= 2 and mc_parts[0] == "1":
-        prefix = f"{mc_parts[1]}.{mc_parts[2]}" if len(mc_parts) >= 3 else "21.11"
-    elif len(mc_parts) >= 2 and mc_parts[0] == "26":
-        prefix = f"{mc_parts[0]}.{mc_parts[1]}" if len(mc_parts) >= 2 else "26.1"
-    else:
-        prefix = "26.1"  # Default to latest
+    # Determine NeoForge version prefix - handle both 1.21.x and 26.x formats
+    from .version import _neoforge_sort_key, _neoforge_version_prefix
+    prefix = _neoforge_version_prefix(mc_version)
     
-    # Fetch latest version from Maven
+    # Fetch latest version from Maven (scoped to the MC version)
     neo_version = None
     try:
         versions_url = "https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge"
         req = urllib.request.Request(versions_url, headers={"User-Agent": "NeoRunner/1.0"})
         with urllib.request.urlopen(req, timeout=15) as resp:
             versions_data = json.loads(resp.read().decode())
-            matching = [v for v in versions_data.get("versions", []) if v.startswith(prefix)]
+            matching = [v for v in versions_data.get("versions", [])
+                        if (v == prefix or v.startswith(prefix + "."))
+                        and "alpha" not in v.lower() and "snapshot" not in v.lower()]
             if matching:
+                matching.sort(key=_neoforge_sort_key)
                 neo_version = matching[-1]
     except Exception as e:
         log_event("ERROR", f"Version lookup failed: {e}")
@@ -466,6 +463,17 @@ def setup(cfg: ServerConfig) -> bool:
         log_event("INFO", "Chunker world converter installed")
     except Exception as e:
         log_event("WARN", f"Chunker installation skipped: {e}")
+
+    # Bundle the ferium mod manager binary. Best-effort: ferium is an optional
+    # optimisation for dependency resolution / mod upgrades.
+    try:
+        from .ferium import ensure_ferium
+        if ensure_ferium() is not None:
+            log_event("INFO", "Ferium mod manager installed")
+        else:
+            log_event("WARN", "Ferium installation skipped (download unavailable)")
+    except Exception as e:
+        log_event("WARN", f"Ferium installation skipped: {e}")
 
     log_event("INFO", "Setup complete!")
     return True

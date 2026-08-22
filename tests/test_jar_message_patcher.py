@@ -95,6 +95,58 @@ def _make_registry_class() -> bytes:
     return b"\xca\xfe\xba\xbe" + struct.pack(">HH", 0, 61) + cp + body
 
 
+def _make_fallback_class() -> bytes:
+    """Synthetic ``NetworkRegistry`` with a ``translatableWithFallback`` site.
+
+    Constant pool:
+      #1 Utf8              neoforge...not_supported        (translation key)
+      #2 String -> #1
+      #3 Utf8              This server runs a modpack you need first. Visit w8.mom to download the mods and loader.
+      #4 String -> #3      (the baked fallback)
+      #5 Utf8              net/minecraft/network/chat/Component
+      #6 Class -> #5
+      #7 Utf8              translatableWithFallback
+      #8 Utf8              (Ljava/lang/String;Ljava/lang/String;[Ljava/lang/Object;)Lnet/minecraft/network/chat/MutableComponent;
+      #9 NameAndType -> (#7, #8)
+      #10 Methodref -> (#6, #9)
+    Body: ``ldc #2; ldc #4; iconst_1; anewarray; dup; iconst_0; invokestatic #10``
+    -- the exact fallback shape the surgery rewrites (ldc key, ldc fallback,
+    then invokestatic translatableWithFallback).
+    """
+    utf8_key = b"neoforge.network.negotiation.failure.vanilla.client.not_supported"
+    utf8_fallback = b"This server runs a modpack you need first. Visit w8.mom to download the mods and loader."
+    utf8_component = b"net/minecraft/network/chat/Component"
+    utf8_name = b"translatableWithFallback"
+    utf8_desc = b"(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/Object;)Lnet/minecraft/network/chat/MutableComponent;"
+
+    cp = struct.pack(">H", 11)  # indices 1..10
+    cp += b"\x01" + struct.pack(">H", len(utf8_key)) + utf8_key  # 1
+    cp += b"\x08" + struct.pack(">H", 1)  # 2 String -> 1
+    cp += b"\x01" + struct.pack(">H", len(utf8_fallback)) + utf8_fallback  # 3
+    cp += b"\x08" + struct.pack(">H", 3)  # 4 String -> 3
+    cp += b"\x01" + struct.pack(">H", len(utf8_component)) + utf8_component  # 5
+    cp += b"\x07" + struct.pack(">H", 5)  # 6 Class -> 5
+    cp += b"\x01" + struct.pack(">H", len(utf8_name)) + utf8_name  # 7
+    cp += b"\x01" + struct.pack(">H", len(utf8_desc)) + utf8_desc  # 8
+    cp += b"\x0C" + struct.pack(">H", 7) + struct.pack(">H", 8)  # 9 NAT -> (7,8)
+    cp += b"\x0A" + struct.pack(">H", 6) + struct.pack(">H", 9)  # 10 Methodref -> (6,9)
+
+    header = struct.pack(">HHHHHH", 0x0021, 11, 0, 0, 0, 0)
+    block = bytes(
+        [
+            0x12, 0x02,  # ldc #2 (key)
+            0x12, 0x04,  # ldc #4 (fallback)
+            0x04,  # iconst_1
+            0xBD, 0x00, 0x02,  # anewarray #2
+            0x59,  # dup
+            0x03,  # iconst_0
+            0xB8, 0x00, 0x0A,  # invokestatic #10 (translatableWithFallback)
+        ]
+    )
+    body = header + block + b"\x00" * 8
+    return b"\xca\xfe\xba\xbe" + struct.pack(">HH", 0, 61) + cp + body
+
+
 class TestParseAndRebuild:
     def test_roundtrip_noop(self):
         data = _fake_class_bytes()
@@ -121,7 +173,7 @@ class TestDownloadLink:
 
     def test_default_host(self, monkeypatch):
         cfg = ServerConfig(hostname="")
-        assert jmp._download_link(cfg) == "https://mc.w8.mom/dl/mods.zip"
+        assert jmp._download_link(cfg) == "https://w8.mom/dl/mods.zip"
 
 
 class TestPatchJar:
@@ -145,7 +197,7 @@ class TestPatchJar:
 
         with zipfile.ZipFile(jar) as z:
             data = z.read("net/neoforged/neoforge/network/registration/NetworkRegistry.class")
-        assert b"Download the modpack" in data
+        assert b"to download the mods and loader" in data
         assert b"multiplayer.disconnect.incompatible" not in data
 
         # Idempotent: second patch also reports True but stays valid
@@ -215,7 +267,7 @@ class TestPatchJar:
             names = z.namelist()
             data = z.read("net/neoforged/neoforge/network/registration/NetworkRegistry.class")
             manifest_out = z.read("META-INF/MANIFEST.MF")
-        assert b"Download the modpack" in data
+        assert b"to download the mods and loader" in data
         assert "META-INF/NEORUNNER.SF" not in names
         assert "META-INF/NEORUNNER.RSA" not in names
         # Per-entry digest section stripped, main section kept
@@ -231,7 +283,7 @@ class TestClickableInjection:
         out = jmp._inject_clickable(data, self.LINK)
         assert out is not None
         # Text-only message + separate link constant + helper reference baked in.
-        assert b"Your client does not match the server's mods. Download the modpack: " in out
+        assert b"Your client does not match the server's mods. Visit w8.mom to download the mods and loader." in out
         assert self.LINK.encode() in out
         assert b"textWithLink" in out
         assert b"multiplayer.disconnect.incompatible" not in out
@@ -249,16 +301,29 @@ class TestClickableInjection:
         data = clickable_message_class()
         assert data[:4] == b"\xca\xfe\xba\xbe"
         major = struct.unpack(">H", data[6:8])[0]
-        assert major <= 65  # Java 21 or older so it loads everywhere NeoForge runs
+        assert major <= 69  # Java 25 or older
         assert b"textWithLink" in data
         assert b"open_url" in data or b"OpenUrl" in data
+
+    def test_embedded_helper_has_no_plaintext_fallback(self):
+        """The fallback must remain a link (copy-to-clipboard), never plain text."""
+        from neorunner_pkg._clickable_message import (
+            clickable_message_class,
+            clickable_message_class_neoforge,
+        )
+
+        for data in (clickable_message_class(), clickable_message_class_neoforge()):
+            assert b"CopyToClipboard" in data
+            # The old plaintext fallback used StringConcatFactory for `text + " " + url`.
+            assert b"makeConcatWithConstants" not in data
+            assert b"OpenUrl" in data
 
     def test_registry_inject_rewrites_call_site(self):
         data = _make_registry_class()
         out = jmp._inject_clickable_registry(data, self.LINK)
         assert out is not None
         # Text-only message + separate link constant + helper reference baked in.
-        assert b"Your client does not match the server's mods. Download the modpack: " in out
+        assert b"Your client does not match the server's mods. Visit w8.mom to download the mods and loader." in out
         assert self.LINK.encode() in out
         assert b"textWithLink" in out
         assert b"multiplayer.disconnect.incompatible" not in out
@@ -366,6 +431,45 @@ class TestClickableInjection:
             z.writestr("neorunner_client/ClickableMessage.class", clickable_message_class())
             z.writestr("net/minecraft/server/network/ServerHandshakePacketListenerImpl.class", _make_handshake_class())
         assert jmp._jar_is_clickable(jar) is False
+
+    def test_fallback_inject_rewrites_site(self):
+        """The translatableWithFallback site is rewritten to the clickable helper."""
+        data = _make_fallback_class()
+        out = jmp._inject_clickable_fallback(data, self.LINK)
+        assert out is not None
+        # Text captured as its own constant, link separate, helper baked in.
+        assert b"to download the mods and loader" in out
+        assert self.LINK.encode() in out
+        assert b"neorunner_neoforge/ClickableMessage" in out
+        assert b"textWithLink" in out
+        # Result is still a structurally valid class file (same magic + version).
+        assert out[:8] == data[:8]
+        assert out[:4] == b"\xca\xfe\xba\xbe"
+
+    def test_fallback_inject_returns_none_when_absent(self):
+        """Classes without the fallback shape return None (idempotent)."""
+        assert jmp._inject_clickable_fallback(_fake_class_bytes(), self.LINK) is None
+        assert jmp._inject_clickable_fallback(_make_handshake_class(), self.LINK) is None
+
+    def test_patch_jar_injects_fallback_clickable(self, tmp_path, monkeypatch):
+        """Patching the universal jar rewrites the vanilla-client fallback site."""
+        jar = tmp_path / "neoforge-26.1.2.87-universal.jar"
+        with zipfile.ZipFile(jar, "w") as z:
+            z.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n\n")
+            z.writestr("net/neoforged/neoforge/network/registration/NetworkRegistry.class", _make_fallback_class())
+
+        monkeypatch.setattr(jmp, "load_cfg", lambda: ServerConfig(hostname="mc.w8.mom"))
+        monkeypatch.setattr(jmp, "_download_link", lambda cfg: self.LINK)
+
+        assert jmp._patch_jar(jar, "neoforge") is True
+        with zipfile.ZipFile(jar) as z:
+            data = z.read("net/neoforged/neoforge/network/registration/NetworkRegistry.class")
+        assert b"neorunner_neoforge/ClickableMessage" in data
+        assert b"textWithLink" in data
+        assert b"to download the mods and loader" in data
+
+        # Idempotent: second patch reports no change.
+        assert jmp._patch_jar(jar, "neoforge") is False
 
 
 class TestFindUniversalJars:

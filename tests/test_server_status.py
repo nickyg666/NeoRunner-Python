@@ -1,8 +1,9 @@
 """Tests for server status checks and monitoring."""
 
-import os
+import pytest
 import sys
-from unittest.mock import MagicMock, patch
+import os
+from unittest.mock import patch, MagicMock, PropertyMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -20,9 +21,9 @@ class TestServerStatusFunctions:
     
     def test_is_server_running_returns_bool(self):
         """is_server_running returns boolean."""
-        from neorunner_pkg import server
+        from neorunner import server
         
-        with patch('neorunner_pkg.server.subprocess.run') as mock_run:
+        with patch('neorunner.server.subprocess.run') as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stdout="")
             result = server.is_server_running()
             
@@ -34,8 +35,8 @@ class TestTmuxServer:
     
     def test_tmux_server_init(self):
         """TmuxServer initializes correctly."""
-        from neorunner_pkg.config import ServerConfig
         from neorunner_pkg.server import TmuxServer
+        from neorunner_pkg.config import ServerConfig
         
         cfg = ServerConfig()
         server = TmuxServer(cfg)
@@ -46,8 +47,8 @@ class TestTmuxServer:
     
     def test_tmux_server_default_values(self):
         """TmuxServer has expected defaults."""
-        from neorunner_pkg.config import ServerConfig
         from neorunner_pkg.server import TmuxServer
+        from neorunner_pkg.config import ServerConfig
         
         cfg = ServerConfig()
         server = TmuxServer(cfg)
@@ -88,9 +89,9 @@ class TestServerStatusCheck:
     
     def test_status_check_with_mock(self):
         """Status check works with mocking."""
-        from neorunner_pkg import server
+        from neorunner import server
         
-        with patch('neorunner_pkg.server.subprocess.run') as mock_run:
+        with patch('neorunner.server.subprocess.run') as mock_run:
             # Return code 0 means running
             mock_run.return_value = MagicMock(returncode=0, stdout="minecraft server")
             
@@ -115,8 +116,8 @@ class TestServerConfigIntegration:
     
     def test_server_gets_loader_config(self):
         """Server gets loader from config."""
-        from neorunner_pkg.config import ServerConfig
         from neorunner_pkg.server import TmuxServer
+        from neorunner_pkg.config import ServerConfig
         
         cfg = ServerConfig(loader="neoforge", mc_version="1.21.11")
         server = TmuxServer(cfg)

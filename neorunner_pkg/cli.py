@@ -222,6 +222,18 @@ def cmd_start(args):
         dashboard_thread.start()
         threads.append(dashboard_thread)
         time.sleep(1)
+
+    # Pre-build the mods.zip bundle in the background so the first client
+    # download doesn't hit a long one-time rebuild (or a 500 during it).
+    def warm_mods_bundle():
+        try:
+            from .mod_hosting import build_mods_bundle_zip
+            build_mods_bundle_zip(cfg)
+        except Exception as e:
+            log_event("WARN", f"Background mods.zip warm-up failed: {e}")
+
+    if not args.no_dashboard and not args.no_server:
+        threading.Thread(target=warm_mods_bundle, daemon=True).start()
     
     # Handle shutdown signals
     def request_shutdown():
@@ -229,6 +241,14 @@ def cmd_start(args):
         shutdown_requested = True
         if server_process:
             stop_server()
+        # Stop the holding cell too so its tmux session doesn't outlive us.
+        try:
+            from .holding_cell import VanillaHoldingCell
+            cell = VanillaHoldingCell(cfg)
+            if cell.is_running():
+                cell.stop()
+        except Exception as e:
+            log_event("WARN", f"Holding cell shutdown failed: {e}")
         try:
             os.close(lock_fd)
         except OSError:
@@ -288,6 +308,25 @@ def cmd_start(args):
                 continue
             
             print("Minecraft server started")
+
+            # Start the vanilla holding cell (download lobby) once the modded
+            # server is up, so joiners bounce straight into the room with the
+            # clickable modpack link in chat.
+            if cfg.holding_cell_enabled and not args.no_dashboard:
+                try:
+                    from .holding_cell import VanillaHoldingCell
+                    cell = VanillaHoldingCell(cfg)
+                    if cell.is_running():
+                        # A previous daemon's session survived (crash/kill).
+                        # Drop it so this daemon's watcher thread attaches to a
+                        # fresh boot -- otherwise joiners get no greeting.
+                        log_event("ROOM", "Cleaning up stale holding cell session")
+                        cell.stop_server_only()
+                    cell_started = cell.start()
+                    print(f"Holding cell {'started' if cell_started else 'FAILED to start'} "
+                          f"(port {cfg.holding_cell_port})")
+                except Exception as e:
+                    log_event("WARN", f"Holding cell start failed (non-fatal): {e}")
             
             # Wait for server to actually bind ports
             if not wait_for_server(timeout=60):
@@ -352,11 +391,57 @@ def cmd_start(args):
     return 0
 
 
+def cmd_room(args):
+    """Start/stop/status the vanilla holding cell (download lobby)."""
+    from .config import ensure_config, load_cfg
+    from .holding_cell import VanillaHoldingCell
+
+    cfg = ensure_config(load_cfg())
+    cell = VanillaHoldingCell(cfg)
+
+    if args.action == "start":
+        if cell.is_running():
+            print("Holding cell is already running.")
+        elif cell.start():
+            print(f"Holding cell started on port {cfg.holding_cell_port}.")
+            print(f"  Room address : {cell.status()['address']}")
+            print(f"  Link in chat : {cell.status()['modpack_link']}")
+        else:
+            print("Failed to start holding cell (check logs).")
+            return 1
+    elif args.action == "stop":
+        if cell.is_running():
+            cell.stop()
+            print("Holding cell stopped.")
+        else:
+            print("Holding cell is not running.")
+    else:  # status
+        st = cell.status()
+        state = "RUNNING" if st["running"] else "stopped"
+        print(f"Holding cell: {state}")
+        print(f"  Port          : {st['port']}")
+        print(f"  Room address  : {st['address']}")
+        print(f"  Modpack link  : {st['modpack_link']}")
+        print(f"  Modded server : {st['modded_server']}")
+        print(f"  Room size     : {st['room_size']}x{st['room_size']}x{st['room_size']}")
+    return 0
+
+
 def cmd_stop(args):
     """Stop the NeoRunner server."""
     from .server import is_server_running, stop_server
-    
+
     print("Stopping NeoRunner...")
+    
+    # Also stop the holding cell (download lobby) if it is running.
+    try:
+        from .holding_cell import VanillaHoldingCell
+        cell = VanillaHoldingCell(load_cfg())
+        if cell.is_running():
+            cell.stop()
+            print("Holding cell stopped.")
+    except Exception as e:
+        log_event("WARN", f"Could not stop holding cell: {e}")
     
     if is_server_running():
         if stop_server():
@@ -511,6 +596,37 @@ def cmd_setup(args):
     wants_external = bool(args.domain and args.external_access)
     if wants_external:
         print(f"\nConfiguring external access via {args.external_access} for {args.domain}...")
+
+        # Cloudflare needs an API token. If none was supplied, point the user
+        # at the token/tunnel setup page and prompt for it.
+        if args.external_access == "cloudflare" and not (args.cf_token or "").strip():
+            print("\n  Cloudflare setup")
+            print("  1. Open https://dash.cloudflare.com/profile/api-tokens")
+            print("  2. Create a token with 'Cloudflare Tunnel' permissions (Edit).")
+            print("  3. Paste the token below (or re-run with --cf-token <TOKEN>).")
+            try:
+                import getpass
+                args.cf_token = getpass.getpass("  Cloudflare API token: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                args.cf_token = ""
+
+        # ddclient keeps the domain's DNS pointing at this machine. It needs
+        # DDNS provider login credentials to update the record; prompt when not
+        # already supplied on the command line.
+        ddclient_login = args.ddclient_login or ""
+        ddclient_password = args.ddclient_password or ""
+        if args.ddclient and not (ddclient_login and ddclient_password):
+            print("\n  Dynamic DNS (ddclient) credentials")
+            print(f"  Provider: {args.ddclient_provider} — need account login + password/token")
+            try:
+                import getpass
+                if not ddclient_login:
+                    ddclient_login = input("  DDNS username/login: ").strip()
+                if not ddclient_password:
+                    ddclient_password = getpass.getpass("  DDNS password/token: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                pass
+
         try:
             setup_external_access(cfg, {
                 "domain": args.domain,
@@ -519,8 +635,8 @@ def cmd_setup(args):
                 "mc_port": args.mc_port,
                 "ddclient": args.ddclient,
                 "ddclient_provider": args.ddclient_provider,
-                "ddclient_login": args.ddclient_login,
-                "ddclient_password": args.ddclient_password,
+                "ddclient_login": ddclient_login,
+                "ddclient_password": ddclient_password,
             })
             print(f"  External access configured: https://{args.domain}")
         except ExternalAccessError as e:
@@ -971,6 +1087,10 @@ def main():
     users_parser.add_argument('--remove', help='Remove a user')
     users_parser.add_argument('--set-password', help='Change a user password')
     users_parser.add_argument('--password', help='Password (prompts if omitted)')
+
+    # Holding cell (vanilla download-lobby room)
+    room_parser = subparsers.add_parser('room', help='Manage the vanilla holding cell (download lobby)')
+    room_parser.add_argument('action', choices=['start', 'stop', 'status'], help='Action to perform')
     
     args = parser.parse_args()
     
@@ -997,6 +1117,7 @@ def main():
         'world': cmd_world,
         'mods': cmd_mods,
         'users': cmd_users,
+        'room': cmd_room,
     }
     
     handler = handlers.get(args.command)

@@ -5,7 +5,7 @@ A comprehensive Python module for managing NeoForge, Forge, and Fabric servers
 with automated mod management, web dashboard, and crash recovery.
 """
 
-__version__ = "2.4.9"
+__version__ = "2.5.0"
 __author__ = "Nickyg666"
 __license__ = "MIT"
 
@@ -77,6 +77,7 @@ from .external_access import (
 # Ferium integration
 from .ferium import (
     FeriumManager,
+    ensure_ferium,
     setup_ferium_wizard,
 )
 
@@ -93,6 +94,22 @@ from .installer import (
     install_system_deps,
     setup,
     strip_client_classes,
+)
+
+# Vanilla holding cell (download lobby)
+from .holding_cell import (
+    ROOM_BUILT_MARKER,
+    ROOM_DIR_NAME,
+    ROOM_LOG,
+    TMUX_SESSION,
+    VanillaHoldingCell,
+    download_vanilla_server,
+    get_holding_cell,
+    join_welcome_raws,
+    room_build_commands,
+    room_join_address,
+    room_properties,
+    room_is_running,
 )
 
 # Loader jar message patching
@@ -319,6 +336,7 @@ __all__ = [
     "download_mod_from_modrinth",
     "emit_event",
     "ensure_chunker",
+    "ensure_ferium",
     "ensure_config",
     "ensure_directories",
     "ensure_eula",
@@ -351,6 +369,7 @@ __all__ = [
     "is_server_running",
     "java_compatibility",
     "java_formats",
+    "join_welcome_raws",
     "list_archived_worlds",
     "list_available_formats",
     "list_backups",
@@ -369,6 +388,13 @@ __all__ = [
     "preflight_dep_check",
     "preflight_mod_compatibility_check",
     "quarantine_mod",
+    "room_build_commands",
+    "room_is_running",
+    "room_join_address",
+    "room_properties",
+    "download_vanilla_server",
+    "VanillaHoldingCell",
+    "get_holding_cell",
     "read_load_order",
     "remove_user",
     "resolve_file_name",

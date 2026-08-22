@@ -1,18 +1,23 @@
 """Tests for self-healing and crash handling."""
 
-import os
+import pytest
 import sys
+import os
 import tempfile
+import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from neorunner_pkg.self_heal import (
-    load_crash_history,
     preflight_dep_check,
     quarantine_mod,
+    load_crash_history,
     save_crash_history,
+    _collect_installed_mod_ids,
+    _jij_provided_mod_ids,
+    _required_deps_of,
 )
 
 
@@ -83,55 +88,48 @@ class TestSelfHeal:
             assert history["mod2"] == 2
 
 
-class TestDependencyVerification:
-    """Post-fetch verification quarantines mods with missing required deps."""
+class TestJarJarDeps:
+    """JarJar-bundled dependencies must count as installed, not missing."""
 
-    def _make_mod_jar(self, path: Path, mod_id: str, required: list[str] | None = None) -> Path:
+    def _build_jij_jar(self, path: Path) -> None:
+        import io
         import zipfile
-        jar = path / f"{mod_id}-1.0.0.jar"
-        with zipfile.ZipFile(jar, "w") as z:
-            z.writestr("META-INF/neoforge.mods.toml", _build_toml(mod_id, required or []))
-        return jar
 
-    def test_required_deps_of(self, tmp_path):
-        from neorunner_pkg.self_heal import _required_deps_of
-        jar = self._make_mod_jar(tmp_path, "moda", ["dep1", "dep2"])
-        assert _required_deps_of(jar) == {"dep1", "dep2"}
+        # Inner jar providing modId "scena".
+        inner_buf = io.BytesIO()
+        with zipfile.ZipFile(inner_buf, "w") as z:
+            z.writestr(
+                "META-INF/neoforge.mods.toml",
+                'modLoader="javafml"\n[[mods]]\nmodId="scena"\nversion="1.0"\n',
+            )
+        inner_buf.seek(0)
 
-    def test_required_deps_of_ignores_optional(self, tmp_path):
-        from neorunner_pkg.self_heal import _required_deps_of
-        jar = tmp_path / "modb-1.0.0.jar"
-        import zipfile
-        toml = _build_toml("modb", ["dep1"]) + '[[dependencies.modb]]\nmodId="optdep"\ntype="optional"\nversionRange="[1.0,)"\n'
-        with zipfile.ZipFile(jar, "w") as z:
-            z.writestr("META-INF/neoforge.mods.toml", toml)
-        assert _required_deps_of(jar) == {"dep1"}
+        # Outer jar that depends on scena but bundles it via JarJar.
+        with zipfile.ZipFile(path, "w") as z:
+            z.writestr(
+                "META-INF/neoforge.mods.toml",
+                'modLoader="javafml"\n'
+                '[[mods]]\nmodId="chiselsandbits"\nversion="1.0"\n'
+                '[[dependencies.chiselsandbits]]\nmodId="scena"\nrequired=true\n',
+            )
+            z.writestr("META-INF/jarjar/scena.jar", inner_buf.getvalue())
 
-    def test_quarantine_unsatisfiable(self, tmp_path, monkeypatch):
-        from neorunner_pkg.self_heal import preflight_dep_check
-        mods_dir = tmp_path / "mods"
-        clientonly_dir = tmp_path / "clientonly"
-        mods_dir.mkdir()
-        clientonly_dir.mkdir()
-        # moda requires dep1 which is missing -> should be quarantined.
-        self._make_mod_jar(mods_dir, "moda", ["dep1"])
+    def test_jij_provided_mod_ids(self, tmp_path):
+        jar = tmp_path / "mod.jar"
+        self._build_jij_jar(jar)
+        assert _jij_provided_mod_ids(jar) == {"scena"}
 
-        monkeypatch.setattr("neorunner_pkg.self_heal.CWD", tmp_path)
-        monkeypatch.setattr("neorunner_pkg.self_heal._fetch_dependency", lambda *a, **k: False)
-        cfg = {"mc_version": "1.21.11", "loader": "neoforge", "mods_dir": "mods", "clientonly_dir": "clientonly"}
-        preflight_dep_check(cfg)
+    def test_collect_installed_includes_jij(self, tmp_path):
+        jar = tmp_path / "mod.jar"
+        self._build_jij_jar(jar)
+        ids = _collect_installed_mod_ids([tmp_path])
+        assert "chiselsandbits" in ids
+        assert "scena" in ids  # bundled, so not "missing"
 
-        assert (mods_dir / "quarantine" / "moda-1.0.0.jar").exists()
-
-
-def _build_toml(mod_id: str, required: list[str]) -> str:
-    """Build a valid neoforge.mods.toml declaring the given required deps."""
-    lines = ["[[mods]]", f'modId="{mod_id}"', 'version="1.0.0"', 'displayName="Test"']
-    if required:
-        for r in required:
-            lines.append("")
-            lines.append(f"[[dependencies.{mod_id}]]")
-            lines.append(f'modId="{r}"')
-            lines.append('type="required"')
-            lines.append('versionRange="[1.0,)"')
-    return "\n".join(lines) + "\n"
+    def test_required_deps_still_lists_jij(self, tmp_path):
+        jar = tmp_path / "mod.jar"
+        self._build_jij_jar(jar)
+        # The declared dependency is real, but the installed-set subtraction
+        # (required - installed) must now leave it empty.
+        assert _required_deps_of(jar) == {"scena"}
+        assert _required_deps_of(jar) - set(_collect_installed_mod_ids([tmp_path])) == set()

@@ -29,11 +29,20 @@ from ._clickable_message import (
 from .config import load_cfg
 from .constants import CWD
 from .log import log_event
-from .mod_hosting import public_download_link
+from .mod_hosting import public_download_link, public_host
 
-# The text shown before the (clickable) download URL on a mod-mismatch kick.
-# The link itself is appended as a separate component with a ClickEvent.OpenUrl.
-CLICKABLE_TEXT = "Your client does not match the server's mods. Download the modpack: "
+# The disconnect message shown to a mismatched/vanilla client. The *whole* text
+# is a clickable component (ClickableMessage.textWithLink) whose click event
+# targets the download URL, but the URL itself is not shown. ``{host}`` is the
+# short public hostname so the message reads cleanly even on a vanilla client
+# that cannot render click events, e.g. "Visit w8.mom to download the mods and
+# loader".
+CLICKABLE_TEXT_TEMPLATE = "Your client does not match the server's mods. Visit {host} to download the mods and loader."
+CLICKABLE_FALLBACK_TEXT_TEMPLATE = "This server runs a modpack you need first. Visit {host} to download the mods and loader."
+
+# Legacy names kept for callers/tests that import them directly.
+CLICKABLE_TEXT = "Your client does not match the server's mods. Visit w8.mom to download the mods and loader."
+CLICKABLE_FALLBACK_TEXT = "This server runs a modpack you need first. Visit w8.mom to download the mods and loader."
 
 # The class whose bytecode is rewritten to call the clickable-link helper.
 SERVER_HANDSHAKE_CLASS = "net/minecraft/server/network/ServerHandshakePacketListenerImpl.class"
@@ -48,27 +57,42 @@ NETWORK_REGISTRY_CLASS = "net/neoforged/neoforge/network/registration/NetworkReg
 # ``Component.translatableWithFallback`` (rendered verbatim by vanilla clients).
 NEOFORGE_REPLACEMENTS = {
     # Sent by NetworkRegistry for every modded-payload rejection.
-    "multiplayer.disconnect.incompatible": "Your client does not match the server's mods. Download the modpack: {}",
+    "multiplayer.disconnect.incompatible": "Your client does not match the server's mods. Visit {host} to download the mods and loader.",
     # Vanilla client joining a NeoForge server.
-    "You are trying to connect to a server that is running NeoForge, but you are not. Please install NeoForge Version: %s to connect to this server.": "This server runs a modpack you need first. Download it here: {}",
+    "You are trying to connect to a server that is running NeoForge, but you are not. Please install NeoForge Version: %s to connect to this server.": "This server runs a modpack you need first. Visit {host} to download the mods and loader.",
     # FML handshake version rejection.
-    "Incompatible client! Please use %s": "Your client does not match the server's mods. Download the modpack: {}",
+    "Incompatible client! Please use %s": "Your client does not match the server's mods. Visit {host} to download the mods and loader.",
 }
 
 FORGE_REPLACEMENTS = {
-    "multiplayer.disconnect.incompatible": "Your client does not match the server's mods. Download the modpack: {}",
-    "Incompatible client! Please use %s": "Your client does not match the server's mods. Download the modpack: {}",
+    "multiplayer.disconnect.incompatible": "Your client does not match the server's mods. Visit {host} to download the mods and loader.",
+    "Incompatible client! Please use %s": "Your client does not match the server's mods. Visit {host} to download the mods and loader.",
 }
 
 FABRIC_REPLACEMENTS = {
     # Fabric uses its own handshake; patch the vanilla key where present.
-    "multiplayer.disconnect.incompatible": "Your client does not match the server's mods. Download the modpack: {}",
+    "multiplayer.disconnect.incompatible": "Your client does not match the server's mods. Visit {host} to download the mods and loader.",
 }
 
 
 def _download_link(cfg) -> str:
     """Public installer download URL (delegates to the shared mod_hosting helper)."""
     return public_download_link(cfg)
+
+
+def _download_host(cfg) -> str:
+    """Short public hostname shown in the disconnect message (e.g. w8.mom)."""
+    return public_host(cfg)
+
+
+def _message(host: str) -> str:
+    """The full disconnect message with the short hostname baked in."""
+    return CLICKABLE_TEXT_TEMPLATE.format(host=host)
+
+
+def _fallback_message(host: str) -> str:
+    """The vanilla-client fallback message with the short hostname baked in."""
+    return CLICKABLE_FALLBACK_TEXT_TEMPLATE.format(host=host)
 
 
 def _loader_replacements(loader: str) -> dict[str, str]:
@@ -80,7 +104,7 @@ def _loader_replacements(loader: str) -> dict[str, str]:
     return table.get(loader, {})
 
 
-def _loader_byte_replacements(loader: str, link: str) -> list[tuple[bytes, bytes]]:
+def _loader_byte_replacements(loader: str, host: str) -> list[tuple[bytes, bytes]]:
     """Version-tolerant replacement table as ``[(old_bytes, new_bytes)]``.
 
     Loader disconnect strings vary by MC/loader version, so instead of a fixed
@@ -89,7 +113,7 @@ def _loader_byte_replacements(loader: str, link: str) -> list[tuple[bytes, bytes
     """
     out: list[tuple[bytes, bytes]] = []
     for key, fmt in _loader_replacements(loader).items():
-        out.append((key.encode("utf-8"), fmt.format(link).encode("utf-8")))
+        out.append((key.encode("utf-8"), fmt.format(host=host).encode("utf-8")))
     return out
 
 
@@ -496,6 +520,150 @@ def _clickable_constant_pool(entries: list, text: str, link: str, key: bytes, cl
     return out_entries, url_str_idx, mref_idx
 
 
+def _find_translatable_withfallback_methodref(entries: list) -> int | None:
+    """Return the constant-pool index of
+    ``Component.translatableWithFallback(String,String,Object[])``."""
+    nat_index = None
+    for i, (tag, info) in enumerate(entries):
+        if tag != 12:  # NameAndType
+            continue
+        name_idx, desc_idx = struct.unpack(">H", info[:2])[0], struct.unpack(">H", info[2:4])[0]
+        t_name, v_name = entries[name_idx - 1]
+        t_desc, v_desc = entries[desc_idx - 1]
+        if (
+            t_name == 1
+            and v_name == b"translatableWithFallback"
+            and t_desc == 1
+            and v_desc.startswith(b"(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/Object;)L")
+        ):
+            nat_index = i + 1
+            break
+    if nat_index is None:
+        return None
+    for i, (tag, info) in enumerate(entries):
+        if tag in (10, 11) and struct.unpack(">H", info[2:4])[0] == nat_index:
+            return i + 1
+    return None
+
+
+def _inject_clickable_fallback(data: bytes, link: str, text: str = CLICKABLE_FALLBACK_TEXT) -> bytes | None:
+    """Rewrite ``NetworkRegistry``'s vanilla-client "not supported" disconnect
+    to be clickable.
+
+    Our modpack message is passed as the *fallback* string to
+    ``Component.translatableWithFallback(key, fallback, args)``, so a vanilla
+    client reproduces it verbatim and the URL is a plain, non-clickable string.
+    This finds that call site (``ldc`/`ldc_w <fallback>`` preceded by the
+    translation key and followed by ``invokestatic translatableWithFallback``)
+    and rewrites the whole block to ``ClickableMessage.textWithLink(text, url)``
+    with equal-length NOP padding, preserving offsets and stack-map frames.
+
+    Returns the new class bytes, or ``None`` if the site was not found (already
+    patched or an unexpected layout).
+    """
+    entries, body_start = _parse_cp_entries(data)
+    body = data[body_start:]
+    twf_idx = _find_translatable_withfallback_methodref(entries)
+    if twf_idx is None:
+        return None
+
+    link_bytes = link.encode("utf-8")
+    text_bytes = text.encode("utf-8")
+
+    # The baked fallback message is a String constant whose utf8 is exactly the
+    # fallback text ("...Visit <host> to download the mods and loader.") that the
+    # string-replacement step just wrote. Locate it.
+    string_to_utf8: dict[int, bytes] = {}
+    for i, (tag, info) in enumerate(entries):
+        if tag == 8:  # String -> utf8 index
+            utf8_idx = struct.unpack(">H", info)[0]
+            if 1 <= utf8_idx <= len(entries):
+                subtag, subinfo = entries[utf8_idx - 1]
+                if subtag == 1:
+                    string_to_utf8[i + 1] = subinfo
+    fallback_str_idx = None
+    fallback_utf8 = None
+    for idx, val in string_to_utf8.items():
+        if val == text_bytes or (b"This server runs a modpack" in val and b"to download the mods and loader" in val):
+            fallback_str_idx = idx
+            fallback_utf8 = val
+            break
+    if fallback_str_idx is None:
+        return None
+
+    # Every `ldc/ldc_w <fallback>` preceded by a key `ldc/ldc_w` and followed
+    # (straight-line) by `invokestatic translatableWithFallback`.
+    sites: list[tuple[int, int]] = []
+    i = 0
+    while i < len(body):
+        op = body[i]
+        if op in (0x12, 0x13):  # ldc / ldc_w
+            if op == 0x12 and i + 2 <= len(body):
+                operand = body[i + 1]
+                start = i
+                nxt = i + 2
+            elif op == 0x13 and i + 3 <= len(body):
+                operand = struct.unpack(">H", body[i + 1 : i + 3])[0]
+                start = i
+                nxt = i + 3
+            else:
+                i += 1
+                continue
+        else:
+            i += 1
+            continue
+        if operand != fallback_str_idx:
+            i = nxt
+            continue
+        # Back up over the immediately-preceding key ldc/ldc_w.
+        block_start = None
+        if start >= 3 and body[start - 3] == 0x13:
+            block_start = start - 3
+        elif start >= 2 and body[start - 2] == 0x12:
+            block_start = start - 2
+        if block_start is None:
+            i = nxt
+            continue
+        end = None
+        j = nxt
+        limit = min(len(body) - 2, nxt + 256)
+        while j < limit:
+            if body[j] == 0xB8 and struct.unpack(">H", body[j + 1 : j + 3])[0] == twf_idx:
+                end = j + 3
+                break
+            j += 1
+        if end is None:
+            i = nxt
+            continue
+        sites.append((block_start, end))
+        i = end
+    if not sites:
+        return None
+
+    out_entries, url_str_idx, mref_idx = _clickable_constant_pool(
+        entries, text, link, fallback_utf8, class_name=b"neorunner_neoforge/ClickableMessage"
+    )
+    cp_bytes = bytearray()
+    for tag, info in out_entries:
+        cp_bytes += _encode_cp_entry(tag, info)
+    new_cp_count = len(out_entries) + 1
+    header = data[:8] + struct.pack(">H", new_cp_count) + bytes(cp_bytes)
+
+    new_body = bytearray(body)
+    for block_start, end in sites:
+        block = bytearray()
+        block += b"\x12" + bytes([fallback_str_idx]) if fallback_str_idx <= 0xFF else b"\x13" + struct.pack(">H", fallback_str_idx)
+        block += b"\x13" + struct.pack(">H", url_str_idx)  # ldc_w url
+        block += b"\xB8" + struct.pack(">H", mref_idx)  # invokestatic textWithLink
+        width = end - block_start
+        if len(block) > width:
+            raise ValueError("clickable fallback replacement exceeds original block")
+        block += b"\x00" * (width - len(block))
+        new_body[block_start:end] = bytes(block)
+
+    return header + bytes(new_body)
+
+
 def _inject_clickable_registry(data: bytes, link: str, text: str = CLICKABLE_TEXT) -> bytes | None:
     """Rewrite ``NetworkRegistry`` mod-mismatch disconnects to be clickable.
 
@@ -648,12 +816,42 @@ def _jar_registry_clickable(jar: Path) -> bool:
         return False
 
 
+def _jar_helper_is_stale(jar: Path) -> bool:
+    """True when a jar carries an *old* copy of the clickable helper.
+
+    The helper's body changed over time (e.g. the plaintext fallback was
+    replaced with a copy-to-clipboard click event). A jar whose embedded
+    helper bytes differ from the current compiled class must be re-patched so
+    the freshly-injected helper matches what ``_inject_clickable`` expects.
+    """
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(jar) as z:
+            names = z.namelist()
+            current: bytes | None = None
+            if CLICKABLE_CLASS_NAME in names:
+                current = clickable_message_class()
+                embedded = z.read(CLICKABLE_CLASS_NAME)
+            elif CLICKABLE_CLASS_NAME_NEOFORGE in names:
+                current = clickable_message_class_neoforge()
+                embedded = z.read(CLICKABLE_CLASS_NAME_NEOFORGE)
+            else:
+                return False
+            return embedded != current
+    except Exception:
+        return False
+
+
 def _patch_jar(jar: Path, loader: str) -> bool:
     """Patch a single universal jar in place. Returns True if anything changed."""
     import tempfile
     import zipfile
 
     link = _download_link(load_cfg())
+    host = _download_host(load_cfg())
+    text = _message(host)
+    fallback_text = _fallback_message(host)
     backup = jar.with_suffix(".jar.orig")
 
     # NeoForge's ``minecraft-server-patched`` jar sends the vanilla
@@ -674,15 +872,18 @@ def _patch_jar(jar: Path, loader: str) -> bool:
     baked = _baked_link(jar)
     clickable = _jar_is_clickable(jar) if do_clickable else True
     registry_clickable = _jar_registry_clickable(jar) if do_registry else True
-    stale = baked is not None and (
-        baked != link or (do_clickable and not clickable) or (do_registry and not registry_clickable)
+    helper_stale = _jar_helper_is_stale(jar)
+    stale = helper_stale or (
+        baked is not None and (
+            baked != link or (do_clickable and not clickable) or (do_registry and not registry_clickable)
+        )
     )
     if stale and backup.exists():
         shutil.copy2(backup, jar)
 
     # Version-tolerant byte map: only constants actually present in this jar's
     # classes will match, so the same table works across loader versions.
-    mapping = dict(_loader_byte_replacements(loader, link))
+    mapping = dict(_loader_byte_replacements(loader, host))
     if not mapping:
         return False
 
@@ -724,12 +925,12 @@ def _patch_jar(jar: Path, loader: str) -> bool:
                     # ``multiplayer.disconnect.incompatible`` key to the
                     # text-only message (plus a separate URL constant), so it
                     # must run on the pristine bytes, not the string-patched ones.
-                    out_data = _inject_clickable(data, link)
+                    out_data = _inject_clickable(data, link, text=text)
                     did_surgery = out_data is not None
                 if out_data is None and do_registry and name == NETWORK_REGISTRY_CLASS:
-                    out_data = _inject_clickable_registry(data, link)
-                    did_surgery = out_data is not None
-                    if did_surgery:
+                    reg_data = _inject_clickable_registry(data, link, text=text)
+                    if reg_data is not None:
+                        did_surgery = True
                         # The clickable surgery only rewrites the
                         # "multiplayer.disconnect.incompatible" key. NetworkRegistry
                         # also carries other mismatch strings (e.g. the vanilla
@@ -739,10 +940,20 @@ def _patch_jar(jar: Path, loader: str) -> bool:
                             k: v for k, v in mapping.items()
                             if k != b"multiplayer.disconnect.incompatible"
                         }
-                        if other_mapping and any(k in out_data for k in other_mapping):
-                            patched = _parse_and_rebuild(out_data, other_mapping)
-                            if patched != out_data:
-                                out_data = patched
+                        if other_mapping and any(k in reg_data for k in other_mapping):
+                            patched = _parse_and_rebuild(reg_data, other_mapping)
+                            if patched != reg_data:
+                                reg_data = patched
+                        out_data = reg_data
+                    # The vanilla-client "not supported" kick passes our message
+                    # as the *fallback* arg to translatableWithFallback, so it
+                    # renders as plain text.  The download link only appears in
+                    # that constant after the string replacement above, so run
+                    # the fallback surgery on the (possibly replaced) bytes.
+                    fallback_out = _inject_clickable_fallback(out_data or data, link, text=fallback_text)
+                    if fallback_out is not None:
+                        out_data = fallback_out
+                        did_surgery = True
                 if out_data is None and any(k in data for k in mapping):
                     # String replacement fallback (loader keys -> modpack message).
                     patched = _parse_and_rebuild(data, mapping)
@@ -832,14 +1043,18 @@ def loader_is_patched(loader: str | None = None) -> bool:
 
     For NeoForge this means both the string marker (in the universal jar) and,
     on the ``minecraft-server-patched`` jar, the clickable-link bytecode surgery.
+    It also validates that the baked URL matches the current config (so a
+    hostname change is detected) and that the injected helper class is the
+    current revision (so a stale plaintext-fallback helper is caught).
     """
     if loader is None:
         loader = load_cfg().loader
     link = _download_link(load_cfg())
+    host = _download_host(load_cfg())
     jars = _find_universal_jars(loader)
     if not jars:
         return False
-    marker = f"Download the modpack: {link}".encode()
+    marker = f"Visit {host} to download the mods and loader".encode()
     import zipfile
 
     has_string_marker = False
@@ -847,6 +1062,13 @@ def loader_is_patched(loader: str | None = None) -> bool:
     registry_ok = True
     for jar in jars:
         try:
+            # A jar whose helper is stale (old revision) or whose baked URL no
+            # longer matches the configured host is not considered patched.
+            if _jar_helper_is_stale(jar):
+                return False
+            baked = _baked_link(jar)
+            if baked is not None and baked != link:
+                return False
             with zipfile.ZipFile(jar) as z:
                 names = z.namelist()
                 if SERVER_HANDSHAKE_CLASS in names:

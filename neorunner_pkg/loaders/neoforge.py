@@ -86,13 +86,13 @@ class NeoForgeLoader(LoaderBase):
             "enable-rcon": "true",
             "rcon.password": _get_cfg_value(self.cfg, "rcon_pass", "changeme"),
             "rcon.port": str(_get_cfg_value(self.cfg, "rcon_port", 25575)),
-            "server-port": str(_get_cfg_value(self.cfg, "server_port", 1234)),
-            "motd": "NeoRunner - NeoForge Server",
+            "server-port": str(_get_cfg_value(self.cfg, "mc_port", _get_cfg_value(self.cfg, "server_port", 1234))),
+            "motd": _get_cfg_value(self.cfg, "server_description", "") or "NeoRunner - NeoForge Server",
             "level-name": "world",
             "gamemode": "survival",
             "difficulty": "normal",
             "max-players": "20",
-            "online-mode": "false",
+            "online-mode": "true",
             "pvp": "true",
             "allow-flight": "true",
             "network-compression-threshold": "256",
@@ -155,27 +155,10 @@ class NeoForgeLoader(LoaderBase):
                 pass
         
         # Try to run installer with ServerStarterJar if it exists
-        if os.path.exists(starter_jar):
-            run_script = os.path.join(cwd_str, "run.sh")
-            if not os.path.exists(run_script) or not os.path.exists(jar_path):
-                log_event("LOADER_NEOFORGE", f"Running installer for {nf_ver}...")
-                try:
-                    # Try with ServerStarterJar first
-                    result = subprocess.run(
-                        ["java", "-jar", starter_jar, "--installer", nf_ver], check=False,
-                        capture_output=True, text=True, timeout=180, cwd=cwd_str
-                    )
-                    if result.returncode != 0 and "installer" in result.stderr.lower() and os.path.exists(installer_jar):
-                        # Fallback: try direct with installer JAR if it exists
-                            subprocess.run(
-                                ["java", "-jar", installer_jar, "--installServer", "."], check=False,
-                                capture_output=True, timeout=180, cwd=cwd_str
-                            )
-                except Exception as e:
-                    log_event("LOADER_NEOFORGE", f"Installer note: {e}")
+        run_script = os.path.join(cwd_str, "run.sh")
+        self._ensure_run_script(nf_ver, run_script, jar_path, starter_jar, installer_jar, cwd_str)
         
         # Build command - prefer run.sh (properly configured), fallback to server.jar
-        run_script = os.path.join(cwd_str, "run.sh")
         if os.path.exists(run_script):
             # Use run.sh script directly for NeoForge 26.x
             java_cmd = ["./run.sh", "nogui"]
@@ -187,29 +170,93 @@ class NeoForgeLoader(LoaderBase):
         
         log_event("LOADER_NEOFORGE", f"Java cmd: {' '.join(java_cmd)}")
         return java_cmd
+
+    def _ensure_run_script(self, nf_ver: str, run_script: str, jar_path: str,
+                           starter_jar: str, installer_jar: str, cwd_str: str) -> None:
+        """Make sure run.sh targets the resolved NeoForge version.
+
+        A stale run.sh left over from a previous loader version points at a
+        missing unix_args.txt and crashes at launch.  If run.sh exists but
+        references a different/absent version we regenerate it.
+        """
+        expected_args = os.path.join(cwd_str, "libraries/net/neoforged/neoforge",
+                                     nf_ver, "unix_args.txt")
+        good = False
+        if os.path.exists(run_script) and os.path.exists(expected_args):
+            try:
+                with open(run_script) as f:
+                    if f"neoforge/{nf_ver}/unix_args.txt" in f.read():
+                        good = True
+            except OSError:
+                good = False
+        
+        if good:
+            return
+        
+        if os.path.exists(run_script):
+            log_event("LOADER_NEOFORGE",
+                      f"run.sh stale (points at wrong/absent NeoForge version), regenerating for {nf_ver}")
+            try:
+                os.remove(run_script)
+            except OSError:
+                pass
+        
+        if os.path.exists(starter_jar) or os.path.exists(jar_path):
+            log_event("LOADER_NEOFORGE", f"Running installer for {nf_ver}...")
+            try:
+                # Try with ServerStarterJar first
+                result = subprocess.run(
+                    ["java", "-jar", starter_jar, "--installer", nf_ver], check=False,
+                    capture_output=True, text=True, timeout=180, cwd=cwd_str
+                )
+                if result.returncode != 0 and "installer" in result.stderr.lower() and os.path.exists(installer_jar):
+                    # Fallback: try direct with installer JAR if it exists
+                        subprocess.run(
+                            ["java", "-jar", installer_jar, "--installServer", "."], check=False,
+                            capture_output=True, timeout=180, cwd=cwd_str
+                        )
+            except Exception as e:
+                log_event("LOADER_NEOFORGE", f"Installer note: {e}")
+        
+        if not os.path.exists(run_script) and os.path.exists(expected_args):
+            # ServerStarterJar regenerates run.sh; write a known-good one otherwise
+            try:
+                with open(run_script, "w") as f:
+                    f.write("#!/usr/bin/env sh\n"
+                            "exec java @user_jvm_args.txt "
+                            f"@libraries/net/neoforged/neoforge/{nf_ver}/unix_args.txt \"$@\"\n")
+                os.chmod(run_script, 0o755)
+                log_event("LOADER_NEOFORGE", f"Wrote run.sh for {nf_ver}")
+            except OSError as e:
+                log_event("LOADER_NEOFORGE", f"Could not write run.sh: {e}")
     
     def _get_neoforge_version(self) -> str:
         """Get NeoForge version - prefer local libraries, fallback to dynamic fetch."""
         lib_path = self.cwd / "libraries" / "net" / "neoforged" / "neoforge" if isinstance(self.cwd, Path) else os.path.join(self.cwd, "libraries/net/neoforged/neoforge")
+        mc_ver = self.mc_version if hasattr(self, 'mc_version') else ""
+        # Map MC version -> NeoForge prefix (1.21.x -> 21.x, 26.x -> 26.x)
+        try:
+            from ..version import _neoforge_version_prefix
+            nf_prefix = _neoforge_version_prefix(mc_ver)
+        except Exception:
+            nf_prefix = mc_ver.split(".")[1] if "." in mc_ver else None
         if os.path.exists(lib_path):
             versions = [d for d in os.listdir(lib_path) if os.path.isdir(os.path.join(lib_path, d))]
             if versions:
-                # Pick version matching mc_version, or latest
-                mc_ver = self.mc_version if hasattr(self, 'mc_version') else ""
-                mc_major = mc_ver.split(".")[1] if "." in mc_ver else "21"
-                for v in sorted(versions, reverse=True):
-                    if v.startswith(f"{mc_major}."):
-                        jar_path = os.path.join(lib_path, v, f"neoforge-{v}-universal.jar")
-                        if os.path.exists(jar_path):
-                            return v
+                if nf_prefix:
+                    for v in sorted(versions, reverse=True):
+                        if v == nf_prefix or v.startswith(f"{nf_prefix}."):
+                            jar_path = os.path.join(lib_path, v, f"neoforge-{v}-universal.jar")
+                            if os.path.exists(jar_path):
+                                return v
                 latest = max(versions)
                 jar_path = os.path.join(lib_path, latest, f"neoforge-{latest}-universal.jar")
                 if os.path.exists(jar_path):
                     return latest
         
-        # Fallback: fetch dynamically from Maven
+        # Fallback: fetch dynamically from Maven (scoped to the MC version)
         from ..version import get_latest_for_loader
-        latest = get_latest_for_loader("neoforge")
+        latest = get_latest_for_loader("neoforge", mc_version=mc_ver)
         if latest:
             return latest.split("-")[0] if "-" in latest else latest
         return None

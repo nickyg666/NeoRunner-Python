@@ -297,3 +297,78 @@ def setup_ferium_wizard(config: ServerConfig, cwd: Path | None = None) -> Server
     print("="*70 + "\n")
     
     return config
+
+
+# ---------------------------------------------------------------------------
+# Binary installation
+# ---------------------------------------------------------------------------
+
+FERIUM_RELEASE_API = "https://api.github.com/repos/gorilla-devs/ferium/releases/latest"
+FERIUM_USER_AGENT = "NeoRunner/2.4.0 ferium-installer"
+
+
+def _ferium_binary_path(cwd: Path | None = None) -> Path:
+    """Path the ferium binary is installed to (``.local/bin/ferium``)."""
+    return (cwd or CWD) / ".local" / "bin" / "ferium"
+
+
+def ensure_ferium(cwd: Path | None = None, force: bool = False) -> Path | None:
+    """Ensure the ferium binary is available, downloading it if needed.
+
+    Downloads the latest x86_64 musl Linux binary from the official GitHub
+    releases (https://github.com/gorilla-devs/ferium) and installs it to
+    ``.local/bin/ferium``. Best-effort: returns ``None`` on failure (ferium is
+    an optional optimisation, not a hard dependency).
+    """
+    import json as _json
+    import urllib.request
+    import zipfile
+
+    dest = _ferium_binary_path(cwd)
+    if dest.exists() and not force:
+        return dest
+
+    try:
+        req = urllib.request.Request(
+            FERIUM_RELEASE_API, headers={"User-Agent": FERIUM_USER_AGENT}
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = _json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        log_event("FERIUM", f"Could not query ferium releases: {e}")
+        return None
+
+    asset_url = None
+    for asset in data.get("assets", []):
+        name = asset.get("name", "")
+        if name == "ferium-linux.zip":
+            asset_url = asset.get("browser_download_url")
+            break
+    if not asset_url:
+        log_event("FERIUM", "No ferium-linux.zip asset in latest release")
+        return None
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        tmp_zip = dest.with_suffix(".zip.tmp")
+        req = urllib.request.Request(asset_url, headers={"User-Agent": FERIUM_USER_AGENT})
+        with urllib.request.urlopen(req, timeout=300) as resp, open(tmp_zip, "wb") as f:
+            while True:
+                chunk = resp.read(1024 * 512)
+                if not chunk:
+                    break
+                f.write(chunk)
+        with zipfile.ZipFile(tmp_zip) as z:
+            names = [n for n in z.namelist() if n.endswith("ferium")]
+            if not names:
+                log_event("FERIUM", "ferium binary not found in release archive")
+                return None
+            binary = z.read(names[0])
+        dest.write_bytes(binary)
+        dest.chmod(0o755)
+        tmp_zip.unlink(missing_ok=True)
+        log_event("FERIUM", f"Installed ferium binary to {dest}")
+        return dest
+    except Exception as e:
+        log_event("FERIUM", f"Failed to install ferium: {e}")
+        return None

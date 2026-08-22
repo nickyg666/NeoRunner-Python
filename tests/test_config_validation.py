@@ -1,7 +1,9 @@
 """Tests for config validation functionality."""
 
-import os
+import pytest
 import sys
+import os
+from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -14,7 +16,7 @@ class TestConfigValidationEdgeCases:
         from neorunner_pkg.config import ServerConfig, validate_config
         
         cfg = ServerConfig(mc_version="")
-        valid, _errors = validate_config(cfg, fail_on_error=False)
+        valid, errors = validate_config(cfg, fail_on_error=False)
         assert valid is False
     
     def test_validate_missing_mc_version(self):
@@ -22,7 +24,7 @@ class TestConfigValidationEdgeCases:
         from neorunner_pkg.config import ServerConfig, validate_config
         
         cfg = ServerConfig(mc_version=None)
-        valid, _errors = validate_config(cfg, fail_on_error=False)
+        valid, errors = validate_config(cfg, fail_on_error=False)
         assert valid is False
     
     def test_validate_invalid_loader(self):
@@ -30,7 +32,7 @@ class TestConfigValidationEdgeCases:
         from neorunner_pkg.config import ServerConfig, validate_config
         
         cfg = ServerConfig(loader="invalid")
-        valid, _errors = validate_config(cfg, fail_on_error=False)
+        valid, errors = validate_config(cfg, fail_on_error=False)
         assert valid is False
 
 
@@ -45,7 +47,7 @@ class TestConfigMemoryValidation:
         # The loader validation happens separately
         for mem in ["1G", "2G", "4G", "8G", "512M"]:
             cfg = ServerConfig(xmx=mem)
-            valid, _errors = validate_config(cfg, fail_on_error=False)
+            valid, errors = validate_config(cfg, fail_on_error=False)
             # Just verify it doesn't crash
             assert isinstance(valid, bool)
 
@@ -104,12 +106,12 @@ class TestConfigDefaults:
     
     def test_default_values_known(self):
         """Default values are correctly set."""
-        from neorunner_pkg.config import ServerConfig
+        from neorunner_pkg.config import ServerConfig, _get_default_version
         
         cfg = ServerConfig()
         
         assert cfg.rcon_port == "25575"
-        assert cfg.mc_port == 1234
+        assert cfg.mc_port == 25565
         assert cfg.http_port == 8000
         assert cfg.mods_dir == "mods"
         assert cfg.loader == "neoforge"

@@ -52,9 +52,8 @@ def build_installer_properties(cfg: ServerConfig, base_url: str | None = None, h
         else:
             base_url = f"http://{_get_local_ip()}:{http_port}"
     if not server_address:
-        src_host = host or _get_local_ip()
-        mc_port = int(getattr(cfg, "mc_port", 25565) or 25565)
-        server_address = f"{src_host}:{mc_port}" if mc_port != 25565 else src_host
+        from .mod_hosting import game_join_address
+        server_address = game_join_address(cfg)
 
     loader_version = ""
     try:
@@ -83,13 +82,75 @@ def build_installer_properties(cfg: ServerConfig, base_url: str | None = None, h
     ])
 
 
+def _pack_fingerprint(cfg: ServerConfig) -> str:
+    """Cheap fingerprint of everything that goes into the launcher pack.
+
+    Rebuilding the pack to compute its hash on every request is the bottleneck
+    behind a slow ``/dl/mods.zip`` (a ~300MB in-memory zip per hit).  Instead we
+    hash the *inputs* (name + size + mtime) so unchanged folders hit the disk
+    cache without rebuilding anything.
+    """
+    from .mod_hosting import _loader_installer_path
+
+    def stat_tuple(p: Path) -> tuple:
+        try:
+            st = p.stat()
+        except OSError:
+            return (p.name, 0, 0)
+        return (p.name, st.st_size, int(st.st_mtime))
+
+    parts: list[tuple] = []
+    installer = _loader_installer_path(cfg)
+    if installer is not None:
+        parts.append(("installer",) + stat_tuple(installer))
+
+    mods_dir = Path(cfg.mods_dir)
+    if not mods_dir.is_absolute():
+        mods_dir = CWD / mods_dir
+    clientonly_dir = Path(cfg.clientonly_dir)
+    if not clientonly_dir.is_absolute():
+        clientonly_dir = CWD / clientonly_dir
+
+    for d, prefix in ((mods_dir, "mods"), (clientonly_dir, "clientonly")):
+        if d.exists():
+            for f in sorted(d.glob("*.jar")):
+                if f.name.endswith(".server.jar"):
+                    continue
+                parts.append((prefix,) + stat_tuple(f))
+
+    for folder in ("config", "defaultconfigs", "shaderpacks", "resourcepacks"):
+        path = CWD / folder
+        if path.exists():
+            for f in sorted(path.rglob("*")):
+                if f.is_file():
+                    parts.append((folder,) + stat_tuple(f))
+
+    return hashlib.sha256(repr(parts).encode("utf-8")).hexdigest()[:16]
+
+
 def _build_pack_zip(cfg: ServerConfig) -> bytes:
-    """Build the embedded pack (mods + config + defaultconfigs) as bytes."""
+    """Build the embedded pack (mods + config + defaultconfigs) as bytes.
+
+    Cached to disk keyed by the input fingerprint, so a pack with unchanged
+    contents is returned without re-compressing ~300MB of mods on every hit.
+    """
     from .mod_hosting import build_launcher_zip_bytes
+
+    fp = _pack_fingerprint(cfg)
+    cache_dir = _cache_dir()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cached = cache_dir / f"pack-{fp}.zip"
+    if cached.exists() and cached.stat().st_size > 0:
+        return cached.read_bytes()
+
     buf = build_launcher_zip_bytes(cfg)
     if buf is None:
         raise RuntimeError("failed to build launcher pack")
-    return buf.getvalue()
+    data = buf.getvalue()
+    tmp = cached.with_suffix(".zip.tmp")
+    tmp.write_bytes(data)
+    tmp.replace(cached)
+    return data
 
 
 def build_installer_jar(cfg: ServerConfig, base_url: str | None = None, host: str | None = None,

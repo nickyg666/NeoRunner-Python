@@ -30,6 +30,7 @@ MOD_FILENAME = "neorunner-client-link-1.0.0.jar"
 _JAVA_SOURCES = [
     MOD_DIR / "src" / "neorunner" / "client" / "link" / "NeoRunnerClientLink.java",
     MOD_DIR / "src" / "neorunner" / "client" / "link" / "mixin" / "DisconnectedScreenMixin.java",
+    MOD_DIR / "src" / "neorunner" / "client" / "link" / "mixin" / "ModMismatchDisconnectedScreenMixin.java",
 ]
 _RESOURCES = MOD_DIR / "resources"
 
@@ -95,12 +96,40 @@ def build_client_link_mod(clientonly_dir: Path | None = None) -> Path | None:
         log_event("CLIENT_MOD", "no library classpath found - skipping client-link mod build")
         return None
 
+    # Cache: skip the (expensive) recompile when the jar is already up to date
+    # with every input -- sources, resources, and classpath jars.  Rebuilding
+    # unconditionally on every request churns the jar mtime, which breaks the
+    # downstream installer/bundle caches (new pack hash -> new cache key each hit).
+    if out_jar.exists() and out_jar.stat().st_size > 0:
+        try:
+            with zipfile.ZipFile(out_jar, "r") as zf:
+                names = set(zf.namelist())
+            # The jar is only valid if it actually contains the compiled mixin
+            # class. A stale/corrupt jar (e.g. clobbered by a test or an old
+            # build that only packaged resources) must be rebuilt regardless of
+            # mtime.
+            has_classes = any(
+                n == "neorunner/client/link/mixin/DisconnectedScreenMixin.class"
+                for n in names
+            )
+        except Exception:
+            has_classes = False
+        if has_classes:
+            newest_input = max(
+                [f.stat().st_mtime for f in _JAVA_SOURCES if f.exists()]
+                + [f.stat().st_mtime for f in _RESOURCES.rglob("*") if f.is_file()]
+                + [Path(p).stat().st_mtime for p in cp.split(":") if p and Path(p).exists()]
+                + [out_jar.stat().st_mtime],
+            )
+            if out_jar.stat().st_mtime >= newest_input:
+                return out_jar
+
     with tempfile.TemporaryDirectory(prefix="nr-clientmod-") as tmpd:
         tmp = Path(tmpd)
         classes = tmp / "classes"
         classes.mkdir()
         result = subprocess.run(
-            [javac, "--release", "21", "-nowarn", "-cp", cp, "-d", str(classes)]
+            [javac, "--release", "25", "-nowarn", "-cp", cp, "-d", str(classes)]
             + [str(s) for s in _JAVA_SOURCES],
             check=False, capture_output=True, text=True, timeout=180,
         )

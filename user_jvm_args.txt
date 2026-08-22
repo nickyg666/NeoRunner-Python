@@ -1,4 +1,0 @@
--Xmx4G
--Xms2G
--XX:+UseG1GC
--Djava.net.preferIPv4Stack=true

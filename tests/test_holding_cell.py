@@ -57,21 +57,22 @@ def test_room_properties_uses_configured_port():
 # ---------------------------------------------------------------------------
 def test_room_build_commands_dimensions():
     cmds = room_build_commands(_cfg(holding_cell_room_size=20))
-    # Floor + ceiling + 4 walls + lights + 4 corners
-    assert any(c.startswith("fill -10 120 -10 10 120 10 minecraft:white_concrete") for c in cmds)
+    # Floor + ceiling + 4 walls + lights + 4 corners (ground level, floor y=4)
+    assert any(c.startswith("fill -10 4 -10 10 4 10 minecraft:white_concrete") for c in cmds)
     assert any("minecraft:sea_lantern" in c for c in cmds)
     assert any("minecraft:barrier" in c for c in cmds)
-    assert "setworldspawn 0 121 0" in cmds
+    assert "setworldspawn 0 5 0" in cmds
     assert "gamemode adventure @a" in cmds
     assert "gamerule doDaylightCycle false" in cmds
-    assert "tp @a 0 121 0" in cmds
+    assert "tp @a 0 5 0" in cmds
+    assert any(c.startswith("forceload add -10 -10 10 10") for c in cmds)
 
 
 def test_room_build_commands_capped_at_20():
     cmds = room_build_commands(_cfg(holding_cell_room_size=40))
-    # Despite requesting 40, the room is capped at 20 (half=10, floor 120-139)
-    assert any(c.startswith("fill -10 120 -10 10 120 10 minecraft:white_concrete") for c in cmds)
-    assert any(c.startswith("fill 10 121 -10 10 138 10 minecraft:barrier") for c in cmds)
+    # Despite requesting 40, the room is capped at 20 (half=10, floor 4-23)
+    assert any(c.startswith("fill -10 4 -10 10 4 10 minecraft:white_concrete") for c in cmds)
+    assert any(c.startswith("fill 10 5 -10 10 22 10 minecraft:barrier") for c in cmds)
 
 
 def test_room_build_commands_includes_four_walls():

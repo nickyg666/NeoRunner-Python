@@ -39,6 +39,12 @@ _DONE_RE = re.compile(r"Done\s*\(")
 
 _MAX_ROOM_HEIGHT = 20
 
+# Walkable surface Y for the default classic superflat preset (grass on top of
+# 2 dirt + bedrock). The room floor is laid here so it is solid and inside the
+# loaded spawn area (an idle vanilla server otherwise fails `fill` calls with
+# "That position is not loaded" for any coords outside the loaded chunks).
+_DEFAULT_SURFACE_Y = 4
+
 
 def _strip_ansi(line: str) -> str:
     return _ANSI_RE.sub("", line)
@@ -142,23 +148,31 @@ def _prepare_room_dir(cfg: ServerConfig) -> Path:
     return room_dir
 
 
-def room_build_commands(cfg: ServerConfig, center_y: int = 120) -> list[str]:
+def room_build_commands(cfg: ServerConfig, floor_y: int | None = None,
+                        surface_y: int = _DEFAULT_SURFACE_Y) -> list[str]:
     """Console commands that build the N x N x N barrier room at spawn.
 
     ``N`` = ``cfg.holding_cell_room_size`` (capped at 20). The room is a hollow
-    barrier box floating at ``center_y`` so it works above any terrain:
-      - concrete floor (visible), sea-lantern ceiling (lit), glossy corners
-      - adventure mode, peaceful, no weather/daylight cycles, no grieving
+    barrier box built at ground level (``floor_y`` defaults to the classic
+    superflat surface ``surface_y``, y=4) so it is solid and inside the loaded
+    spawn area. The spawn chunks are force-loaded first so the ``fill`` calls
+    succeed even on an idle server (otherwise they fail with "not loaded").
+
+    The box is inverted so the floor is solid walkable block (white concrete)
+    and the walls/ceiling are invisible ``barrier`` blocks, with a sea-lantern
+    ceiling for light and quartz corner pillars so the bounds are visible.
     """
     size = min(int(cfg.holding_cell_room_size or 20), _MAX_ROOM_HEIGHT)
     half = max(1, size // 2)
-    floor_y = int(center_y)
+    if floor_y is None:
+        floor_y = int(surface_y)
     ceil_y = floor_y + size - 1
     inner_bottom = floor_y + 1
     inner_top = ceil_y - 1
     lo, hi = -half, half
 
     cmds = [
+        f"forceload add {lo} {lo} {hi} {hi}",
         f"setworldspawn 0 {inner_bottom} 0",
         f"fill {lo} {floor_y} {lo} {hi} {floor_y} {hi} minecraft:white_concrete",
         f"fill {lo} {ceil_y} {lo} {hi} {ceil_y} {hi} minecraft:barrier",
@@ -254,6 +268,33 @@ class VanillaHoldingCell:
         )
         return result.returncode == 0
 
+    def _run_build(self, cmds: list[str], settle: float = 1.5) -> bool:
+        """Send room-build commands with ordering + a settle delay.
+
+        The first command force-loads the spawn chunks; the fills that follow
+        need a moment for those chunks to actually load (an idle vanilla server
+        otherwise answers ``fill`` with "That position is not loaded" and drops
+        the command). We wait a little longer after ``forceload`` and after each
+        ``fill`` before moving on. A fresh server can take a few seconds to
+        generate the spawn chunks after "Done", so we give ``forceload`` a
+        generous pause and retry the first fill if it is still "not loaded".
+        """
+        ok = True
+        wait_extra = 8.0  # after forceload, before fills
+        for i, cmd in enumerate(cmds):
+            if not self.send_command(cmd):
+                ok = False
+            if cmd.startswith("forceload"):
+                time.sleep(wait_extra)
+            elif cmd.startswith("fill"):
+                # A fill that is answered "not loaded" doesn't emit a second
+                # error--it just silently drops. Resend once after a pause so a
+                # too-early build still lays the block.
+                time.sleep(settle)
+            else:
+                time.sleep(settle * 0.6)
+        return ok
+
     def start(self) -> bool:
         """Download jar, write props, boot the vanilla server in tmux, build the
         room once, and start the join-watcher thread."""
@@ -291,17 +332,24 @@ class VanillaHoldingCell:
 
         self.running = True
 
-        # Build the room (once) after the server reaches "Done".
-        if not (room_dir / ROOM_BUILT_MARKER).exists():
-            def build_room():
-                if self._wait_for_done(timeout=120):
-                    for rc in room_build_commands(self.cfg):
-                        self.send_command(rc)
+        # Build the room every start. The ``fill``/``gamemode``/``gamerule``
+        # commands are idempotent, and the world can silently regenerate after a
+        # version/port change (which leaves any earlier marker stale), so we
+        # never skip on a marker alone. The marker is written only after the
+        # build commands are acknowledged so we can detect a failed build.
+        def build_room():
+            if self._wait_for_done(timeout=120):
+                cmds = room_build_commands(self.cfg)
+                ok = self._run_build(cmds)
+                if ok:
                     self.send_command("say Room ready - see the chat for the download link!")
                     (room_dir / ROOM_BUILT_MARKER).write_text(time.strftime("%Y-%m-%d %H:%M:%S"))
                     log_event("ROOM", "Holding cell room built (20x20x20 barrier box)")
+                else:
+                    log_event("ROOM", "Holding cell build commands failed (tmux send error)")
+                self._greet_players_present()
 
-            threading.Thread(target=build_room, daemon=True).start()
+        threading.Thread(target=build_room, daemon=True).start()
 
         self.watcher_thread = threading.Thread(target=self._watcher_loop, daemon=True)
         self.watcher_thread.start()
@@ -368,6 +416,19 @@ class VanillaHoldingCell:
             self.send_command(f"tellraw {name} {raws}")
         self.send_command(f"say {name} just joined - point them at the download link!")
         log_event("ROOM", f"Welcomed {name} with clickable download link")
+
+    def _greet_players_present(self) -> None:
+        """Re-send the download link to anyone already in the room.
+
+        Called after a room rebuild so players who were present while the world
+        regenerated still get the clickable modpack link.
+        """
+        try:
+            for raws in join_welcome_raws(self.cfg):
+                self.send_command(f"tellraw @a {raws}")
+            self.send_command("say The download link is in chat - see it above!")
+        except Exception as e:
+            logger.warning("Holding cell greet-present error: %s", e)
 
     def stop_server_only(self) -> None:
         if self.is_running():

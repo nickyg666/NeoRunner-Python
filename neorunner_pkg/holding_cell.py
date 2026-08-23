@@ -138,7 +138,7 @@ def room_properties(cfg: ServerConfig) -> str:
         val("difficulty", "peaceful"),
         val("gamemode", "adventure"),
         val("white-list", "false"),
-        val("enforce-secure-profile", "true"),
+        val("enforce-secure-profile", "false"),
         "",
     ])
 

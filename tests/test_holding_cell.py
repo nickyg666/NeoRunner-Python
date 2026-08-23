@@ -43,6 +43,10 @@ def test_room_properties_has_vanilla_settings():
     assert '"block":"minecraft:grass_block","height":1' in props
     assert "server-port=25565" in props
     assert "online-mode=true" in props
+    # Secure-profile enforcement hides/restricts server chat + links (the client
+    # shows "chat is restricted by your profile" and blocks direct open/copy).
+    # The wait room must disable it so the plaintext URL opens directly.
+    assert "enforce-secure-profile=false" in props
     assert "gamemode=adventure" in props
     assert "difficulty=peaceful" in props
     assert "max-players=10" in props

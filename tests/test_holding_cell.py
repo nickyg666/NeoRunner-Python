@@ -196,3 +196,14 @@ def test_welcome_never_exposes_public_ip():
     )
     assert "174.49.233.151" not in all_text
     assert "W8.mom" in all_text
+
+
+def test_join_welcome_url_is_unstyled_plaintext():
+    raws_list = join_welcome_raws(_cfg())
+    download = json.loads(raws_list[1])
+    url_parts = [p for p in download if isinstance(p, dict) and p.get("text") == "https://W8.mom"]
+    assert len(url_parts) == 1
+    # No clickEvent and no link styling - the URL is sent as plain text.
+    assert "clickEvent" not in url_parts[0]
+    assert "color" not in url_parts[0]
+    assert "underlined" not in url_parts[0]

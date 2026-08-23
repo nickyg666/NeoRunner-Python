@@ -262,10 +262,10 @@ def join_welcome_raws(cfg: ServerConfig) -> list[str]:
     """Chat components (one list per message) sent to a joining player.
 
     Message 1: plain-text welcome (works everywhere).
-    Message 2: download instructions. The modpack URL is sent as *plaintext* --
-    vanilla's chat client auto-links bare URLs (blue + underlined, clickable,
-    and copyable), which is far more reliable than a custom ``open_url``
-    clickEvent that some clients don't render.
+    Message 2: download instructions. The modpack URL is sent as genuinely
+    plain text -- no clickEvent, no link styling. The raw characters are what
+    the player sees, so they can read it, copy it, or type it into a browser
+    (which the root UA-routes to the download page).
 
     The URL is the bare root (``https://<hostname>``): the server UA-routes the
     root -- browsers get the download page, Minecraft clients get the join
@@ -285,11 +285,11 @@ def join_welcome_raws(cfg: ServerConfig) -> list[str]:
         {"text": " the modded server yet.", "color": "white"},
     ]
     download = [
-        {"text": "1) Open the download page in your browser: ", "color": "white"},
-        {"text": link, "color": "aqua", "underlined": True},
-        {"text": "\n2) Install it, then launch Minecraft and join: ", "color": "white"},
-        {"text": addr, "color": "green", "underlined": True},
-        {"text": "\nNeed help? Visit the server website for instructions.",
+        {"text": "1) Open the download page in your browser:\n", "color": "white"},
+        {"text": link},
+        {"text": "\n\n2) Install it, then launch Minecraft and join:\n", "color": "white"},
+        {"text": addr},
+        {"text": "\n\nNeed help? Visit the server website for instructions.",
          "color": "gray"},
     ]
     return [_split_json_args(welcome), _split_json_args(download)]

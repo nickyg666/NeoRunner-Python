@@ -33,16 +33,15 @@ from .mod_hosting import public_download_link, public_host
 
 # The disconnect message shown to a mismatched/vanilla client. The *whole* text
 # is a clickable component (ClickableMessage.textWithLink) whose click event
-# targets the download URL, but the URL itself is not shown. ``{host}`` is the
-# short public hostname so the message reads cleanly even on a vanilla client
-# that cannot render click events, e.g. "Visit w8.mom to download the mods and
-# loader".
-CLICKABLE_TEXT_TEMPLATE = "Your client does not match the server's mods. Visit {host} to download the mods and loader."
-CLICKABLE_FALLBACK_TEXT_TEMPLATE = "This server runs a modpack you need first. Visit {host} to download the mods and loader."
+# targets the download URL, and the URL itself is shown as visible underlined
+# aqua text (same look as the holding cell's clickable chat links) so even a
+# vanilla client that cannot route click events can copy it from the message.
+CLICKABLE_TEXT_TEMPLATE = "Your client does not match the server's mods. Download the modpack: {link}"
+CLICKABLE_FALLBACK_TEXT_TEMPLATE = "This server runs a modpack you need first. Download the modpack: {link}"
 
 # Legacy names kept for callers/tests that import them directly.
-CLICKABLE_TEXT = "Your client does not match the server's mods. Visit w8.mom to download the mods and loader."
-CLICKABLE_FALLBACK_TEXT = "This server runs a modpack you need first. Visit w8.mom to download the mods and loader."
+CLICKABLE_TEXT = "Your client does not match the server's mods. Download the modpack: https://w8.mom/dl/mods.zip"
+CLICKABLE_FALLBACK_TEXT = "This server runs a modpack you need first. Download the modpack: https://w8.mom/dl/mods.zip"
 
 # The class whose bytecode is rewritten to call the clickable-link helper.
 SERVER_HANDSHAKE_CLASS = "net/minecraft/server/network/ServerHandshakePacketListenerImpl.class"
@@ -57,21 +56,21 @@ NETWORK_REGISTRY_CLASS = "net/neoforged/neoforge/network/registration/NetworkReg
 # ``Component.translatableWithFallback`` (rendered verbatim by vanilla clients).
 NEOFORGE_REPLACEMENTS = {
     # Sent by NetworkRegistry for every modded-payload rejection.
-    "multiplayer.disconnect.incompatible": "Your client does not match the server's mods. Visit {host} to download the mods and loader.",
+    "multiplayer.disconnect.incompatible": "Your client does not match the server's mods. Download the modpack: {link}",
     # Vanilla client joining a NeoForge server.
-    "You are trying to connect to a server that is running NeoForge, but you are not. Please install NeoForge Version: %s to connect to this server.": "This server runs a modpack you need first. Visit {host} to download the mods and loader.",
+    "You are trying to connect to a server that is running NeoForge, but you are not. Please install NeoForge Version: %s to connect to this server.": "This server runs a modpack you need first. Download the modpack: {link}",
     # FML handshake version rejection.
-    "Incompatible client! Please use %s": "Your client does not match the server's mods. Visit {host} to download the mods and loader.",
+    "Incompatible client! Please use %s": "Your client does not match the server's mods. Download the modpack: {link}",
 }
 
 FORGE_REPLACEMENTS = {
-    "multiplayer.disconnect.incompatible": "Your client does not match the server's mods. Visit {host} to download the mods and loader.",
-    "Incompatible client! Please use %s": "Your client does not match the server's mods. Visit {host} to download the mods and loader.",
+    "multiplayer.disconnect.incompatible": "Your client does not match the server's mods. Download the modpack: {link}",
+    "Incompatible client! Please use %s": "Your client does not match the server's mods. Download the modpack: {link}",
 }
 
 FABRIC_REPLACEMENTS = {
     # Fabric uses its own handshake; patch the vanilla key where present.
-    "multiplayer.disconnect.incompatible": "Your client does not match the server's mods. Visit {host} to download the mods and loader.",
+    "multiplayer.disconnect.incompatible": "Your client does not match the server's mods. Download the modpack: {link}",
 }
 
 
@@ -85,14 +84,14 @@ def _download_host(cfg) -> str:
     return public_host(cfg)
 
 
-def _message(host: str) -> str:
-    """The full disconnect message with the short hostname baked in."""
-    return CLICKABLE_TEXT_TEMPLATE.format(host=host)
+def _message(link: str) -> str:
+    """The full disconnect message with the download link baked in."""
+    return CLICKABLE_TEXT_TEMPLATE.format(link=link)
 
 
-def _fallback_message(host: str) -> str:
-    """The vanilla-client fallback message with the short hostname baked in."""
-    return CLICKABLE_FALLBACK_TEXT_TEMPLATE.format(host=host)
+def _fallback_message(link: str) -> str:
+    """The vanilla-client fallback message with the download link baked in."""
+    return CLICKABLE_FALLBACK_TEXT_TEMPLATE.format(link=link)
 
 
 def _loader_replacements(loader: str) -> dict[str, str]:
@@ -104,7 +103,7 @@ def _loader_replacements(loader: str) -> dict[str, str]:
     return table.get(loader, {})
 
 
-def _loader_byte_replacements(loader: str, host: str) -> list[tuple[bytes, bytes]]:
+def _loader_byte_replacements(loader: str, link: str) -> list[tuple[bytes, bytes]]:
     """Version-tolerant replacement table as ``[(old_bytes, new_bytes)]``.
 
     Loader disconnect strings vary by MC/loader version, so instead of a fixed
@@ -113,7 +112,7 @@ def _loader_byte_replacements(loader: str, host: str) -> list[tuple[bytes, bytes
     """
     out: list[tuple[bytes, bytes]] = []
     for key, fmt in _loader_replacements(loader).items():
-        out.append((key.encode("utf-8"), fmt.format(host=host).encode("utf-8")))
+        out.append((key.encode("utf-8"), fmt.format(link=link).encode("utf-8")))
     return out
 
 
@@ -754,6 +753,28 @@ def _inject_clickable_registry(data: bytes, link: str, text: str = CLICKABLE_TEX
 _URL_RE = None
 
 
+def _jar_baked_text_stale(jar: Path) -> bool:
+    """True if the jar still carries a *legacy* disconnect message template.
+
+    The current templates say "Download the modpack:"; anything that still
+    renders "Visit ... to download the mods and loader" is a leftover from an
+    older patch and must be re-baked from the pristine backup.
+    """
+    import zipfile
+
+    legacy = b"to download the mods and loader"
+    try:
+        with zipfile.ZipFile(jar) as z:
+            for name in z.namelist():
+                if not name.endswith(".class"):
+                    continue
+                if legacy in z.read(name):
+                    return True
+    except Exception:
+        return False
+    return False
+
+
 def _baked_link(jar: Path) -> str | None:
     """Return the download link currently baked into a patched jar, if any."""
     import re
@@ -849,9 +870,8 @@ def _patch_jar(jar: Path, loader: str) -> bool:
     import zipfile
 
     link = _download_link(load_cfg())
-    host = _download_host(load_cfg())
-    text = _message(host)
-    fallback_text = _fallback_message(host)
+    text = _message(link)
+    fallback_text = _fallback_message(link)
     backup = jar.with_suffix(".jar.orig")
 
     # NeoForge's ``minecraft-server-patched`` jar sends the vanilla
@@ -867,13 +887,15 @@ def _patch_jar(jar: Path, loader: str) -> bool:
     do_registry = loader == "neoforge" and is_registry
 
     # Restore the pristine backup before re-patching if the jar already carries
-    # a *different* link (hostname changed), or if it was string-patched before
-    # the clickable feature existed and still needs the clickable upgrade.
+    # a *different* link (hostname changed), or a different message text (e.g.
+    # the template was updated), or if it was string-patched before the
+    # clickable feature existed and still needs the clickable upgrade.
     baked = _baked_link(jar)
     clickable = _jar_is_clickable(jar) if do_clickable else True
     registry_clickable = _jar_registry_clickable(jar) if do_registry else True
     helper_stale = _jar_helper_is_stale(jar)
-    stale = helper_stale or (
+    text_stale = _jar_baked_text_stale(jar)
+    stale = helper_stale or text_stale or (
         baked is not None and (
             baked != link or (do_clickable and not clickable) or (do_registry and not registry_clickable)
         )
@@ -883,7 +905,7 @@ def _patch_jar(jar: Path, loader: str) -> bool:
 
     # Version-tolerant byte map: only constants actually present in this jar's
     # classes will match, so the same table works across loader versions.
-    mapping = dict(_loader_byte_replacements(loader, host))
+    mapping = dict(_loader_byte_replacements(loader, link))
     if not mapping:
         return False
 
@@ -1050,11 +1072,10 @@ def loader_is_patched(loader: str | None = None) -> bool:
     if loader is None:
         loader = load_cfg().loader
     link = _download_link(load_cfg())
-    host = _download_host(load_cfg())
     jars = _find_universal_jars(loader)
     if not jars:
         return False
-    marker = f"Visit {host} to download the mods and loader".encode()
+    marker = f"Download the modpack: {link}".encode()
     import zipfile
 
     has_string_marker = False

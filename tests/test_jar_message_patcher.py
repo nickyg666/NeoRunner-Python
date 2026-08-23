@@ -101,7 +101,7 @@ def _make_fallback_class() -> bytes:
     Constant pool:
       #1 Utf8              neoforge...not_supported        (translation key)
       #2 String -> #1
-      #3 Utf8              This server runs a modpack you need first. Visit w8.mom to download the mods and loader.
+      #3 Utf8              This server runs a modpack you need first. Download the modpack: https://w8.mom/dl/mods.zip
       #4 String -> #3      (the baked fallback)
       #5 Utf8              net/minecraft/network/chat/Component
       #6 Class -> #5
@@ -114,7 +114,7 @@ def _make_fallback_class() -> bytes:
     then invokestatic translatableWithFallback).
     """
     utf8_key = b"neoforge.network.negotiation.failure.vanilla.client.not_supported"
-    utf8_fallback = b"This server runs a modpack you need first. Visit w8.mom to download the mods and loader."
+    utf8_fallback = b"This server runs a modpack you need first. Download the modpack: https://w8.mom/dl/mods.zip"
     utf8_component = b"net/minecraft/network/chat/Component"
     utf8_name = b"translatableWithFallback"
     utf8_desc = b"(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/Object;)Lnet/minecraft/network/chat/MutableComponent;"
@@ -197,7 +197,7 @@ class TestPatchJar:
 
         with zipfile.ZipFile(jar) as z:
             data = z.read("net/neoforged/neoforge/network/registration/NetworkRegistry.class")
-        assert b"to download the mods and loader" in data
+        assert b"Download the modpack:" in data
         assert b"multiplayer.disconnect.incompatible" not in data
 
         # Idempotent: second patch also reports True but stays valid
@@ -267,7 +267,7 @@ class TestPatchJar:
             names = z.namelist()
             data = z.read("net/neoforged/neoforge/network/registration/NetworkRegistry.class")
             manifest_out = z.read("META-INF/MANIFEST.MF")
-        assert b"to download the mods and loader" in data
+        assert b"Download the modpack:" in data
         assert "META-INF/NEORUNNER.SF" not in names
         assert "META-INF/NEORUNNER.RSA" not in names
         # Per-entry digest section stripped, main section kept
@@ -283,7 +283,7 @@ class TestClickableInjection:
         out = jmp._inject_clickable(data, self.LINK)
         assert out is not None
         # Text-only message + separate link constant + helper reference baked in.
-        assert b"Your client does not match the server's mods. Visit w8.mom to download the mods and loader." in out
+        assert b"Your client does not match the server's mods. Download the modpack: https://w8.mom/dl/mods.zip" in out
         assert self.LINK.encode() in out
         assert b"textWithLink" in out
         assert b"multiplayer.disconnect.incompatible" not in out
@@ -323,7 +323,7 @@ class TestClickableInjection:
         out = jmp._inject_clickable_registry(data, self.LINK)
         assert out is not None
         # Text-only message + separate link constant + helper reference baked in.
-        assert b"Your client does not match the server's mods. Visit w8.mom to download the mods and loader." in out
+        assert b"Your client does not match the server's mods. Download the modpack: https://w8.mom/dl/mods.zip" in out
         assert self.LINK.encode() in out
         assert b"textWithLink" in out
         assert b"multiplayer.disconnect.incompatible" not in out
@@ -438,7 +438,7 @@ class TestClickableInjection:
         out = jmp._inject_clickable_fallback(data, self.LINK)
         assert out is not None
         # Text captured as its own constant, link separate, helper baked in.
-        assert b"to download the mods and loader" in out
+        assert b"Download the modpack:" in out
         assert self.LINK.encode() in out
         assert b"neorunner_neoforge/ClickableMessage" in out
         assert b"textWithLink" in out
@@ -466,7 +466,7 @@ class TestClickableInjection:
             data = z.read("net/neoforged/neoforge/network/registration/NetworkRegistry.class")
         assert b"neorunner_neoforge/ClickableMessage" in data
         assert b"textWithLink" in data
-        assert b"to download the mods and loader" in data
+        assert b"Download the modpack:" in data
 
         # Idempotent: second patch reports no change.
         assert jmp._patch_jar(jar, "neoforge") is False
@@ -518,3 +518,20 @@ class TestStripJarSignatures:
         filtered, clean = jmp.strip_jar_signatures(["net/example/Foo.class"], None)
         assert filtered == ["net/example/Foo.class"]
         assert clean is None
+
+
+class TestVisibleLink:
+    def test_message_shows_link_text(self):
+        """The disconnect message includes the URL as visible text."""
+        link = "https://w8.mom/dl/mods.zip"
+        msg = jmp._message(link)
+        assert "Download the modpack:" in msg
+        assert link in msg
+        assert "Visit" not in msg and "to download the mods and loader" not in msg
+
+    def test_fallback_message_shows_link_text(self):
+        link = "https://w8.mom/dl/mods.zip"
+        msg = jmp._fallback_message(link)
+        assert "Download the modpack:" in msg
+        assert link in msg
+        assert "Visit" not in msg

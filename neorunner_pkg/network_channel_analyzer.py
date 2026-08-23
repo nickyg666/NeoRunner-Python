@@ -1,6 +1,7 @@
 """Network channel analyzer for detecting client/server mod mismatches."""
 
 
+import json
 import re
 from dataclasses import dataclass
 from typing import ClassVar
@@ -259,14 +260,24 @@ class NetworkChannelAnalyzer:
     def kick_reason(self, mismatch: ChannelMismatch) -> str | None:
         """Build the kick message to send a mismatched player.
 
-        Returns a message for every mismatch direction so the server can kick
-        clients whose mod set diverges from the server's, pointing them at the
-        modpack download link. Returns None only when there is no player to kick.
+        Returns a JSON text component with a clickable ``open_url`` link
+        pointing to the modpack download, using the *exact* same component
+        format the vanilla holding cell uses in its chat (modern 1.21.5+
+        ``click_event``/``url`` syntax) so the neorunner-client-link mod
+        renders a clickable "Download the modpack" link on the kick screen.
+        Returns None only when there is no player to kick.
         """
         if not mismatch.player:
             return None
-        return ("Your client mods do not match the server. "
-                f"Download the modpack: {self._link}")
+        link = self._link
+        # Compact, no-space JSON -- mirrors holding_cell.join_welcome_raws so
+        # the component shape is identical to the lobby's clickable links.
+        parts = [
+            {"text": "Your client mods do not match the server. ", "color": "white"},
+            {"text": "Download the modpack", "color": "aqua", "underlined": True,
+             "click_event": {"action": "open_url", "url": link}},
+        ]
+        return json.dumps(parts, ensure_ascii=False, separators=(",", ":"))
 
 
 def analyze_network_channels(log_text: str) -> list[ChannelMismatch]:

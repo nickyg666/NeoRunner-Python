@@ -237,7 +237,7 @@ def _room_lectern_commands(cfg: ServerConfig, inner_bottom: int, inner_top: int)
     ])
 
     lectern = (
-        f"setblock {bx} {by} {bz} minecraft:lectern[facing=north]"
+        f"setblock {bx} {by} {bz} minecraft:lectern[facing=north,has_book=true]"
         f"{{Book:{{id:\"minecraft:written_book\",Count:1,components:{{"
         f"written_book_content:{{title:\"NeoRunner\",author:\"NeoRunner\","
         f"pages:[{pages_arg}]}}}}}}}}"
@@ -249,8 +249,10 @@ def join_welcome_raws(cfg: ServerConfig) -> list[str]:
     """Chat components (one list per message) sent to a joining player.
 
     Message 1: plain-text welcome (works everywhere).
-    Message 2: clickable download link + modded server address (vanilla chat
-    renders open_url links as blue, clickable).
+    Message 2: download instructions. The modpack URL is sent as *plaintext* --
+    vanilla's chat client auto-links bare URLs (blue + underlined, clickable,
+    and copyable), which is far more reliable than a custom ``open_url``
+    clickEvent that some clients don't render.
     """
     from .mod_hosting import game_join_address, public_download_link
 
@@ -265,11 +267,10 @@ def join_welcome_raws(cfg: ServerConfig) -> list[str]:
         {"text": " the modded server yet.", "color": "white"},
     ]
     download = [
-        {"text": "1) Click here to download the modpack: ", "color": "white"},
-        {"text": "[ DOWNLOAD MODS ]", "color": "green", "bold": True, "underlined": True,
-         "clickEvent": {"action": "open_url", "value": link}},
+        {"text": "1) Download the modpack here: ", "color": "white"},
+        {"text": link, "color": "aqua", "underlined": True},
         {"text": "\n2) Install it, then launch Minecraft and join: ", "color": "white"},
-        {"text": addr, "color": "aqua", "underlined": True},
+        {"text": addr, "color": "green", "underlined": True},
         {"text": "\nNeed help? Visit the server website for instructions.",
          "color": "gray"},
     ]

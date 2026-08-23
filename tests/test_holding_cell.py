@@ -88,7 +88,7 @@ def test_room_build_commands_include_lectern_with_book():
     cmds = room_build_commands(_cfg(holding_cell_room_size=20))
     lectern = [c for c in cmds if "minecraft:lectern" in c]
     assert len(lectern) == 1
-    assert "setblock 0 5 0 minecraft:lectern[facing=north]" in lectern[0]
+    assert "setblock 0 5 0 minecraft:lectern[facing=north,has_book=true]" in lectern[0]
     assert 'Book:{id:"minecraft:written_book"' in lectern[0]
     assert "written_book_content" in lectern[0]
     assert "NeoRunner" in lectern[0]
@@ -101,15 +101,14 @@ def test_room_build_commands_include_lectern_with_book():
 # ---------------------------------------------------------------------------
 # join welcome tellraw
 # ---------------------------------------------------------------------------
-def test_join_welcome_has_clickable_download_link():
+def test_join_welcome_has_plaintext_download_link():
     raws_list = join_welcome_raws(_cfg())
     assert len(raws_list) == 2
     download = json.loads(raws_list[1])  # second message = download instructions
     texts = [p for p in download if isinstance(p, dict) and "text" in p]
-    link_part = next(p for p in texts if p.get("clickEvent"))
-    assert link_part["clickEvent"]["action"] == "open_url"
-    assert link_part["clickEvent"]["value"] == "https://W8.mom/dl/mods.zip"
-    assert "DOWNLOAD MODS" in link_part["text"]
+    # The URL is plaintext (no clickEvent) so vanilla auto-links + it is copyable
+    assert any("https://W8.mom/dl/mods.zip" in p["text"] for p in texts)
+    assert all(not p.get("clickEvent") for p in texts)
 
 
 def test_join_welcome_includes_modded_address():

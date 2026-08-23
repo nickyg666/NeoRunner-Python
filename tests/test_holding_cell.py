@@ -207,3 +207,17 @@ def test_join_welcome_url_is_unstyled_plaintext():
     assert "clickEvent" not in url_parts[0]
     assert "color" not in url_parts[0]
     assert "underlined" not in url_parts[0]
+
+
+def test_greet_player_broadcasts_to_all(monkeypatch):
+    """_greet_player sends tellraw @a (not the name) so a just-joining player
+    can't be missed by target resolution timing."""
+    from neorunner_pkg.holding_cell import VanillaHoldingCell
+    cell = VanillaHoldingCell(_cfg())
+    sent = []
+    monkeypatch.setattr(cell, "send_command", lambda cmd: sent.append(cmd) or True)
+    monkeypatch.setattr("neorunner_pkg.holding_cell.time.sleep", lambda s: None)
+    cell._greet_player("TestPlayer")
+    tellraws = [c for c in sent if c.startswith("tellraw")]
+    assert len(tellraws) == 2
+    assert all("@a" in t for t in tellraws)

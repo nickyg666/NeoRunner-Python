@@ -491,10 +491,19 @@ class VanillaHoldingCell:
             time.sleep(2)
 
     def _greet_player(self, name: str) -> None:
-        for raws in join_welcome_raws(self.cfg):
-            self.send_command(f"tellraw {name} {raws}")
-        self.send_command(f"say {name} just joined - point them at the download link!")
-        log_event("ROOM", f"Welcomed {name} with clickable download link")
+        # Broadcast to @a (everyone in the room) rather than targeting the
+        # joining player by name: right after the "joined the game" log line the
+        # player entity may not yet be a valid `tellraw <name>` target, which
+        # silently drops the message. @a is immune to that timing/casing issue,
+        # and the room is a tiny lobby so everyone seeing the link is fine.
+        time.sleep(2)  # let the player finish logging in
+        try:
+            for raws in join_welcome_raws(self.cfg):
+                self.send_command(f"tellraw @a {raws}")
+            self.send_command(f"say Welcome {name} - the download link is in chat above!")
+            log_event("ROOM", f"Welcomed {name} with clickable download link")
+        except Exception as e:
+            logger.warning("Holding cell greet error: %s", e)
 
     def _greet_players_present(self) -> None:
         """Re-send the download link to anyone already in the room.

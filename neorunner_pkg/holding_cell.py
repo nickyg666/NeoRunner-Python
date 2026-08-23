@@ -206,6 +206,19 @@ def room_build_commands(cfg: ServerConfig, floor_y: int | None = None,
     return cmds
 
 
+def _host_join_address(cfg: ServerConfig) -> str:
+    """Join address built from the configured DNS hostname (never the public IP).
+
+    Uses ``cfg.hostname`` (via ``public_host``) with the modded server port
+    appended only when it is not the default 25565.
+    """
+    from .mod_hosting import public_host
+
+    host = public_host(cfg)
+    port = int(getattr(cfg, "mc_port", 25565) or 25565)
+    return host if port == 25565 else f"{host}:{port}"
+
+
 def _room_lectern_commands(cfg: ServerConfig, inner_bottom: int, inner_top: int) -> list[str]:
     """Commands placing a podium (lectern + written book) at the room's center.
 
@@ -220,9 +233,10 @@ def _room_lectern_commands(cfg: ServerConfig, inner_bottom: int, inner_top: int)
     """
     bx, bz = 0, 0  # room center
     by = inner_bottom  # standing on the floor
-    from .mod_hosting import game_join_address, public_download_link
-    download_link = public_download_link(cfg)
-    addr = game_join_address(cfg)
+    from .mod_hosting import public_download_base
+
+    link = public_download_base(cfg)  # bare root; the server UA-routes browsers
+    addr = _host_join_address(cfg)
 
     def page(text: str) -> str:
         raw = json.dumps({"text": text}, ensure_ascii=False, separators=(",", ":"))
@@ -231,9 +245,8 @@ def _room_lectern_commands(cfg: ServerConfig, inner_bottom: int, inner_top: int)
     pages_arg = ",".join([
         page("Welcome to NeoRunner! This is a staging lobby for the modded server.\n\n"
              "Grab the modpack below, install it, and come join us!"),
-        page("1) Download the modpack: " + download_link + "\n\n"
-             "2) Launch Minecraft with the NeoForge profile.\n\n"
-             "3) Join the server at: " + addr),
+        page("1) Open " + link + " in your browser to download the modpack.\n\n"
+             "2) Install it, then launch Minecraft and join:\n" + addr),
     ])
 
     lectern = (
@@ -253,11 +266,16 @@ def join_welcome_raws(cfg: ServerConfig) -> list[str]:
     vanilla's chat client auto-links bare URLs (blue + underlined, clickable,
     and copyable), which is far more reliable than a custom ``open_url``
     clickEvent that some clients don't render.
-    """
-    from .mod_hosting import game_join_address, public_download_link
 
-    link = public_download_link(cfg)
-    addr = game_join_address(cfg)
+    The URL is the bare root (``https://<hostname>``): the server UA-routes the
+    root -- browsers get the download page, Minecraft clients get the join
+    address -- so no path is needed. The join address uses the configured DNS
+    hostname, never the public IP.
+    """
+    from .mod_hosting import public_download_base
+
+    link = public_download_base(cfg)
+    addr = _host_join_address(cfg)
 
     welcome = [
         {"text": "--- NeoRunner Download Lobby ---", "color": "gold", "bold": True},
@@ -267,7 +285,7 @@ def join_welcome_raws(cfg: ServerConfig) -> list[str]:
         {"text": " the modded server yet.", "color": "white"},
     ]
     download = [
-        {"text": "1) Download the modpack here: ", "color": "white"},
+        {"text": "1) Open the download page in your browser: ", "color": "white"},
         {"text": link, "color": "aqua", "underlined": True},
         {"text": "\n2) Install it, then launch Minecraft and join: ", "color": "white"},
         {"text": addr, "color": "green", "underlined": True},

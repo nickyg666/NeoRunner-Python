@@ -94,8 +94,8 @@ def test_room_build_commands_include_lectern_with_book():
     assert "NeoRunner" in lectern[0]
     # Both pages (welcome + download/join instructions) are embedded
     assert "staging lobby" in lectern[0]
-    assert "W8.mom/dl/mods.zip" in lectern[0]
-    assert "Join the server at" in lectern[0]
+    assert "https://W8.mom" in lectern[0]
+    assert "browser to download the modpack" in lectern[0]
 
 
 # ---------------------------------------------------------------------------
@@ -106,8 +106,9 @@ def test_join_welcome_has_plaintext_download_link():
     assert len(raws_list) == 2
     download = json.loads(raws_list[1])  # second message = download instructions
     texts = [p for p in download if isinstance(p, dict) and "text" in p]
-    # The URL is plaintext (no clickEvent) so vanilla auto-links + it is copyable
-    assert any("https://W8.mom/dl/mods.zip" in p["text"] for p in texts)
+    # The URL is plaintext (no clickEvent) so vanilla auto-links + it is copyable.
+    # It is the bare root (hostname) - the server UA-routes the root.
+    assert any("https://W8.mom" in p["text"] for p in texts)
     assert all(not p.get("clickEvent") for p in texts)
 
 
@@ -116,7 +117,9 @@ def test_join_welcome_includes_modded_address():
     download = json.loads(raws_list[1])
     texts = [p.get("text", "") for p in download if isinstance(p, dict)]
     joined = "\n".join(texts)
-    assert "174.49.233.151:1234" in joined
+    # Join address uses the configured DNS hostname (never the public IP).
+    assert "W8.mom:1234" in joined
+    assert "174.49.233.151" not in joined
 
 
 def test_join_welcome_first_message_is_plain():
@@ -171,3 +174,21 @@ def test_room_join_address_waiting_room_owns_forwarded_port():
 def test_room_properties_port_uses_holding_cell_port():
     props = room_properties(_cfg(holding_cell_port=1234))
     assert "server-port=1234" in props
+
+
+# ---------------------------------------------------------------------------
+# hostname-based join address (no public IP exposure)
+# ---------------------------------------------------------------------------
+def test_host_join_address_uses_hostname():
+    from neorunner_pkg.holding_cell import _host_join_address
+    assert _host_join_address(_cfg(mc_port=25565)) == "W8.mom"
+    assert _host_join_address(_cfg(mc_port=1234)) == "W8.mom:1234"
+
+
+def test_welcome_never_exposes_public_ip():
+    raws_list = join_welcome_raws(_cfg())
+    all_text = " ".join(
+        p.get("text", "") for r in raws_list for p in json.loads(r) if isinstance(p, dict)
+    )
+    assert "174.49.233.151" not in all_text
+    assert "W8.mom" in all_text

@@ -133,3 +133,40 @@ class TestJarJarDeps:
         # (required - installed) must now leave it empty.
         assert _required_deps_of(jar) == {"scena"}
         assert _required_deps_of(jar) - set(_collect_installed_mod_ids([tmp_path])) == set()
+
+
+class TestDependencyResolutionFixes:
+    def test_jij_bundled_deps_count_as_installed(self, tmp_path):
+        """A jar that bundles scena via jarjar should not flag scena as missing."""
+        from neorunner_pkg.self_heal import _collect_installed_mod_ids
+        # Build a fake C&B-like jar with an inner jarjar providing 'scena'
+        jar = tmp_path / "chisels.jar"
+        import io
+        inner_toml = b'[[mods]]\nmodId="scena"\nversion="1.0"\n'
+        inner = io.BytesIO()
+        import zipfile as zf
+        with zf.ZipFile(inner, "w") as iz:
+            iz.writestr("META-INF/neoforge.mods.toml", inner_toml)
+        with zf.ZipFile(jar, "w") as z:
+            z.writestr("META-INF/neoforge.mods.toml",
+                       b'[[mods]]\nmodId="chiselsandbits"\nversion="1.0"\n')
+            z.writestr("META-INF/jarjar/scena.jar", inner.getvalue())
+        ids = _collect_installed_mod_ids([tmp_path])
+        assert "scena" in ids
+        assert "chiselsandbits" in ids
+
+    def test_clientonly_mods_count_as_installed(self, tmp_path):
+        """Clientonly mods (e.g. ETF) satisfy their dependents' requirements."""
+        from neorunner_pkg.self_heal import _collect_installed_mod_ids
+        mods = tmp_path / "mods"
+        clientonly = tmp_path / "clientonly"
+        mods.mkdir()
+        clientonly.mkdir()
+        (clientonly / "etf.jar").write_bytes(
+            b'PK\x05\x06' + b'\x00' * 18)  # empty zip
+        import zipfile as zf
+        with zf.ZipFile(clientonly / "etf.jar", "w") as z:
+            z.writestr("META-INF/neoforge.mods.toml",
+                       b'[[mods]]\nmodId="entity_texture_features"\nversion="1.0"\n')
+        ids = _collect_installed_mod_ids([mods, clientonly])
+        assert "entity_texture_features" in ids

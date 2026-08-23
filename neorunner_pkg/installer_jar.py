@@ -15,6 +15,7 @@ contents change.
 import hashlib
 import io
 import logging
+import os
 import shutil
 import subprocess
 import tempfile
@@ -52,8 +53,16 @@ def build_installer_properties(cfg: ServerConfig, base_url: str | None = None, h
         else:
             base_url = f"http://{_get_local_ip()}:{http_port}"
     if not server_address:
-        from .mod_hosting import game_join_address
-        server_address = game_join_address(cfg)
+        # Prefer the configured domain so the installer tells players to join at
+        # the friendly hostname (e.g. w8.mom) rather than exposing the public IP.
+        # Fall back to the direct game address only when no domain is set.
+        host = getattr(cfg, "hostname", "") or ""
+        if host:
+            port = int(getattr(cfg, "mc_port", 25565) or 25565)
+            server_address = host if port == 25565 else f"{host}:{port}"
+        else:
+            from .mod_hosting import game_join_address
+            server_address = game_join_address(cfg)
 
     loader_version = ""
     try:
@@ -147,9 +156,20 @@ def _build_pack_zip(cfg: ServerConfig) -> bytes:
     if buf is None:
         raise RuntimeError("failed to build launcher pack")
     data = buf.getvalue()
-    tmp = cached.with_suffix(".zip.tmp")
-    tmp.write_bytes(data)
-    tmp.replace(cached)
+    # Unique temp name: concurrent builders (warm-up thread + HTTP request)
+    # would otherwise collide on the same .zip.tmp and one would fail with
+    # "No such file or directory" after the other renamed it away.
+    import uuid
+    tmp = cached.with_name(f"{cached.name}.{os.getpid()}-{uuid.uuid4().hex[:8]}.tmp")
+    try:
+        tmp.write_bytes(data)
+        os.replace(str(tmp), str(cached))
+    finally:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
     return data
 
 

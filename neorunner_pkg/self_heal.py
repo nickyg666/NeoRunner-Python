@@ -61,6 +61,7 @@ KNOWN_SAFE_DEPS = {
     "addonslib",
     "mcwbyg",
     "biomeswevegone",
+    "scena",
     # Other common deps
     "bclib",
     "blueprint",
@@ -434,7 +435,10 @@ def preflight_dep_check(cfg: dict[str, Any]) -> dict[str, Any]:
     # Check for Java version mismatches
     java_version_mismatches: dict[str, int] = {}  # mod_file -> required_java_version
     
-    for fn in mods_dir.glob("*.jar"):
+    for scan_dir in (mods_dir, clientonly_dir):
+        if not scan_dir.exists():
+            continue
+        for fn in scan_dir.glob("*.jar"):
             try:
                 with zipfile.ZipFile(fn, 'r') as zf:
                     names = zf.namelist()
@@ -471,6 +475,12 @@ def preflight_dep_check(cfg: dict[str, Any]) -> dict[str, Any]:
                             mid = mod_entry.get("modId", "").lower()
                             if mid:
                                 installed_mod_ids.setdefault(mid, []).append(fn.name)
+                        # JarJar-bundled libs (e.g. Chisels & Bits bundling
+                        # ``scena``) count as installed too, otherwise a mod that
+                        # ships its own deps is wrongly flagged as missing them
+                        # and preflight tries to fetch a phantom dependency.
+                        for mid in _jij_provided_mod_ids(fn):
+                            installed_mod_ids.setdefault(mid, []).append(fn.name)
                     elif 'fabric.mod.json' in names:
                         fabric_raw = zf.read('fabric.mod.json').decode('utf-8', errors='ignore')
                         try:
@@ -487,10 +497,10 @@ def preflight_dep_check(cfg: dict[str, Any]) -> dict[str, Any]:
                                 quarantine_mod(mods_dir, fn.name, "Fabric client-only mod")
                         except Exception:
                             pass
-                # JarJar-bundled dependencies (e.g. chiselsandbits bundling
-                # scena) count as installed, so they aren't mistaken for missing.
-                for mid in _jij_provided_mod_ids(fn):
-                    installed_mod_ids.setdefault(mid, []).append(fn.name)
+                    # JarJar-bundled dependencies (e.g. chiselsandbits bundling
+                    # scena) count as installed, so they aren't mistaken for missing.
+                    for mid in _jij_provided_mod_ids(fn):
+                        installed_mod_ids.setdefault(mid, []).append(fn.name)
             except Exception:
                 continue
     
@@ -603,13 +613,17 @@ def preflight_dep_check(cfg: dict[str, Any]) -> dict[str, Any]:
     
     # Find missing required dependencies
     missing_required: dict[str, set] = {}
+    # Normalize mod IDs for matching: many mods alternate between '-' and '_'
+    # in dependency names (cloth-config vs cloth_config), and both refer to the
+    # same jar. Compare on a normalized key so an installed dep satisfies both.
+    installed_norm = {k.replace("-", "_").replace(" ", "_"): k for k in installed_mod_ids}
     for dep_id, requesters in required_deps.items():
-        if dep_id not in installed_mod_ids:
-            missing_required[dep_id] = requesters    
+        if dep_id not in installed_mod_ids and dep_id.replace("-", "_") not in installed_norm:
+            missing_required[dep_id] = requesters
     # Find missing optional dependencies (optional, but track them)
     missing_optional: dict[str, set] = {}
     for dep_id, requesters in optional_deps.items():
-        if dep_id not in installed_mod_ids:
+        if dep_id not in installed_mod_ids and dep_id.replace("-", "_") not in installed_norm:
             missing_optional[dep_id] = requesters
     
     log_event("PREFLIGHT", f"Found {len(missing_required)} missing required deps, {len(missing_optional)} missing optional deps")

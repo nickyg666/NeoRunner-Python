@@ -68,7 +68,19 @@ class TestInstallerProperties:
         )
         props = build_installer_properties(_cfg(hostname="mc.w8.mom"))
         assert "baseUrl=https://mc.w8.mom" in props
-        # serverAddress is the direct game address, not the web hostname.
+        # serverAddress prefers the configured domain so the installer never
+        # exposes the public IP; the direct game address is only a fallback
+        # when no domain is set.
+        assert "serverAddress=mc.w8.mom:1234" in props
+        assert "1.2.3.4" not in props
+
+    def test_no_hostname_uses_direct_game_address(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("neorunner_pkg.installer_jar.CWD", tmp_path)
+        monkeypatch.setattr(
+            "neorunner_pkg.mod_hosting.game_join_address",
+            lambda cfg: "1.2.3.4:1234",
+        )
+        props = build_installer_properties(_cfg(hostname=""))
         assert "serverAddress=1.2.3.4:1234" in props
 
     def test_no_hostname_falls_back_to_lan_http(self, monkeypatch, tmp_path):

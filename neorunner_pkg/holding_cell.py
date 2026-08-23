@@ -119,7 +119,12 @@ def room_properties(cfg: ServerConfig) -> str:
         val("max-players", str(cfg.holding_cell_max_players)),
         val("motd", getattr(cfg, "holding_cell_description", "") or "NeoRunner Download Lobby - get the modpack link in chat!"),
         val("level-name", "holding_cell_world"),
-        val("level-type", "minecraft:superflat"),
+        val("level-type", "minecraft:flat"),
+        val("generator-settings",
+            '{"biome":"minecraft:plains","layers":['
+            '{"block":"minecraft:bedrock","height":1},'
+            '{"block":"minecraft:dirt","height":2},'
+            '{"block":"minecraft:grass_block","height":1}]}'),
         val("generate-structures", "false"),
         val("spawn-protection", "0"),
         val("view-distance", "6"),
@@ -197,7 +202,47 @@ def room_build_commands(cfg: ServerConfig, floor_y: int | None = None,
         "effect give @a resistance infinite 5 true",
         f"tp @a 0 {inner_bottom} 0",
     ]
+    cmds += _room_lectern_commands(cfg, inner_bottom, inner_top)
     return cmds
+
+
+def _room_lectern_commands(cfg: ServerConfig, inner_bottom: int, inner_top: int) -> list[str]:
+    """Commands placing a podium (lectern + written book) at the room's center.
+
+    The lectern sits on the floor at the center of the cube; the written book
+    introduces NeoRunner and how to join the modded server.
+
+    Uses ``setblock`` with the book inline in block NBT (``Book:{...}``) -- the
+    ``item replace block ... container.0`` form fails with "not a container"
+    because a lectern's book slot is not a regular container. Pages are raw JSON
+    strings with *compact* formatting (no spaces after colons) which is what
+    vanilla stores and renders.
+    """
+    bx, bz = 0, 0  # room center
+    by = inner_bottom  # standing on the floor
+    from .mod_hosting import game_join_address, public_download_link
+    download_link = public_download_link(cfg)
+    addr = game_join_address(cfg)
+
+    def page(text: str) -> str:
+        raw = json.dumps({"text": text}, ensure_ascii=False, separators=(",", ":"))
+        return '"' + raw.replace('"', '\\"') + '"'
+
+    pages_arg = ",".join([
+        page("Welcome to NeoRunner! This is a staging lobby for the modded server.\n\n"
+             "Grab the modpack below, install it, and come join us!"),
+        page("1) Download the modpack: " + download_link + "\n\n"
+             "2) Launch Minecraft with the NeoForge profile.\n\n"
+             "3) Join the server at: " + addr),
+    ])
+
+    lectern = (
+        f"setblock {bx} {by} {bz} minecraft:lectern[facing=north]"
+        f"{{Book:{{id:\"minecraft:written_book\",Count:1,components:{{"
+        f"written_book_content:{{title:\"NeoRunner\",author:\"NeoRunner\","
+        f"pages:[{pages_arg}]}}}}}}}}"
+    )
+    return [lectern]
 
 
 def join_welcome_raws(cfg: ServerConfig) -> list[str]:
@@ -332,13 +377,17 @@ class VanillaHoldingCell:
 
         self.running = True
 
+        # Only count log lines appended after this point: a stale "Done" from a
+        # previous boot must not make the build start before this boot is ready.
+        log_pos = self.log_file.stat().st_size if self.log_file and self.log_file.exists() else 0
+
         # Build the room every start. The ``fill``/``gamemode``/``gamerule``
         # commands are idempotent, and the world can silently regenerate after a
         # version/port change (which leaves any earlier marker stale), so we
         # never skip on a marker alone. The marker is written only after the
         # build commands are acknowledged so we can detect a failed build.
         def build_room():
-            if self._wait_for_done(timeout=120):
+            if self._wait_for_done(timeout=120, from_pos=log_pos):
                 cmds = room_build_commands(self.cfg)
                 ok = self._run_build(cmds)
                 if ok:
@@ -356,7 +405,13 @@ class VanillaHoldingCell:
         log_event("ROOM", f"Holding cell started on port {self.cfg.holding_cell_port}")
         return True
 
-    def _wait_for_done(self, timeout: int = 120) -> bool:
+    def _wait_for_done(self, timeout: int = 120, from_pos: int = 0) -> bool:
+        """Wait until a fresh "Done" line appears in the room log.
+
+        Only lines appended after ``from_pos`` count, so a stale "Done" from a
+        previous boot (or an old log file) can't fool the build into running
+        before this boot's world is ready.
+        """
         if not self.log_file or not self.log_file.exists():
             time.sleep(1)
         start = time.monotonic()
@@ -364,7 +419,12 @@ class VanillaHoldingCell:
             if not self.is_running():
                 return False
             try:
-                text = self.log_file.read_text(errors="replace") if self.log_file and self.log_file.exists() else ""
+                if self.log_file and self.log_file.exists():
+                    with open(self.log_file, "r", errors="replace") as f:
+                        f.seek(from_pos)
+                        text = f.read()
+                else:
+                    text = ""
             except OSError:
                 text = ""
             if _DONE_RE.search(text):

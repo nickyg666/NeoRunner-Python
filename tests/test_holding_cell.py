@@ -38,7 +38,9 @@ def _cfg(**overrides) -> ServerConfig:
 # ---------------------------------------------------------------------------
 def test_room_properties_has_vanilla_settings():
     props = room_properties(_cfg())
-    assert "level-type=minecraft:superflat" in props
+    assert "level-type=minecraft:flat" in props
+    assert '"block":"minecraft:bedrock","height":1' in props
+    assert '"block":"minecraft:grass_block","height":1' in props
     assert "server-port=25565" in props
     assert "online-mode=true" in props
     assert "gamemode=adventure" in props
@@ -80,6 +82,20 @@ def test_room_build_commands_includes_four_walls():
     wall_fills = [c for c in cmds if "minecraft:barrier" in c and c.startswith("fill")]
     # 4 walls: -x, +x, -z, +z
     assert len(wall_fills) >= 4
+
+
+def test_room_build_commands_include_lectern_with_book():
+    cmds = room_build_commands(_cfg(holding_cell_room_size=20))
+    lectern = [c for c in cmds if "minecraft:lectern" in c]
+    assert len(lectern) == 1
+    assert "setblock 0 5 0 minecraft:lectern[facing=north]" in lectern[0]
+    assert 'Book:{id:"minecraft:written_book"' in lectern[0]
+    assert "written_book_content" in lectern[0]
+    assert "NeoRunner" in lectern[0]
+    # Both pages (welcome + download/join instructions) are embedded
+    assert "staging lobby" in lectern[0]
+    assert "W8.mom/dl/mods.zip" in lectern[0]
+    assert "Join the server at" in lectern[0]
 
 
 # ---------------------------------------------------------------------------

@@ -68,10 +68,10 @@ def test_room_build_commands_dimensions():
     assert any(c.startswith("fill -10 4 -10 10 4 10 minecraft:white_concrete") for c in cmds)
     assert any("minecraft:sea_lantern" in c for c in cmds)
     assert any(c.startswith("fill -10 8 -10 10 8 10 minecraft:barrier") for c in cmds)
-    assert "setworldspawn 0 5 0" in cmds
+    assert "setworldspawn 0 5 -3" in cmds
     assert "gamemode adventure @a" in cmds
     assert "gamerule doDaylightCycle false" in cmds
-    assert "tp @a 0 5 0" in cmds
+    assert "tp @a 0 5 -3" in cmds
     assert any(c.startswith("forceload add -10 -10 10 10") for c in cmds)
 
 

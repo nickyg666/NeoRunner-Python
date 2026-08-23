@@ -48,6 +48,10 @@ _DEFAULT_SURFACE_Y = 4
 # Max ceiling height for the holding room (a short 5-block room reads better).
 _MAX_ROOM_HEIGHT_H = 5
 
+# Spawn offset inside the room: nudged -3 in Z so players spawn toward the back
+# of the cube, facing the podium at the center.
+SPAWN_Z_OFFSET = -3
+
 
 def _strip_ansi(line: str) -> str:
     return _ANSI_RE.sub("", line)
@@ -185,7 +189,7 @@ def room_build_commands(cfg: ServerConfig, floor_y: int | None = None,
 
     cmds = [
         f"forceload add {lo} {lo} {hi} {hi}",
-        f"setworldspawn 0 {inner_bottom} 0",
+        f"setworldspawn 0 {inner_bottom} {SPAWN_Z_OFFSET}",
         f"fill {lo} {floor_y} {lo} {hi} {floor_y} {hi} minecraft:white_concrete",
         f"fill {lo} {ceil_y} {lo} {hi} {ceil_y} {hi} minecraft:barrier",
         f"fill {lo} {inner_top} {lo} {hi} {inner_top} {hi} minecraft:sea_lantern",
@@ -207,7 +211,7 @@ def room_build_commands(cfg: ServerConfig, floor_y: int | None = None,
         "time set 6000",
         "effect give @a saturation infinite 255 true",
         "effect give @a resistance infinite 5 true",
-        f"tp @a 0 {inner_bottom} 0",
+        f"tp @a 0 {inner_bottom} {SPAWN_Z_OFFSET}",
     ]
     cmds += _room_lectern_commands(cfg, inner_bottom, inner_top)
     return cmds

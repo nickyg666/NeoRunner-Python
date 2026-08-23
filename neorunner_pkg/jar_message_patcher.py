@@ -61,6 +61,11 @@ NEOFORGE_REPLACEMENTS = {
     "You are trying to connect to a server that is running NeoForge, but you are not. Please install NeoForge Version: %s to connect to this server.": "This server runs a modpack you need first. Download the modpack: {link}",
     # FML handshake version rejection.
     "Incompatible client! Please use %s": "Your client does not match the server's mods. Download the modpack: {link}",
+    # NeoForge 26.1.x vanilla-client "not supported" checks (shown to a plain
+    # vanilla client before the mod-list handshake even starts).
+    "This server does not support vanilla clients as it has extended enums used in clientbound networking": "This server runs a modpack you need first. Download the modpack: {link}",
+    "This server does not support vanilla clients as it has custom FeatureFlags": "This server runs a modpack you need first. Download the modpack: {link}",
+    "This server does not support vanilla clients as it has mandatory registry data maps: ": "This server runs a modpack you need first. Download the modpack: {link}",
 }
 
 FORGE_REPLACEMENTS = {

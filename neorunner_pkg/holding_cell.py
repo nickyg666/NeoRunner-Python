@@ -240,6 +240,12 @@ def _room_lectern_commands(cfg: ServerConfig, inner_bottom: int, inner_top: int)
     hostname and the download/GitHub links are public pages, never admin
     endpoints, credentials, or server internals.
 
+    NOTE: vanilla's BookViewScreen does NOT route component clicks, so book
+    links are never clickable; the URLs are shown as plain readable text so
+    players can type/copy them. The *clickable* link lives in the chat
+    (``join_welcome_raws``), which vanilla clients render as a working
+    open_url component.
+
     Uses ``setblock`` with the book inline in block NBT (``Book:{...}``) -- the
     ``item replace block ... container.0`` form fails with "not a container"
     because a lectern's book slot is not a regular container. Pages are raw JSON
@@ -257,9 +263,10 @@ def _room_lectern_commands(cfg: ServerConfig, inner_bottom: int, inner_top: int)
     def page(text: str, *links: tuple[str, str]) -> str:
         """Build a book page component.
 
-        ``links`` are (url, label) pairs rendered as clickable open_url
-        components (modern 1.21.5+ ``click_event`` syntax). The rest is plain
-        text -- no IPs, no admin URLs, no secrets.
+        ``links`` are (url, label) pairs rendered as plain text (the label on
+        one line, the URL on the next, in aqua) -- not clickable, because
+        vanilla books cannot route clicks. The rest is plain text -- no IPs,
+        no admin URLs, no secrets.
         """
         parts = []
         # Split the text on a literal \n\n sentinel so we can interleave links
@@ -270,9 +277,8 @@ def _room_lectern_commands(cfg: ServerConfig, inner_bottom: int, inner_top: int)
                 parts.append({"text": seg})
             if i < len(links):
                 url, label = links[i]
-                parts.append({"text": "\n" + label + ": " + url,
-                              "color": "aqua", "underlined": True,
-                              "click_event": {"action": "open_url", "url": url}})
+                parts.append({"text": "\n" + label + ": ", "color": "aqua"})
+                parts.append({"text": url, "color": "aqua", "underlined": True})
             if i < len(segments) - 1:
                 parts.append({"text": "\n\n"})
         raw = json.dumps(parts, ensure_ascii=False, separators=(",", ":"))
@@ -564,6 +570,11 @@ class VanillaHoldingCell:
         # and the room is a tiny lobby so everyone seeing the link is fine.
         time.sleep(2)  # let the player finish logging in
         try:
+            # Vanilla restores a returning player's saved position (player.dat)
+            # on rejoin, so they may pop back onto the roof/outside the cube.
+            # Teleport everyone into the room at the spawn point.
+            floor_y = int(_DEFAULT_SURFACE_Y)
+            self.send_command(f"tp @a 0 {floor_y + 1} {SPAWN_Z_OFFSET}")
             for raws in join_welcome_raws(self.cfg):
                 self.send_command(f"tellraw @a {raws}")
             self.send_command(f"say Welcome {name} - the download link is in chat above!")

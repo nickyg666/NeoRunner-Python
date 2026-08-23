@@ -362,6 +362,19 @@ def cmd_start(args):
     restart_attempts = 0
     max_restart_attempts = cfg.max_restart_attempts
     restart_delay = 5
+
+    # The holding cell's join-watcher thread only lives in the process that
+    # started it (the daemon). If the room dies (crash, kill, manual CLI
+    # interference) no one greets joiners with the clickable download link, so
+    # supervise it here and restart it when missing.
+    room_cell = None
+    if cfg.holding_cell_enabled and not args.no_dashboard:
+        try:
+            from .holding_cell import VanillaHoldingCell
+            room_cell = VanillaHoldingCell(cfg)
+        except Exception as e:
+            log_event("WARN", f"Could not load holding cell supervisor: {e}")
+
     try:
         while not shutdown_requested:
             if args.no_server:
@@ -382,7 +395,20 @@ def cmd_start(args):
                     time.sleep(restart_delay)
                 continue
             restart_attempts = 0
-            time.sleep(1)
+
+            # Supervise the holding cell: if the room is gone, bring it back so
+            # joiners keep getting the clickable modpack link in chat. The
+            # join-watcher lives in THIS (daemon) process, so only restart the
+            # room when the tmux session itself is missing - a healthy session
+            # is always greeted by this daemon's watcher.
+            if room_cell is not None:
+                try:
+                    if not room_cell.is_running():
+                        log_event("ROOM", "Holding cell is down - restarting")
+                        room_cell.start()
+                except Exception as e:
+                    log_event("WARN", f"Holding cell supervision error: {e}")
+            time.sleep(5)
     except KeyboardInterrupt:
         print("\nShutting down...")
         if server_process:

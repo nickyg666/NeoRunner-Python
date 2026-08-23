@@ -103,9 +103,10 @@ def test_room_build_commands_include_lectern_with_book():
     assert "https://W8.mom" in lectern[0]
     assert "github.com/nickyg666/NeoRunner-Python" in lectern[0]
     assert "open-source" in lectern[0]
-    # Links use the modern click_event open_url syntax (parsed from the NBT)
-    assert '\\"click_event\\":{\\"action\\":\\"open_url\\",\\"url\\":\\"https://W8.mom' in lectern[0] \
-        or '"click_event":{"action":"open_url","url":"https://W8.mom"' in lectern[0]
+    # Vanilla books cannot route clicks: the book shows the URL as plain
+    # readable text (no click_event), while the clickable link lives in chat.
+    assert "click_event" not in lectern[0]
+    assert "https://W8.mom" in lectern[0]  # still visible/copyable
     # No secrets / internals exposed
     assert "174.49.233.151" not in lectern[0]
     assert "rcon" not in lectern[0].lower()
@@ -262,3 +263,14 @@ def test_bundle_readme_has_linux_java_install_guide():
                 "amazonlinux", "temurin-25-jre", "portable JRE",
                 "update-alternatives", "aarch64", "java -version"):
         assert key in readme, f"missing {key!r} in bundle README"
+
+
+def test_greet_player_tps_into_room():
+    """Joiners are teleported to the spawn point, not their saved roof pos."""
+    from neorunner_pkg.holding_cell import VanillaHoldingCell, _DEFAULT_SURFACE_Y
+    cell = VanillaHoldingCell(_cfg())
+    sent = []
+    cell.send_command = lambda cmd: sent.append(cmd) or True
+    cell._greet_player("FoxNews")
+    assert any(cmd == f"tp @a 0 {_DEFAULT_SURFACE_Y + 1} -3" for cmd in sent)
+    assert any(cmd.startswith("tellraw @a") for cmd in sent)

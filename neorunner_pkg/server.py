@@ -607,30 +607,38 @@ def get_server() -> TmuxServer:
 
 
 def is_server_running() -> bool:
-    """Check if the Minecraft server is running."""
+    """Check if the modded Minecraft server is running.
+
+    The holding cell runs its OWN vanilla server (``minecraft-server-<ver>.jar
+    nogui``) in the room tmux session; that process must NOT count as "the
+    modded server", otherwise the daemon skips starting the real server. The
+    modded server runs with the loader jars (``@...neoforge/.../unix_args.txt``
+    or ``neoforge.jar``/``forge.jar``/``fabric`` on the java command line), so
+    require a loader marker on the command line, and explicitly exclude the
+    holding cell's vanilla room jar.
+    """
     # Check tmux session first
     if _server_instance and _server_instance.running and _server_instance.is_running():
         return True
-    
-    # Check for java processes
+
+    # Check for java processes running a *modded* server (loader args or
+    # loader jar on the command line). The holding cell's vanilla room jar
+    # (minecraft-server-*.jar nogui) must not match.
     result = subprocess.run(
-        ["pgrep", "-f", "neoforge.*nogui|forge.*nogui|fabric.*nogui|minecraft.*server"], check=False,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode == 0 and result.stdout.strip():
-        return True
-    
-    result = subprocess.run(
-        ["pgrep", "-a", "java"], check=False,
+        ["pgrep", "-af", "java"], check=False,
         capture_output=True,
         text=True,
     )
     if result.returncode == 0:
         for line in result.stdout.strip().split("\n"):
-            if any(x in line.lower() for x in ["neoforge", "forge", "fabric", "minecraft"]):
+            low = line.lower()
+            if "minecraft-server" in low and "nogui" in low:
+                continue  # holding cell vanilla room, not the modded server
+            if any(x in low for x in ["neoforge", "fabric", "forge"]):
                 return True
-    
+            if "minecraft" in low and ("unix_args" in low or "libraries" in low or "server.jar" in low):
+                return True
+
     return False
 
 

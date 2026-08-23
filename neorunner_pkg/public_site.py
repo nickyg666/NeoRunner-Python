@@ -40,24 +40,33 @@ def _public_host() -> str:
 
 
 def _game_address() -> str:
-    """Direct-connect address for the Minecraft port (host:port).
+    """Join address built from the configured DNS hostname (never the public IP).
 
-    Distinct from ``_public_host``: the game port is raw TCP, which the
-    Cloudflare tunnel does not proxy, so it resolves to the direct IP (or the
-    configured ``game_address``) rather than the web hostname.
+    Uses ``cfg.hostname`` (via ``public_host``) with the modded server port
+    appended only when it is not the default 25565.
     """
     try:
-        from .mod_hosting import game_join_address
-        return game_join_address()
+        from .mod_hosting import public_host
+        cfg = load_cfg()
+        host = public_host(cfg)
+        port = int(getattr(cfg, "mc_port", DEFAULT_SERVER_PORT) or DEFAULT_SERVER_PORT)
+        return host if port == 25565 else f"{host}:{port}"
     except Exception:
         return ""
 
 
 def _room_address() -> str:
-    """Direct-connect address of the vanilla waiting room (download lobby)."""
+    """Waiting-room join address built from the configured DNS hostname.
+
+    The room listens on the externally-forwarded port; the hostname is loaded
+    dynamically from settings (never the raw public IP).
+    """
     try:
-        from .holding_cell import room_join_address
-        return room_join_address(load_cfg())
+        from .mod_hosting import public_host
+        cfg = load_cfg()
+        host = public_host(cfg)
+        port = int(getattr(cfg, "holding_cell_port", 25565) or 25565)
+        return host if port == 25565 else f"{host}:{port}"
     except Exception:
         return ""
 

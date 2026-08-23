@@ -12,6 +12,7 @@ import socket
 import threading
 import time
 import urllib.request
+import uuid
 import zipfile
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
@@ -19,6 +20,10 @@ from pathlib import Path
 from .config import ServerConfig, load_cfg
 from .constants import CWD
 from .log import log_event
+
+# Serializes mods.zip bundle builds so concurrent callers (daemon warm-up thread
+# + HTTP requests) never race on the same output file.
+_MODS_BUNDLE_LOCK = threading.Lock()
 
 # PUBLIC_HOST config: the single source of truth is ``cfg.hostname`` (set by
 # ``neorunner external`` when the user configures hosting). When unset we fall
@@ -1249,21 +1254,101 @@ def _mods_bundle_readme(cfg: ServerConfig, installer_jar_name: str) -> str:
             address = f"{host}:{mc_port}"
     except Exception:
         pass
+    major = _bundled_java_major()
     return f"""NeoRunner modpack installer
 ================================
 
 This bundle contains:
   - {installer_jar_name}   (the one-click installer: NeoForge loader + all mods, configs and shaderpacks)
-  - java/                  (Java {_bundled_java_major()} runtimes for Windows, macOS and Linux)
+  - java/                  (Java {major} runtimes for Windows, macOS and Linux)
 
 How to install
 --------------
-1. If you don't already have Java {_bundled_java_major()} installed, install it:
-     Windows:  run  java\\java-windows-x64.msi
-     macOS:    run  java\\java-mac-x64.pkg
-     Linux:    extract java\\java-linux-x64.tar.gz and add its bin/ folder to your PATH
+1. Make sure you have Java {major} (64-bit). Check first:
+     java -version
+   If it reports "java version \\"{major}.x\\" ..." you are done -- skip to step 2.
+
+   Need it? Install it:
+
+     Windows:  run  java\\java-windows-x64.msi   (an .exe installer - just click through)
+     macOS:    run  java\\java-mac-x64.pkg       (a .dmg-style package installer - click through)
+
+     Linux: several options, pick whichever matches your distribution:
+
+       A. Use the portable JRE bundled in this zip (works on ANY x86_64 Linux,
+          no package manager or root required):
+             mkdir -p "$HOME/neorunner-jre"
+             tar -xzf java/java-linux-x64.tar.gz -C "$HOME/neorunner-jre" --strip-components=1
+             export PATH="$HOME/neorunner-jre/bin:$PATH"
+          (Add that export line to ~/.bashrc or ~/.profile to keep it.)
+
+       B. Debian / Ubuntu / Mint (apt):
+             sudo apt update
+             sudo apt install -y wget apt-transport-https gpg
+             wget -qO - https://packages.adoptium.net/artifactory/api/gpg/key/public \
+               | gpg --dearmor | sudo tee /usr/share/keyrings/adoptium.gpg > /dev/null
+             echo "deb [signed-by=/usr/share/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb $(lsb_release -cs) main" \
+               | sudo tee /etc/apt/sources.list.d/adoptium.list
+             sudo apt update
+             sudo apt install -y temurin-{major}-jre
+
+       C. Fedora / RHEL 8+ / Rocky / Alma (dnf):
+             sudo dnf install -y wget
+             sudo tee /etc/yum.repos.d/adoptium.repo > /dev/null <<'EOF'
+             [Adoptium]
+             name=Adoptium
+             baseurl=https://packages.adoptium.net/artifactory/rpm/rhel/$releasever/$basearch
+             enabled=1
+             gpgcheck=1
+             gpgkey=https://packages.adoptium.net/artifactory/api/gpg/key/public
+             EOF
+             sudo dnf install -y temurin-{major}-jre
+
+       D. CentOS 7 / older RHEL (yum):
+             sudo yum install -y wget
+             sudo tee /etc/yum.repos.d/adoptium.repo > /dev/null <<'EOF'
+             [Adoptium]
+             name=Adoptium
+             baseurl=https://packages.adoptium.net/artifactory/rpm/rhel/$releasever/$basearch
+             enabled=1
+             gpgcheck=1
+             gpgkey=https://packages.adoptium.net/artifactory/api/gpg/key/public
+             EOF
+             sudo yum install -y temurin-{major}-jre
+
+       E. Amazon Linux 2 (yum, no EL repo): use the amazonlinux repo instead
+             sudo yum install -y wget
+             sudo tee /etc/yum.repos.d/adoptium.repo > /dev/null <<'EOF'
+             [Adoptium]
+             name=Adoptium
+             baseurl=https://packages.adoptium.net/artifactory/rpm/amazonlinux/2/$basearch
+             enabled=1
+             gpgcheck=1
+             gpgkey=https://packages.adoptium.net/artifactory/api/gpg/key/public
+             EOF
+             sudo yum install -y temurin-{major}-jre
+
+       F. Arch / Manjaro (pacman): the distro OpenJDK already tracks the
+          current Java release:
+             sudo pacman -S --needed jre-openjdk
+          (Or for Temurin specifically, install temurin-bin from the AUR.)
+
+       G. Anything else / container images (Alpine, busybox, etc.): the
+          portable JRE in option A always works, or grab a build from
+          https://adoptium.net (Temurin {major} JRE, Linux x64).
+
+   If you install via a package manager, the java command may need one of:
+     export PATH="$JAVA_HOME/bin:$PATH"
+     sudo update-alternatives --config java
+   or simply open a new terminal so the new PATH takes effect.
+
+   NOTE: the bundled tarball is x86_64 only. On arm64/aarch64 Linux (e.g. a
+   Raspberry Pi or an M-series Mac running Linux), use the distro packages
+   above (or Adoptium aarch64 builds) instead.
+
 2. Run the installer:
      Double-click {installer_jar_name}  (or run: java -jar {installer_jar_name})
+
 3. Launch Minecraft and connect to: {address}
 
 Need help? Re-download the latest bundle at any time.
@@ -1275,6 +1360,11 @@ def build_mods_bundle_zip(cfg: ServerConfig) -> Path:
 
     Contains the self-contained installer JAR plus Java {_bundled_java_major()} installers for
     Windows/macOS/Linux, so a client without Java can still get going.
+
+    Concurrent callers (the daemon's warm-up thread and /dl/mods.zip requests)
+    may build the same bundle at once. A module lock serializes builds, and the
+    temp file name is unique per builder, so a slow worker can never collide
+    with (or wipe) another worker's in-progress file.
     """
     from .installer_jar import build_installer_jar
 
@@ -1288,13 +1378,24 @@ def build_mods_bundle_zip(cfg: ServerConfig) -> Path:
     if bundle.exists() and bundle.stat().st_size > 0:
         return bundle
 
-    tmp = bundle.with_suffix(".zip.tmp")
-    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.write(jar, arcname=jar.name)
-        for name, path in sorted(jre.items()):
-            zf.write(path, arcname=f"java/{path.name}")
-        zf.writestr("README.txt", _mods_bundle_readme(cfg, jar.name))
-    shutil.move(str(tmp), str(bundle))
+    with _MODS_BUNDLE_LOCK:
+        if bundle.exists() and bundle.stat().st_size > 0:
+            return bundle
+        unique = f"{os.getpid()}-{threading.get_ident()}-{uuid.uuid4().hex[:8]}"
+        tmp = bundle.with_name(f"{bundle.name}.{unique}.tmp")
+        try:
+            with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.write(jar, arcname=jar.name)
+                for name, path in sorted(jre.items()):
+                    zf.write(path, arcname=f"java/{path.name}")
+                zf.writestr("README.txt", _mods_bundle_readme(cfg, jar.name))
+            os.replace(str(tmp), str(bundle))
+        finally:
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
     log_event("MOD_ZIP", f"Built mods.zip bundle ({bundle.stat().st_size / 1e6:.1f} MB)")
     return bundle
 

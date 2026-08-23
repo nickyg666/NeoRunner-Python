@@ -45,7 +45,8 @@ class ServerConfig:
     holding_cell_description: str = ""  # MOTD for the vanilla waiting room; empty = default
     holding_cell_enabled: bool = True  # Vanilla "download lobby" room that greets players with the clickable modpack link
     holding_cell_port: int = 1234     # Waiting-room port = the externally-forwarded entrance players hit first
-    holding_cell_room_size: int = 20   # Room dimensions (N x N x N blocks), capped at 20
+    holding_cell_room_size: int = 20   # Room footprint (N x N blocks), capped at 20
+    holding_cell_room_height: int = 5  # Room ceiling height in blocks, capped at 5
     holding_cell_max_players: int = 10
     broadcast_enabled: bool = True
     broadcast_auto_on_install: bool = True
@@ -116,6 +117,7 @@ class ServerConfig:
             holding_cell_enabled=self.holding_cell_enabled,
             holding_cell_port=self.holding_cell_port,
             holding_cell_room_size=self.holding_cell_room_size,
+            holding_cell_room_height=self.holding_cell_room_height,
             holding_cell_max_players=self.holding_cell_max_players,
             broadcast_enabled=self.broadcast_enabled,
             broadcast_auto_on_install=self.broadcast_auto_on_install,
@@ -274,6 +276,7 @@ def ensure_config(cfg: ServerConfig) -> ServerConfig:
         holding_cell_enabled=cfg.holding_cell_enabled,
         holding_cell_port=cfg.holding_cell_port or 25565,
         holding_cell_room_size=min(cfg.holding_cell_room_size or 20, 20),
+        holding_cell_room_height=min(cfg.holding_cell_room_height or 5, 5),
         holding_cell_max_players=cfg.holding_cell_max_players or 10,
         broadcast_enabled=cfg.broadcast_enabled,
         broadcast_auto_on_install=cfg.broadcast_auto_on_install,

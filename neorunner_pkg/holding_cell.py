@@ -45,6 +45,9 @@ _MAX_ROOM_HEIGHT = 20
 # "That position is not loaded" for any coords outside the loaded chunks).
 _DEFAULT_SURFACE_Y = 4
 
+# Max ceiling height for the holding room (a short 5-block room reads better).
+_MAX_ROOM_HEIGHT_H = 5
+
 
 def _strip_ansi(line: str) -> str:
     return _ANSI_RE.sub("", line)
@@ -155,23 +158,27 @@ def _prepare_room_dir(cfg: ServerConfig) -> Path:
 
 def room_build_commands(cfg: ServerConfig, floor_y: int | None = None,
                         surface_y: int = _DEFAULT_SURFACE_Y) -> list[str]:
-    """Console commands that build the N x N x N barrier room at spawn.
+    """Console commands that build the N x N x H room at spawn.
 
-    ``N`` = ``cfg.holding_cell_room_size`` (capped at 20). The room is a hollow
-    barrier box built at ground level (``floor_y`` defaults to the classic
-    superflat surface ``surface_y``, y=4) so it is solid and inside the loaded
-    spawn area. The spawn chunks are force-loaded first so the ``fill`` calls
-    succeed even on an idle server (otherwise they fail with "not loaded").
+    ``N`` = ``cfg.holding_cell_room_size`` (capped at 20) is the footprint;
+    ``H`` = ``cfg.holding_cell_room_height`` (capped at 5) is the ceiling
+    height. The room is a hollow box built at ground level (``floor_y``
+    defaults to the classic superflat surface ``surface_y``, y=4) so it is
+    solid and inside the loaded spawn area. The spawn chunks are force-loaded
+    first so the ``fill`` calls succeed even on an idle server (otherwise they
+    fail with "not loaded").
 
-    The box is inverted so the floor is solid walkable block (white concrete)
-    and the walls/ceiling are invisible ``barrier`` blocks, with a sea-lantern
-    ceiling for light and quartz corner pillars so the bounds are visible.
+    The box is inverted so the floor is solid walkable block (white concrete),
+    the walls are transparent glass so the room feels open, and the ceiling is
+    an invisible ``barrier`` block with a sea-lantern under-layer for light,
+    plus quartz corner pillars so the bounds are visible.
     """
     size = min(int(cfg.holding_cell_room_size or 20), _MAX_ROOM_HEIGHT)
+    height = min(int(getattr(cfg, "holding_cell_room_height", 5) or 5), _MAX_ROOM_HEIGHT_H)
     half = max(1, size // 2)
     if floor_y is None:
         floor_y = int(surface_y)
-    ceil_y = floor_y + size - 1
+    ceil_y = floor_y + height - 1
     inner_bottom = floor_y + 1
     inner_top = ceil_y - 1
     lo, hi = -half, half
@@ -182,10 +189,10 @@ def room_build_commands(cfg: ServerConfig, floor_y: int | None = None,
         f"fill {lo} {floor_y} {lo} {hi} {floor_y} {hi} minecraft:white_concrete",
         f"fill {lo} {ceil_y} {lo} {hi} {ceil_y} {hi} minecraft:barrier",
         f"fill {lo} {inner_top} {lo} {hi} {inner_top} {hi} minecraft:sea_lantern",
-        f"fill {lo} {inner_bottom} {lo} {lo} {inner_top} {hi} minecraft:barrier",
-        f"fill {hi} {inner_bottom} {lo} {hi} {inner_top} {hi} minecraft:barrier",
-        f"fill {lo} {inner_bottom} {lo} {hi} {inner_top} {lo} minecraft:barrier",
-        f"fill {lo} {inner_bottom} {hi} {hi} {inner_top} {hi} minecraft:barrier",
+        f"fill {lo} {inner_bottom} {lo} {lo} {inner_top} {hi} minecraft:glass",
+        f"fill {hi} {inner_bottom} {lo} {hi} {inner_top} {hi} minecraft:glass",
+        f"fill {lo} {inner_bottom} {lo} {hi} {inner_top} {lo} minecraft:glass",
+        f"fill {lo} {inner_bottom} {hi} {hi} {inner_top} {hi} minecraft:glass",
         f"setblock {lo} {inner_bottom} {lo} minecraft:quartz_block",
         f"setblock {hi} {inner_bottom} {lo} minecraft:quartz_block",
         f"setblock {lo} {inner_bottom} {hi} minecraft:quartz_block",
@@ -222,8 +229,12 @@ def _host_join_address(cfg: ServerConfig) -> str:
 def _room_lectern_commands(cfg: ServerConfig, inner_bottom: int, inner_top: int) -> list[str]:
     """Commands placing a podium (lectern + written book) at the room's center.
 
-    The lectern sits on the floor at the center of the cube; the written book
-    introduces NeoRunner and how to join the modded server.
+    The lectern sits on the floor at the center of the cube; the written book is
+    a small user guide: what this lobby is, how to join the modded server, and
+    where NeoRunner comes from (GitHub) + what it can do. Only safe, public
+    information is included -- the join address uses the configured DNS
+    hostname and the download/GitHub links are public pages, never admin
+    endpoints, credentials, or server internals.
 
     Uses ``setblock`` with the book inline in block NBT (``Book:{...}``) -- the
     ``item replace block ... container.0`` form fails with "not a container"
@@ -237,22 +248,68 @@ def _room_lectern_commands(cfg: ServerConfig, inner_bottom: int, inner_top: int)
 
     link = public_download_base(cfg)  # bare root; the server UA-routes browsers
     addr = _host_join_address(cfg)
+    github = "https://github.com/nickyg666/NeoRunner-Python"
 
-    def page(text: str) -> str:
-        raw = json.dumps({"text": text}, ensure_ascii=False, separators=(",", ":"))
+    def page(text: str, *links: tuple[str, str]) -> str:
+        """Build a book page component.
+
+        ``links`` are (url, label) pairs rendered as clickable open_url
+        components (modern 1.21.5+ ``click_event`` syntax). The rest is plain
+        text -- no IPs, no admin URLs, no secrets.
+        """
+        parts = []
+        # Split the text on a literal \n\n sentinel so we can interleave links
+        # at specific positions.
+        segments = text.split("\n\n")
+        for i, seg in enumerate(segments):
+            if seg:
+                parts.append({"text": seg})
+            if i < len(links):
+                url, label = links[i]
+                parts.append({"text": "\n" + label + ": " + url,
+                              "color": "aqua", "underlined": True,
+                              "click_event": {"action": "open_url", "url": url}})
+            if i < len(segments) - 1:
+                parts.append({"text": "\n\n"})
+        raw = json.dumps(parts, ensure_ascii=False, separators=(",", ":"))
         return '"' + raw.replace('"', '\\"') + '"'
 
     pages_arg = ",".join([
-        page("Welcome to NeoRunner! This is a staging lobby for the modded server.\n\n"
-             "Grab the modpack below, install it, and come join us!"),
-        page("1) Open " + link + " in your browser to download the modpack.\n\n"
-             "2) Install it, then launch Minecraft and join:\n" + addr),
+        page(
+            "Welcome to the NeoRunner Download Lobby!\n\n"
+            "This room is a staging area for the modded server.\n\n"
+            "Download the modpack and come join us.",
+            (link, "Download"),
+        ),
+        page(
+            "How to join:\n\n"
+            "1) Download the modpack (link below).\n\n"
+            "2) Install it, then launch Minecraft with the NeoForge profile.\n\n"
+            "3) Join the server at the address below.",
+            (link, "Download the modpack"),
+            (f"https://{addr}", "Server address"),
+        ),
+        page(
+            "About NeoRunner:\n\n"
+            "NeoRunner is an open-source Minecraft modded-server manager.\n\n"
+            "Get the source (and releases) on GitHub:",
+            (github, "GitHub repository"),
+        ),
+        page(
+            "What NeoRunner can do:\n\n"
+            "It installs and manages modded servers (NeoForge/Forge/Fabric), "
+            "downloads and organizes mods, patches compatibility issues, backs "
+            "up worlds, hosts client downloads, and runs a web dashboard with "
+            "live logs and crash recovery.\n\n"
+            "Questions? Visit the download page for instructions.",
+            (link, "Download page"),
+        ),
     ])
 
     lectern = (
         f"setblock {bx} {by} {bz} minecraft:lectern[facing=north,has_book=true]"
         f"{{Book:{{id:\"minecraft:written_book\",Count:1,components:{{"
-        f"written_book_content:{{title:\"NeoRunner\",author:\"NeoRunner\","
+        f"written_book_content:{{title:\"NeoRunner Guide\",author:\"NeoRunner\","
         f"pages:[{pages_arg}]}}}}}}}}"
     )
     return [lectern]
@@ -262,10 +319,14 @@ def join_welcome_raws(cfg: ServerConfig) -> list[str]:
     """Chat components (one list per message) sent to a joining player.
 
     Message 1: plain-text welcome (works everywhere).
-    Message 2: download instructions. The modpack URL is sent as genuinely
-    plain text -- no clickEvent, no link styling. The raw characters are what
-    the player sees, so they can read it, copy it, or type it into a browser
-    (which the root UA-routes to the download page).
+    Message 2: download instructions.
+
+    The modpack URL is displayed as its raw text (readable + copyable) and
+    carries a ``clickEvent`` with ``action: open_url`` -- the same mechanism the
+    vanilla client uses for its own "Chat is restricted. Click this message for
+    details." message, which is clickable and opens the link in a browser (or
+    offers copy-to-clipboard). So the URL is visible as plain text *and*
+    clickable.
 
     The URL is the bare root (``https://<hostname>``): the server UA-routes the
     root -- browsers get the download page, Minecraft clients get the join
@@ -285,8 +346,9 @@ def join_welcome_raws(cfg: ServerConfig) -> list[str]:
         {"text": " the modded server yet.", "color": "white"},
     ]
     download = [
-        {"text": "1) Open the download page in your browser:\n", "color": "white"},
-        {"text": link},
+        {"text": "1) Open the download page in your browser (click it):\n", "color": "white"},
+        {"text": link, "color": "aqua", "underlined": True,
+         "click_event": {"action": "open_url", "url": link}},
         {"text": "\n\n2) Install it, then launch Minecraft and join:\n", "color": "white"},
         {"text": addr},
         {"text": "\n\nNeed help? Visit the server website for instructions.",

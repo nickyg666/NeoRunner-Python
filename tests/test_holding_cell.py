@@ -63,10 +63,11 @@ def test_room_properties_uses_configured_port():
 # ---------------------------------------------------------------------------
 def test_room_build_commands_dimensions():
     cmds = room_build_commands(_cfg(holding_cell_room_size=20))
-    # Floor + ceiling + 4 walls + lights + 4 corners (ground level, floor y=4)
+    # Floor + ceiling + 4 walls + lights + 4 corners (ground level, floor y=4,
+    # 5-tall room: floor y=4, sea-lanterns y=7, ceiling y=8)
     assert any(c.startswith("fill -10 4 -10 10 4 10 minecraft:white_concrete") for c in cmds)
     assert any("minecraft:sea_lantern" in c for c in cmds)
-    assert any("minecraft:barrier" in c for c in cmds)
+    assert any(c.startswith("fill -10 8 -10 10 8 10 minecraft:barrier") for c in cmds)
     assert "setworldspawn 0 5 0" in cmds
     assert "gamemode adventure @a" in cmds
     assert "gamerule doDaylightCycle false" in cmds
@@ -76,16 +77,17 @@ def test_room_build_commands_dimensions():
 
 def test_room_build_commands_capped_at_20():
     cmds = room_build_commands(_cfg(holding_cell_room_size=40))
-    # Despite requesting 40, the room is capped at 20 (half=10, floor 4-23)
+    # Despite requesting 40, the room footprint is capped at 20 (half=10).
     assert any(c.startswith("fill -10 4 -10 10 4 10 minecraft:white_concrete") for c in cmds)
-    assert any(c.startswith("fill 10 5 -10 10 22 10 minecraft:barrier") for c in cmds)
+    assert any(c.startswith("fill 10 5 -10 10 7 10 minecraft:glass") for c in cmds)
 
 
-def test_room_build_commands_includes_four_walls():
+def test_room_build_commands_includes_four_glass_walls():
     cmds = room_build_commands(_cfg(holding_cell_room_size=20))
-    wall_fills = [c for c in cmds if "minecraft:barrier" in c and c.startswith("fill")]
+    wall_fills = [c for c in cmds if "minecraft:glass" in c and c.startswith("fill")]
     # 4 walls: -x, +x, -z, +z
     assert len(wall_fills) >= 4
+    assert all("minecraft:glass" in c for c in wall_fills)
 
 
 def test_room_build_commands_include_lectern_with_book():
@@ -95,11 +97,19 @@ def test_room_build_commands_include_lectern_with_book():
     assert "setblock 0 5 0 minecraft:lectern[facing=north,has_book=true]" in lectern[0]
     assert 'Book:{id:"minecraft:written_book"' in lectern[0]
     assert "written_book_content" in lectern[0]
-    assert "NeoRunner" in lectern[0]
-    # Both pages (welcome + download/join instructions) are embedded
-    assert "staging lobby" in lectern[0]
+    assert "NeoRunner Guide" in lectern[0]
+    # User-guide pages: welcome/lobby, how to join, about NeoRunner, features
+    assert "Download Lobby" in lectern[0]
     assert "https://W8.mom" in lectern[0]
-    assert "browser to download the modpack" in lectern[0]
+    assert "github.com/nickyg666/NeoRunner-Python" in lectern[0]
+    assert "open-source" in lectern[0]
+    # Links use the modern click_event open_url syntax (parsed from the NBT)
+    assert '\\"click_event\\":{\\"action\\":\\"open_url\\",\\"url\\":\\"https://W8.mom' in lectern[0] \
+        or '"click_event":{"action":"open_url","url":"https://W8.mom"' in lectern[0]
+    # No secrets / internals exposed
+    assert "174.49.233.151" not in lectern[0]
+    assert "rcon" not in lectern[0].lower()
+    assert "password" not in lectern[0].lower()
 
 
 # ---------------------------------------------------------------------------
@@ -110,10 +120,15 @@ def test_join_welcome_has_plaintext_download_link():
     assert len(raws_list) == 2
     download = json.loads(raws_list[1])  # second message = download instructions
     texts = [p for p in download if isinstance(p, dict) and "text" in p]
-    # The URL is plaintext (no clickEvent) so vanilla auto-links + it is copyable.
-    # It is the bare root (hostname) - the server UA-routes the root.
-    assert any("https://W8.mom" in p["text"] for p in texts)
-    assert all(not p.get("clickEvent") for p in texts)
+    # The URL is the bare root (hostname) - the server UA-routes the root.
+    url_parts = [p for p in texts if p.get("text") == "https://W8.mom"]
+    assert url_parts
+    # It is visible as plain text AND carries the modern (1.21.5+) click_event
+    # open_url (like the client's own "Chat is restricted" message), so
+    # clicking it opens the browser confirmation / copy dialog.
+    ce = url_parts[0].get("click_event")
+    assert ce and ce["action"] == "open_url"
+    assert ce["url"] == "https://W8.mom"
 
 
 def test_join_welcome_includes_modded_address():
@@ -198,15 +213,18 @@ def test_welcome_never_exposes_public_ip():
     assert "W8.mom" in all_text
 
 
-def test_join_welcome_url_is_unstyled_plaintext():
+def test_join_welcome_url_is_clickable_open_url():
     raws_list = join_welcome_raws(_cfg())
     download = json.loads(raws_list[1])
     url_parts = [p for p in download if isinstance(p, dict) and p.get("text") == "https://W8.mom"]
     assert len(url_parts) == 1
-    # No clickEvent and no link styling - the URL is sent as plain text.
-    assert "clickEvent" not in url_parts[0]
-    assert "color" not in url_parts[0]
-    assert "underlined" not in url_parts[0]
+    # The URL text is visible AND carries the modern (1.21.5+) click_event
+    # open_url syntax (same mechanism as the client's "Chat is restricted"
+    # message), so clicking opens the browser-confirmation / copy dialog.
+    ce = url_parts[0].get("click_event")
+    assert ce is not None
+    assert ce["action"] == "open_url"
+    assert ce["url"] == "https://W8.mom"
 
 
 def test_greet_player_broadcasts_to_all(monkeypatch):
@@ -221,3 +239,26 @@ def test_greet_player_broadcasts_to_all(monkeypatch):
     tellraws = [c for c in sent if c.startswith("tellraw")]
     assert len(tellraws) == 2
     assert all("@a" in t for t in tellraws)
+
+
+# ---------------------------------------------------------------------------
+# downloads page: domain from settings, no public IP
+# ---------------------------------------------------------------------------
+def test_downloads_page_uses_hostname_not_ip():
+    from neorunner_pkg import public_site
+    info = public_site._server_info()
+    assert "174.49.233.151" not in str(info)
+    assert info["server_address"] == "w8.mom"
+    assert info["room_address"] == "w8.mom:1234"
+
+
+# ---------------------------------------------------------------------------
+# bundle README: Linux Java install decision tree
+# ---------------------------------------------------------------------------
+def test_bundle_readme_has_linux_java_install_guide():
+    from neorunner_pkg.mod_hosting import _mods_bundle_readme
+    readme = _mods_bundle_readme(_cfg(), "neorunner-installer-test.jar")
+    for key in ("apt", "dnf install", "yum install", "pacman",
+                "amazonlinux", "temurin-25-jre", "portable JRE",
+                "update-alternatives", "aarch64", "java -version"):
+        assert key in readme, f"missing {key!r} in bundle README"

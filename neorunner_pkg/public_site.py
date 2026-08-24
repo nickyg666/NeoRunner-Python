@@ -40,33 +40,28 @@ def _public_host() -> str:
 
 
 def _game_address() -> str:
-    """Join address built from the configured DNS hostname (never the public IP).
+    """Join address for the modded server: the game domain only, never an IP.
 
-    Uses ``cfg.hostname`` (via ``public_host``) with the modded server port
-    appended only when it is not the default 25565.
+    Resolves through ``mod_hosting.game_join_address`` so a Cloudflare-proxied
+    web hostname is never advertised as a raw-TCP join address.
     """
     try:
-        from .mod_hosting import public_host
-        cfg = load_cfg()
-        host = public_host(cfg)
-        port = int(getattr(cfg, "mc_port", DEFAULT_SERVER_PORT) or DEFAULT_SERVER_PORT)
-        return host if port == 25565 else f"{host}:{port}"
+        from .mod_hosting import game_join_address
+        return game_join_address(load_cfg())
     except Exception:
         return ""
 
 
 def _room_address() -> str:
-    """Waiting-room join address built from the configured DNS hostname.
+    """Waiting-room join address = the single shared public entrance.
 
-    The room listens on the externally-forwarded port; the hostname is loaded
-    dynamically from settings (never the raw public IP).
+    The entrance proxy routes vanilla clients to the room from the same port
+    modded clients use, so this is the game join address (domain only,
+    dynamically loaded from settings, never the raw public IP).
     """
     try:
-        from .mod_hosting import public_host
-        cfg = load_cfg()
-        host = public_host(cfg)
-        port = int(getattr(cfg, "holding_cell_port", 25565) or 25565)
-        return host if port == 25565 else f"{host}:{port}"
+        from .mod_hosting import game_join_address
+        return game_join_address(load_cfg())
     except Exception:
         return ""
 

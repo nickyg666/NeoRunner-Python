@@ -121,7 +121,7 @@ def room_properties(cfg: ServerConfig) -> str:
 
     return "\n".join([
         val("server-port", str(cfg.holding_cell_port)),
-        val("server-ip", ""),
+        val("server-ip", "127.0.0.1"),  # loopback only: the entrance proxy (connection_proxy) is the public listener
         val("online-mode", "true"),
         val("max-players", str(cfg.holding_cell_max_players)),
         val("motd", getattr(cfg, "holding_cell_description", "") or "NeoRunner Download Lobby - get the modpack link in chat!"),
@@ -368,12 +368,14 @@ def join_welcome_raws(cfg: ServerConfig) -> list[str]:
 
 
 def room_join_address(cfg: ServerConfig) -> str:
-    """Public address players use to reach the holding cell itself."""
-    from .mod_hosting import game_address
+    """Public address to reach the holding cell: the single shared entrance.
 
-    host = game_address(cfg) or "localhost"
-    port = int(cfg.holding_cell_port or 25565)
-    return f"{host}:{port}" if port != 25565 else host
+    The proxy routes vanilla clients here from the same public port modded
+    clients use, so this is just the game join address.
+    """
+    from .mod_hosting import game_join_address
+
+    return game_join_address(cfg)
 
 
 class VanillaHoldingCell:
@@ -471,6 +473,7 @@ class VanillaHoldingCell:
         # Only count log lines appended after this point: a stale "Done" from a
         # previous boot must not make the build start before this boot is ready.
         log_pos = self.log_file.stat().st_size if self.log_file and self.log_file.exists() else 0
+        self._watcher_start_pos = log_pos
 
         # Build the room every start. The ``fill``/``gamemode``/``gamerule``
         # commands are idempotent, and the world can silently regenerate after a
@@ -527,7 +530,12 @@ class VanillaHoldingCell:
         """Tail the holding cell log; greet players with clickable download link."""
         if not self.log_file:
             return
-        pos = 0
+        # Start at the end of the log as of THIS boot: the file is append-only
+        # across restarts, so reading from 0 would re-greet every historical
+        # join and spam the whole lobby.
+        pos = getattr(self, "_watcher_start_pos", 0)
+        if not self.log_file.exists():
+            pos = 0
         joined: dict[str, float] = {}
         last_line = ""
         while not self.stop_flag.is_set():

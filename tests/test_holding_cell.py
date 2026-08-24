@@ -16,6 +16,7 @@ from neorunner_pkg.holding_cell import (
     room_join_address,
     room_properties,
 )
+from neorunner_pkg.mod_hosting import game_join_address
 
 
 def _cfg(**overrides) -> ServerConfig:
@@ -151,14 +152,25 @@ def test_join_welcome_first_message_is_plain():
 # ---------------------------------------------------------------------------
 # room join address
 # ---------------------------------------------------------------------------
-def test_room_join_address_default_port_hidden():
-    addr = room_join_address(_cfg(holding_cell_port=25565))
-    assert addr == "174.49.233.151"
+def test_room_join_address_is_the_single_shared_entrance():
+    # The proxy routes vanilla clients to the room from the SAME public
+    # address modded clients use; holding_cell_port is loopback-internal.
+    cfg = _cfg(game_address="w8.mom", hostname="w8.mom", mc_port=25565,
+               holding_cell_port=1234)
+    assert room_join_address(cfg) == "w8.mom"
+    assert room_join_address(cfg) == game_join_address(cfg)
 
 
-def test_room_join_address_custom_port_shown():
-    addr = room_join_address(_cfg(holding_cell_port=25566))
-    assert addr == "174.49.233.151:25566"
+def test_room_join_address_ignores_internal_room_port():
+    # The holding-cell port is bound to loopback behind the proxy and must
+    # never leak into player-facing addresses.
+    cfg = _cfg(game_address="w8.mom", mc_port=25565, holding_cell_port=25566)
+    addr = room_join_address(cfg)
+    assert addr == "w8.mom"
+    assert ":25566" not in addr
+
+
+# (room join address tests moved above: single shared entrance via proxy)
 
 
 # ---------------------------------------------------------------------------
@@ -185,10 +197,11 @@ def test_room_properties_default_description_when_empty():
     assert "motd=NeoRunner Download Lobby - get the modpack link in chat!" in props
 
 
-def test_room_join_address_waiting_room_owns_forwarded_port():
-    # Waiting room should own the externally-forwarded port (1234).
-    addr = room_join_address(_cfg(mc_port=25565, holding_cell_port=1234))
-    assert addr == "174.49.233.151:1234"
+def test_room_join_address_waiting_room_no_longer_owns_a_port():
+    # Pre-proxy, the vanilla room owned the forwarded 1234 entrance; now the
+    # proxy routes to its loopback port and players only ever see one address.
+    cfg = _cfg(game_address="w8.mom", mc_port=25565, holding_cell_port=1234)
+    assert room_join_address(cfg) == "w8.mom"
 
 
 def test_room_properties_port_uses_holding_cell_port():
@@ -245,12 +258,17 @@ def test_greet_player_broadcasts_to_all(monkeypatch):
 # ---------------------------------------------------------------------------
 # downloads page: domain from settings, no public IP
 # ---------------------------------------------------------------------------
-def test_downloads_page_uses_hostname_not_ip():
+def test_downloads_page_uses_hostname_not_ip(monkeypatch):
     from neorunner_pkg import public_site
+    monkeypatch.setattr(
+        "neorunner_pkg.mod_hosting.game_join_address",
+        lambda cfg: "w8.mom",
+    )
     info = public_site._server_info()
     assert "174.49.233.151" not in str(info)
     assert info["server_address"] == "w8.mom"
-    assert info["room_address"] == "w8.mom:1234"
+    # Single shared entrance: the room is reached at the same address.
+    assert info["room_address"] == info["server_address"]
 
 
 # ---------------------------------------------------------------------------

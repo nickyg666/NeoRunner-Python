@@ -40,7 +40,7 @@ def build_env(monkeypatch, tmp_path):
             "mc_version": "26.1.2",
             "loader": "neoforge",
             "loader_version": "26.1.2.87",
-            "server_address": "mc.w8.mom",
+            "server_address": "w8.mom",
         }
 
     def fake_modpack_meta():

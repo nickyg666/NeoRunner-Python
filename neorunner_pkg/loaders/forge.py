@@ -81,7 +81,18 @@ class ForgeLoader(LoaderBase):
             "enable-rcon": "true",
             "rcon.password": _get_cfg_value(self.cfg, "rcon_pass", "changeme"),
             "rcon.port": str(_get_cfg_value(self.cfg, "rcon_port", 25575)),
-            "server-port": str(_get_cfg_value(self.cfg, "mc_port", _get_cfg_value(self.cfg, "server_port", 1234))),
+            # Behind the entrance proxy the real server binds a loopback backend
+            # port; cfg.mc_port belongs to the proxy itself.
+            "server-port": str(
+                _get_cfg_value(self.cfg, "backend_modded_port", 25570)
+                if _get_cfg_value(self.cfg, "proxy_enabled", True)
+                else _get_cfg_value(self.cfg, "mc_port", _get_cfg_value(self.cfg, "server_port", 1234))
+            ),
+            "server-ip": (
+                "127.0.0.1"
+                if _get_cfg_value(self.cfg, "proxy_enabled", True)
+                else ""
+            ),
             "motd": _get_cfg_value(self.cfg, "server_description", "") or "NeoRunner - Forge Server",
             "online-mode": "true"
         }

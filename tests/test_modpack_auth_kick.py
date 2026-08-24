@@ -164,7 +164,7 @@ class TestKickEndpoint:
         from neorunner_pkg.config import ServerConfig
 
         def fake_cfg():
-            return ServerConfig(hostname="mc.w8.mom", http_port=8000, mc_port=1234)
+            return ServerConfig(hostname="w8.mom", http_port=8000, mc_port=1234)
 
         monkeypatch.setattr("neorunner_pkg.dashboard.load_cfg", fake_cfg)
         dashboard.app.config["TESTING"] = True
@@ -183,4 +183,4 @@ class TestKickEndpoint:
         r = client.post("/api/broadcast-mods", headers=_auth_header())
         assert r.status_code == 200
         assert len(sent) == 1
-        assert "mc.w8.mom/dl/mods.zip" in sent[0]
+        assert "w8.mom/dl/mods.zip" in sent[0]

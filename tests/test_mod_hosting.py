@@ -144,23 +144,24 @@ class TestGameAddress:
         cfg = ServerConfig(game_address="play.example.com")
         assert game_address(cfg) == "play.example.com"
 
-    def test_game_address_falls_back_to_public_ip(self, monkeypatch):
+    def test_game_address_falls_back_to_hostname_never_ip(self, monkeypatch):
         from neorunner_pkg.config import ServerConfig
         from neorunner_pkg import mod_hosting
+        # Policy: the detected public IP must NEVER be surfaced to players.
         monkeypatch.setattr(mod_hosting, "_detect_public_ip", lambda: "8.8.8.8")
-        cfg = ServerConfig(game_address="")
-        assert mod_hosting.game_address(cfg) == "8.8.8.8"
+        cfg = ServerConfig(game_address="", hostname="w8.mom")
+        assert mod_hosting.game_address(cfg) == "w8.mom"
 
     def test_game_join_address_appends_port(self, monkeypatch):
         from neorunner_pkg.config import ServerConfig
         from neorunner_pkg import mod_hosting
         monkeypatch.setattr(mod_hosting, "_detect_public_ip", lambda: "8.8.8.8")
-        cfg = ServerConfig(game_address="", mc_port=1234)
-        assert mod_hosting.game_join_address(cfg) == "8.8.8.8:1234"
+        cfg = ServerConfig(game_address="", hostname="w8.mom", mc_port=1234)
+        assert mod_hosting.game_join_address(cfg) == "w8.mom:1234"
 
     def test_game_join_address_omits_default_port(self, monkeypatch):
         from neorunner_pkg.config import ServerConfig
         from neorunner_pkg import mod_hosting
         monkeypatch.setattr(mod_hosting, "_detect_public_ip", lambda: "8.8.8.8")
-        cfg = ServerConfig(game_address="", mc_port=25565)
-        assert mod_hosting.game_join_address(cfg) == "8.8.8.8"
+        cfg = ServerConfig(game_address="", hostname="w8.mom", mc_port=25565)
+        assert mod_hosting.game_join_address(cfg) == "w8.mom"

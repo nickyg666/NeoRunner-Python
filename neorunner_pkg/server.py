@@ -647,7 +647,12 @@ def wait_for_server(timeout: int = 60) -> bool:
     import socket
     
     cfg = load_cfg()
-    port = int(cfg.mc_port)
+    # With the entrance proxy enabled the real modded server binds a loopback
+    # backend port, not cfg.mc_port (which the proxy owns).
+    if getattr(cfg, "proxy_enabled", False):
+        port = int(getattr(cfg, "backend_modded_port", 0) or 25570)
+    else:
+        port = int(cfg.mc_port)
     
     start_time = time.time()
     while time.time() - start_time < timeout:

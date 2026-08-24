@@ -53,16 +53,12 @@ def build_installer_properties(cfg: ServerConfig, base_url: str | None = None, h
         else:
             base_url = f"http://{_get_local_ip()}:{http_port}"
     if not server_address:
-        # Prefer the configured domain so the installer tells players to join at
-        # the friendly hostname (e.g. w8.mom) rather than exposing the public IP.
-        # Fall back to the direct game address only when no domain is set.
-        host = getattr(cfg, "hostname", "") or ""
-        if host:
-            port = int(getattr(cfg, "mc_port", 25565) or 25565)
-            server_address = host if port == 25565 else f"{host}:{port}"
-        else:
-            from .mod_hosting import game_join_address
-            server_address = game_join_address(cfg)
+        # Join address must be a domain that actually carries raw TCP game
+        # traffic: ``cfg.game_address`` (e.g. w8.mom, the join domain kept
+        # current by ip-updater.service) or ``cfg.hostname`` when it is not
+        # Cloudflare-proxied. NEVER an IP.
+        from .mod_hosting import game_join_address
+        server_address = game_join_address(cfg)
 
     loader_version = ""
     try:

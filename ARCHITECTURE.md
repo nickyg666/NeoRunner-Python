@@ -320,7 +320,78 @@ Implementations:
   - Log rotation
   - Network channel analysis
   - Mod management
+## Single-Port Entrance & Domain Redirection (2026-08-24)
+
+Only ONE Minecraft port is exposed to the internet. Everything else is loopback.
+
+```
+                         ┌────────────────────────── router :25565 ─────────────┐
+player ▶ w8.mom:25565 ┘                                                      │
+                                                                                ▼
+              0.0.0.0:25565  connection_proxy.py  (the ONLY public MC listener)
+                 │ handshake peek: protocol varint + address + \x00FML* marker
+                 ├─ Forge/NeoForge marker AND proto == modded proto
+                 │      └─▶ 127.0.0.1:25570   real NeoForge server (server.properties)
+                 ├─ no marker AND proto == room proto
+                 │      └─▶ 127.0.0.1:1234    vanilla holding cell (lobby + chat link)
+                 ├─ backend down
+                 │      └─▶ friendly kick w/ clickable download link
+                 └─ anything else (wrong version / wrong loader / junk)
+                        └─▶ synthetic login-state Disconnect carrying BOTH click-event
+                            schemas (click_event + clickEvent) and the visible URL
+```
+
+### Domain / port redirection chain
+
+| Name | DNS | Carries | Used for |
+|---|---|---|---|
+| `w8.mom` | A record → home WAN IP, kept current by `ip-updater.service` | web (HTTPS via Cloudflare/tunnel) **and** raw TCP game port | everything: downloads, dashboard, and the game join address |
+
+- Players join at plain **`w8.mom`** (port 25565 default — never a suffix, never
+  an IP). The join URL is intentionally the shortest possible form.
+- For raw TCP :25565 to reach this host through `w8.mom`, the DNS record must
+  resolve to the home WAN IP (DNS-only); `ip-updater.service` rewrites the A
+  record on WAN changes (Cloudflare API token in `~/.cloudflared/api_token`,
+  zone `w8.mom`). If the record is ever toggled to Cloudflare-proxied, free
+  proxying will not forward the game port.
+- Router forwards external `25565/tcp` → this host.
+- Join address resolution lives in `mod_hosting.game_address()`:
+  `cfg.game_address` (`w8.mom`) → `cfg.hostname` → LAN IP. Raw public IPs are
+  never surfaced anywhere (installer properties, holding-cell book/chat,
+  disconnect kicks, public site all go through this helper).
+- Backends bind loopback only:
+  - modded server: `server.properties` → `server-ip=127.0.0.1`,
+    `server-port=<backend_modded_port>` (loader installers write this when
+    `proxy_enabled`; default 25570)
+  - holding cell: `room_properties()` → `server-ip=127.0.0.1`, port
+    `holding_cell_port` (1234)
+
+### Config fields
+
+| Field | Meaning |
+|---|---|
+| `proxy_enabled` | master switch; when false the system behaves like before |
+| `backend_modded_port` | loopback port of the real modded server behind the proxy |
+| `mc_port` | the PUBLIC entrance port owned by the proxy (25565) |
+| `game_address` | player-facing join domain (`w8.mom`) |
+| `hostname` | web-facing domain (`w8.mom`) |
+
+### Protocol learning
+
+The proxy never hard-codes protocol numbers: it status-pings both backends
+(`_probe_protocol`, TTL 60s, re-probes while unknown) and routes on equality.
+Routing decisions are logged via `log_event("PROXY", ...)` into `live.log` and
+kept in a ring buffer exposed at `/api/proxy/status`.
+
+### Client installer hardening
+
+- **Single instance**: `acquireSingleInstanceLock()` takes an OS-level FileLock
+  on `~/.neorunner-installer.lock`; second launches show "already running" and
+  exit. The OS releases the lock even on crash/kill.
+- **Domain at build time**: `build_installer_properties()` bakes
+  `baseUrl=https://w8.mom` + `serverAddress=w8.mom` from live config into
+  `installer.properties` inside the JAR at build time — no IPs are embedded.
 
 ---
 
-*Last updated: 2026-04-30*
+*Last updated: 2026-08-24*

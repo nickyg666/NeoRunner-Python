@@ -67,10 +67,10 @@ def public_download_link(cfg: ServerConfig, path: str = "/dl/mods.zip") -> str:
 # ---------------------------------------------------------------------------
 # Minecraft join address
 #
-# The game port is reached over raw TCP, which Cloudflare's free tunnel (used
-# for ``hostname``) does NOT proxy. So the join address must point at the
-# machine's direct IP (or a non-proxied DNS record), not at the web hostname.
-# Resolution order: ``cfg.game_address`` -> detected public IP -> LAN IP.
+# Policy: NEVER surface a raw IP to players. The join address resolves from
+# ``cfg.game_address`` (a dedicated game DNS record) and then ``cfg.hostname``
+# (the public domain). The router/firewall maps the public game port to this
+# machine; the entrance proxy owns that port locally.
 # ---------------------------------------------------------------------------
 
 _public_ip_cache: dict[str, str] = {}
@@ -104,19 +104,20 @@ def _detect_public_ip() -> str:
 
 
 def game_address(cfg: ServerConfig | None = None) -> str:
-    """Resolve the direct-connect host for the Minecraft game port.
+    """Resolve the join host for the Minecraft game port -- never an IP.
 
-    Prefers ``cfg.game_address`` (an IP or non-proxied DNS the player enters in
-    Minecraft). Falls back to the detected public IP, then the LAN IP.
+    Resolution order: ``cfg.game_address`` (dedicated game DNS record) ->
+    ``cfg.hostname`` (the public domain) -> LAN IP (last resort, local-only
+    setups). The detected public IP is deliberately NOT used anywhere.
     """
     if cfg is None:
         cfg = load_cfg()
     addr = getattr(cfg, "game_address", "") or ""
     if addr:
         return addr
-    pub = _detect_public_ip()
-    if pub:
-        return pub
+    host = getattr(cfg, "hostname", "") or ""
+    if host:
+        return host
     return _get_local_ip()
 
 

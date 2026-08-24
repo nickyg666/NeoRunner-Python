@@ -44,9 +44,9 @@ class TestInstallerProperties:
     def test_custom_base_url(self, monkeypatch, tmp_path):
         monkeypatch.setattr("neorunner_pkg.installer_jar.CWD", tmp_path)
         props = build_installer_properties(
-            _cfg(), base_url="https://mc.w8.mom", server_address="w8.mom:1234"
+            _cfg(), base_url="https://w8.mom", server_address="w8.mom:1234"
         )
-        assert "baseUrl=https://mc.w8.mom" in props
+        assert "baseUrl=https://w8.mom" in props
         assert "serverAddress=w8.mom:1234" in props
 
     def test_default_server_address_uses_mc_port(self, monkeypatch, tmp_path):
@@ -64,14 +64,13 @@ class TestInstallerProperties:
         monkeypatch.setattr("neorunner_pkg.installer_jar.CWD", tmp_path)
         monkeypatch.setattr(
             "neorunner_pkg.mod_hosting.game_join_address",
-            lambda cfg: "1.2.3.4:1234",
+            lambda cfg: "w8.mom",
         )
-        props = build_installer_properties(_cfg(hostname="mc.w8.mom"))
-        assert "baseUrl=https://mc.w8.mom" in props
-        # serverAddress prefers the configured domain so the installer never
-        # exposes the public IP; the direct game address is only a fallback
-        # when no domain is set.
-        assert "serverAddress=mc.w8.mom:1234" in props
+        props = build_installer_properties(_cfg(hostname="w8.mom"))
+        assert "baseUrl=https://w8.mom" in props
+        # serverAddress is ALWAYS the game join address kept current by
+        # ip-updater -- never an IP.
+        assert "serverAddress=w8.mom" in props
         assert "1.2.3.4" not in props
 
     def test_no_hostname_uses_direct_game_address(self, monkeypatch, tmp_path):
@@ -177,8 +176,8 @@ class TestBuildJarEmbedding:
             "neorunner_pkg.mod_hosting.build_launcher_zip_bytes", fake_builder
         )
 
-        jar = build_installer_jar(_cfg(hostname="mc.w8.mom"), base_url="https://mc.w8.mom",
-                                  server_address="mc.w8.mom:1234", force=True)
+        jar = build_installer_jar(_cfg(hostname="w8.mom"), base_url="https://w8.mom",
+                                  server_address="w8.mom:1234", force=True)
         with zipfile.ZipFile(jar) as z:
             names = z.namelist()
             assert "pack.zip" in names
@@ -222,11 +221,11 @@ class TestBuildJarEmbedding:
             lambda cfg: hashlib.sha256(packs["current"].encode()).hexdigest()[:16],
         )
 
-        cfg = _cfg(hostname="mc.w8.mom")
+        cfg = _cfg(hostname="w8.mom")
         packs["current"] = "a"
-        jar_a = build_installer_jar(cfg, base_url="https://mc.w8.mom",
-                                    server_address="mc.w8.mom:1234", force=True)
+        jar_a = build_installer_jar(cfg, base_url="https://w8.mom",
+                                    server_address="w8.mom:1234", force=True)
         packs["current"] = "b"
-        jar_b = build_installer_jar(cfg, base_url="https://mc.w8.mom",
-                                    server_address="mc.w8.mom:1234", force=True)
+        jar_b = build_installer_jar(cfg, base_url="https://w8.mom",
+                                    server_address="w8.mom:1234", force=True)
         assert jar_a.name != jar_b.name

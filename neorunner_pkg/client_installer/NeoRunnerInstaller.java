@@ -31,6 +31,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.io.RandomAccessFile;
+import java.nio.channels.FileLock;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -73,11 +75,50 @@ public class NeoRunnerInstaller {
     private JButton installBtn;
 
     public static void main(String[] args) throws Exception {
+        if (!acquireSingleInstanceLock()) {
+            System.err.println("NeoRunner installer is already running.");
+            try {
+                if (!GraphicsEnvironment.isHeadless()) {
+                    JOptionPane.showMessageDialog(null,
+                        "NeoRunner installer is already running.\n"
+                        + "Check the open installer window (or your taskbar).",
+                        "Already running", JOptionPane.INFORMATION_MESSAGE);
+                }
+            } catch (Throwable ignored) {
+            }
+            System.exit(0);
+        }
         NeoRunnerInstaller inst = new NeoRunnerInstaller();
         if (GraphicsEnvironment.isHeadless()) {
             inst.runConsole();
         } else {
             inst.showGui();
+        }
+    }
+
+    /* ------------- single instance ------------- */
+
+    private static FileLock INSTANCE_LOCK;
+    private static RandomAccessFile INSTANCE_LOCK_FILE;
+
+    /**
+     * Ensures only one installer runs at a time via an OS-level lock file in
+     * the user home. The lock is released automatically by the OS when the
+     * JVM exits for ANY reason (including crash/kill), so it can never wedge
+     * permanently. Returns false when another instance holds the lock.
+     */
+    private static boolean acquireSingleInstanceLock() {
+        RandomAccessFile raf = null;
+        try {
+            Path lockFile = Paths.get(System.getProperty("user.home"), ".neorunner-installer.lock");
+            raf = new RandomAccessFile(lockFile.toFile(), "rw");
+            INSTANCE_LOCK = raf.getChannel().tryLock();
+            INSTANCE_LOCK_FILE = raf;  // keep the channel alive for the JVM lifetime
+            return INSTANCE_LOCK != null;
+        } catch (Throwable t) {
+            // Cannot create/lock the file (permissions, read-only home...):
+            // prefer letting the install proceed over blocking a legit run.
+            return true;
         }
     }
 

@@ -48,6 +48,8 @@ class ServerConfig:
     holding_cell_room_size: int = 20   # Room footprint (N x N blocks), capped at 20
     holding_cell_room_height: int = 5  # Room ceiling height in blocks, capped at 5
     holding_cell_max_players: int = 10
+    proxy_enabled: bool = True  # Single public MC port with handshake-routing entrance (connection_proxy.py)
+    backend_modded_port: int = 25570  # Loopback-only port of the real modded server behind the proxy
     broadcast_enabled: bool = True
     broadcast_auto_on_install: bool = True
     nag_show_mod_list_on_join: bool = False
@@ -119,6 +121,8 @@ class ServerConfig:
             holding_cell_room_size=self.holding_cell_room_size,
             holding_cell_room_height=self.holding_cell_room_height,
             holding_cell_max_players=self.holding_cell_max_players,
+            proxy_enabled=self.proxy_enabled,
+            backend_modded_port=self.backend_modded_port,
             broadcast_enabled=self.broadcast_enabled,
             broadcast_auto_on_install=self.broadcast_auto_on_install,
             nag_show_mod_list_on_join=self.nag_show_mod_list_on_join,
@@ -278,6 +282,8 @@ def ensure_config(cfg: ServerConfig) -> ServerConfig:
         holding_cell_room_size=min(cfg.holding_cell_room_size or 20, 20),
         holding_cell_room_height=min(cfg.holding_cell_room_height or 5, 5),
         holding_cell_max_players=cfg.holding_cell_max_players or 10,
+        proxy_enabled=bool(getattr(cfg, "proxy_enabled", True)),
+        backend_modded_port=int(getattr(cfg, "backend_modded_port", 0) or 25570),
         broadcast_enabled=cfg.broadcast_enabled,
         broadcast_auto_on_install=cfg.broadcast_auto_on_install,
         nag_show_mod_list_on_join=cfg.nag_show_mod_list_on_join,

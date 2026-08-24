@@ -3228,6 +3228,45 @@ def api_room_stop():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/proxy/status")
+def api_proxy_status():
+    """Entrance-proxy status: routing decisions + learned backend protocols."""
+    from .config import ensure_config
+    from .connection_proxy import get_connection_proxy
+
+    try:
+        proxy = get_connection_proxy(ensure_config(load_cfg()))
+        return jsonify(proxy.status())
+    except Exception as e:
+        return jsonify({"error": str(e), "running": False}), 500
+
+
+@app.route("/api/proxy/start", methods=["POST"])
+def api_proxy_start():
+    """Start the entrance proxy."""
+    from .config import ensure_config
+    from .connection_proxy import get_connection_proxy
+
+    try:
+        proxy = get_connection_proxy(ensure_config(load_cfg()))
+        ok = proxy.start()
+        return jsonify({"ok": ok, **proxy.status()}), (200 if ok else 500)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/proxy/stop", methods=["POST"])
+def api_proxy_stop():
+    """Stop the entrance proxy (clients will no longer reach any server)."""
+    from .connection_proxy import get_connection_proxy
+
+    try:
+        get_connection_proxy().stop()
+        return jsonify({"ok": True, "running": False})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/health")
 def api_health():
     """Health check endpoint."""
@@ -3490,7 +3529,20 @@ def run_dashboard(host: str = "0.0.0.0", port: int = 8000, debug: bool = False):
     
     global DASHBOARD_PORT
     DASHBOARD_PORT = port
-    
+
+    # Bring up the entrance proxy before serving traffic so the single public
+    # MC port is routed from the first request on (no window where the modded
+    # backend is directly exposed or unreachable).
+    try:
+        from .config import ensure_config
+        from .connection_proxy import get_connection_proxy
+
+        cfg = ensure_config(load_cfg())
+        if getattr(cfg, "proxy_enabled", False):
+            get_connection_proxy(cfg).start()
+    except Exception as e:
+        log_event("PROXY", f"proxy autostart failed: {e}")
+
     log_event("DASHBOARD", f"Starting dashboard on {host}:{port} with Waitress")
     serve(app, host=host, port=port, threads=8)
 

@@ -188,7 +188,7 @@ class TestPatchJar:
             z.writestr("README.txt", "hello")
 
         monkeypatch.setattr(jmp, "CWD", tmp_path.parent)
-        monkeypatch.setattr(jmp, "load_cfg", lambda: ServerConfig(hostname="mc.w8.mom"))
+        monkeypatch.setattr(jmp, "load_cfg", lambda: ServerConfig(hostname="w8.mom"))
         monkeypatch.setattr(jmp, "_find_universal_jars", lambda loader: [jar])
 
         assert jmp.patch_loader_messages("neoforge") is True
@@ -257,7 +257,7 @@ class TestPatchJar:
             z.writestr("net/neoforged/neoforge/client/network/registration/ClientNetworkRegistry.class", _fake_class_bytes())
 
         monkeypatch.setattr(jmp, "CWD", tmp_path.parent)
-        monkeypatch.setattr(jmp, "load_cfg", lambda: ServerConfig(hostname="mc.w8.mom"))
+        monkeypatch.setattr(jmp, "load_cfg", lambda: ServerConfig(hostname="w8.mom"))
         monkeypatch.setattr(jmp, "_find_universal_jars", lambda loader: [jar])
 
         assert jmp.has_jar_signatures(zipfile.ZipFile(jar).namelist()) is True
@@ -340,7 +340,7 @@ class TestClickableInjection:
             z.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n\n")
             z.writestr("net/neoforged/neoforge/network/registration/NetworkRegistry.class", _make_registry_class())
 
-        monkeypatch.setattr(jmp, "load_cfg", lambda: ServerConfig(hostname="mc.w8.mom"))
+        monkeypatch.setattr(jmp, "load_cfg", lambda: ServerConfig(hostname="w8.mom"))
         monkeypatch.setattr(jmp, "_download_link", lambda cfg: self.LINK)
 
         assert jmp._patch_jar(jar, "neoforge") is True
@@ -364,7 +364,7 @@ class TestClickableInjection:
             z.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n\n")
             z.writestr("net/minecraft/server/network/ServerHandshakePacketListenerImpl.class", _make_handshake_class())
 
-        monkeypatch.setattr(jmp, "load_cfg", lambda: ServerConfig(hostname="mc.w8.mom"))
+        monkeypatch.setattr(jmp, "load_cfg", lambda: ServerConfig(hostname="w8.mom"))
         monkeypatch.setattr(jmp, "_download_link", lambda cfg: self.LINK)
 
         assert jmp._patch_jar(jar, "neoforge") is True
@@ -385,7 +385,7 @@ class TestClickableInjection:
             z.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n\n")
             z.writestr("net/minecraft/server/network/ServerHandshakePacketListenerImpl.class", _make_handshake_class())
 
-        monkeypatch.setattr(jmp, "load_cfg", lambda: ServerConfig(hostname="mc.w8.mom"))
+        monkeypatch.setattr(jmp, "load_cfg", lambda: ServerConfig(hostname="w8.mom"))
         monkeypatch.setattr(jmp, "_download_link", lambda cfg: self.LINK)
 
         # First: simulate the old string-only patch (no clickable helper).
@@ -458,7 +458,7 @@ class TestClickableInjection:
             z.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n\n")
             z.writestr("net/neoforged/neoforge/network/registration/NetworkRegistry.class", _make_fallback_class())
 
-        monkeypatch.setattr(jmp, "load_cfg", lambda: ServerConfig(hostname="mc.w8.mom"))
+        monkeypatch.setattr(jmp, "load_cfg", lambda: ServerConfig(hostname="w8.mom"))
         monkeypatch.setattr(jmp, "_download_link", lambda cfg: self.LINK)
 
         assert jmp._patch_jar(jar, "neoforge") is True

@@ -169,11 +169,17 @@ VERDICT_ROOM = "room"
 VERDICT_KICK = "kick"
 
 
-def route_login(hs: Handshake, modded_proto: int | None, room_proto: int | None) -> tuple[str, str]:
+def route_login(hs: Handshake, modded_proto: int | None, room_proto: int | None,
+                unmarked_target: str = VERDICT_ROOM) -> tuple[str, str]:
     """Decide where a LOGIN handshake goes: ``(verdict, human_reason)``.
 
     - Forge/NeoForge client speaking the modded server's protocol -> modded.
-    - Anything else that speaks the waiting room's protocol -> room.
+    - Unmarked clients (vanilla / Fabric / Quilt -- indistinguishable at the
+      handshake layer): routed per ``unmarked_target``:
+        * VERDICT_ROOM  -> lobby if the protocol matches the room
+        * VERDICT_MODDED -> straight to the modded server when the protocol
+          matches it (Fabric packs usually want this; the server itself kicks
+          truly-vanilla clients with a patched, link-carrying message)
     - Everything else -> clickable kick (wrong version / wrong loader / junk).
     """
     if hs.has_fml_marker:
@@ -182,6 +188,10 @@ def route_login(hs: Handshake, modded_proto: int | None, room_proto: int | None)
         return VERDICT_KICK, (
             f"modloader client but protocol {hs.protocol} != modded {modded_proto}"
         )
+    if unmarked_target == VERDICT_MODDED:
+        if modded_proto is not None and hs.protocol == modded_proto:
+            return VERDICT_MODDED, f"unmarked client, protocol {hs.protocol} matches modded"
+        return VERDICT_KICK, f"unknown client, protocol {hs.protocol} != modded {modded_proto}"
     if room_proto is not None and hs.protocol == room_proto:
         return VERDICT_ROOM, f"vanilla-compatible client, protocol {hs.protocol}"
     return VERDICT_KICK, f"unknown client, protocol {hs.protocol}"
@@ -246,6 +256,25 @@ class ConnectionProxy:
     def _download_link(self) -> str:
         from .mod_hosting import public_download_base
         return public_download_base(self.cfg)
+
+    def _loader_name(self) -> str:
+        return {"neoforge": "NeoForge", "forge": "Forge",
+                "fabric": "Fabric"}.get(str(self.cfg.loader or "").lower(), "modded")
+
+    def _unmarked_target(self) -> str:
+        """Where unmarked (vanilla/Fabric/Quilt) clients go.
+
+        ``auto`` policy: Forge-family packs bounce unmarked clients to the
+        lobby; Fabric/Quilt packs usually accept plain vanilla clients (or the
+        server kicks them with a patched, link-carrying message), so those go
+        straight to the modded backend.
+        """
+        pref = str(getattr(self.cfg, "unmarked_client_target", "auto") or "auto").lower()
+        if pref in (VERDICT_ROOM, VERDICT_MODDED):
+            return pref
+        if str(self.cfg.loader or "").lower() in ("neoforge", "forge"):
+            return VERDICT_ROOM
+        return VERDICT_MODDED
 
     # -- lifecycle ----------------------------------------------------------
 
@@ -438,8 +467,12 @@ class ConnectionProxy:
                 return
 
             kind = "status" if hs.next_state == 1 else "login"
+            unmarked = self._unmarked_target()
             if kind == "status":
-                target = self.modded_port if hs.has_fml_marker else self.room_port
+                if hs.has_fml_marker:
+                    target = self.modded_port
+                else:
+                    target = self.modded_port if unmarked == VERDICT_MODDED else self.room_port
                 self._record("status",
                              f"{peer}: proto={hs.protocol} modloader={hs.has_fml_marker} "
                              f"-> status via :{target}")
@@ -447,15 +480,17 @@ class ConnectionProxy:
                                   first_frame + rest)
                 return
 
-            verdict, why = route_login(hs, self.protocols.get("modded"), self.protocols.get("room"))
+            verdict, why = route_login(hs, self.protocols.get("modded"),
+                                       self.protocols.get("room"), unmarked)
             detail = (f"{peer}: addr={hs.address.split(chr(0))[0]!r} proto={hs.protocol} "
                       f"modloader={hs.has_fml_marker} ({why})")
 
             if verdict == VERDICT_KICK:
                 self._record("kick", detail)
-                reason = ("This server needs its modpack. Grab the installer, then rejoin:"
+                loader = self._loader_name()
+                reason = (f"This server needs its {loader} mods. Grab the installer, then rejoin:"
                           if hs.has_fml_marker else
-                          "This server runs mods. Download them first, then rejoin:")
+                          f"This server runs {loader} mods. Download them first, then rejoin:")
                 writer.write(kick_packet(reason, link))
                 await writer.drain()
                 await asyncio.sleep(0.2)

@@ -128,6 +128,42 @@ def test_route_unknown_loader_without_marker_treated_as_vanilla():
 
 
 # ---------------------------------------------------------------------------
+# loader-aware unmarked-client policy (Fabric packs route to the pack server)
+# ---------------------------------------------------------------------------
+
+def test_route_fabric_policy_sends_matching_unmarked_to_modded():
+    verdict, _ = route_login(_hs(775), modded_proto=775, room_proto=775,
+                             unmarked_target=VERDICT_MODDED)
+    assert verdict == VERDICT_MODDED
+
+
+def test_route_fabric_policy_wrong_version_still_kicked():
+    verdict, _ = route_login(_hs(340), modded_proto=775, room_proto=775,
+                             unmarked_target=VERDICT_MODDED)
+    assert verdict == VERDICT_KICK
+
+
+def test_route_forge_family_policy_keeps_unmarked_in_lobby():
+    verdict, _ = route_login(_hs(775), modded_proto=775, room_proto=775,
+                             unmarked_target=VERDICT_ROOM)
+    assert verdict == VERDICT_ROOM
+
+
+def test_proxy_auto_policy_fabric_loader_targets_modded():
+    cfg = ServerConfig(hostname="w8.mom", mc_port=25565,
+                       backend_modded_port=25570, holding_cell_port=1234,
+                       loader="fabric")
+    assert ConnectionProxy(cfg)._unmarked_target() == "modded"
+
+
+def test_proxy_auto_policy_neoforge_targets_lobby():
+    cfg = ServerConfig(hostname="w8.mom", mc_port=25565,
+                       backend_modded_port=25570, holding_cell_port=1234,
+                       loader="neoforge")
+    assert ConnectionProxy(cfg)._unmarked_target() == "room"
+
+
+# ---------------------------------------------------------------------------
 # kick payload
 # ---------------------------------------------------------------------------
 

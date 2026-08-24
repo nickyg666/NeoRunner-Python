@@ -129,3 +129,30 @@ def test_dispatcher_selects_velocity_when_configured(monkeypatch, tmp_path):
     st = ent.status()
     assert st["backend"] == "velocity"
     assert st["servers"]["modded"] == "127.0.0.1:25570"
+
+
+def test_velocity_properties_follow_loader_policy(mgr, monkeypatch, tmp_path):
+    """auto policy: Fabric/Quilt packs route unmarked clients to the pack
+    server; Forge-family packs keep them in the lobby."""
+    from neorunner_pkg import velocity_proxy as vp
+
+    run_dir = tmp_path / ".cache" / "velocity" / "run"
+    (run_dir / "plugins").mkdir(parents=True)
+    monkeypatch.setattr(vp, "RUN_DIR", run_dir)
+
+    mgr.cfg.loader = "fabric"
+    mgr.ensure_plugin()
+    props = (run_dir / "plugins" / "neorunner-router.properties").read_text()
+    assert "unmarkedTarget=modded" in props
+    assert props.startswith("modded=modded")
+
+    mgr.cfg.loader = "neoforge"
+    mgr.ensure_plugin()
+    props = (run_dir / "plugins" / "neorunner-router.properties").read_text()
+    assert "unmarkedTarget=lobby" in props
+
+
+def test_router_source_honors_unmarked_target():
+    src = (PLUGIN_DIR / "src/mom/w8/neorunner/NeorunnerRouter.java").read_text()
+    assert "unmarkedTarget" in src
+    assert 'getRawVirtualHost' in src

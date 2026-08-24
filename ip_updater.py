@@ -19,8 +19,12 @@ IP_SOURCES = (
 )
 IP_CACHE = Path("/tmp/neorunner_public_ip.json")
 RECORDS = [
-    {"name": "w8.mom", "proxied": False},
-    {"name": "mc.w8.mom", "proxied": True},
+    # The game door: DNS-only A record so raw TCP :25565 reaches the home
+    # router. NEVER set proxied=true here - Cloudflare's free proxy does not
+    # forward arbitrary game ports and clients would lose the ability to join.
+    # The apex/root name stays a proxied CNAME to the cloudflared tunnel for
+    # web traffic; this updater must never touch it.
+    {"name": "mc.w8.mom", "proxied": False},
 ]
 
 

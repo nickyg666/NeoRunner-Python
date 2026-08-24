@@ -126,6 +126,20 @@ class VelocityManager:
         plugins_dir.mkdir(exist_ok=True)
         if PLUGINS_SRC.exists():
             shutil.copy2(PLUGINS_SRC, plugins_dir / PLUGIN_JAR_NAME)
+        # Router policy: resolve the same auto rule the Python entrance uses.
+        pref = str(getattr(self.cfg, "unmarked_client_target", "auto") or "auto").lower()
+        if pref in ("modded", "lobby"):
+            target = pref
+        elif str(self.cfg.loader or "").lower() in ("neoforge", "forge"):
+            target = "lobby"
+        else:
+            target = "modded"
+        props = (
+            f"modded=modded\n"
+            f"lobby=lobby\n"
+            f"unmarkedTarget={target}\n"
+        )
+        (plugins_dir / "neorunner-router.properties").write_text(props)
 
     def _write_secret(self) -> None:
         secret_file = RUN_DIR / "forwarding.secret"

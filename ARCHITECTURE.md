@@ -376,6 +376,43 @@ player ▶ w8.mom:25565 ┘                                                     
 | `game_address` | player-facing join domain (`w8.mom`) |
 | `hostname` | web-facing domain (`w8.mom`) |
 
+### Entrance backends (`entrance_backend` config field)
+
+Two interchangeable implementations own the public port; both expose
+`start()/stop()/status()/is_running()` through `entrance.get_entrance()`:
+
+| Backend | Module | Notes |
+|---|---|---|
+| `python` (default, live) | `connection_proxy.py` | asyncio splice proxy; classification in-process |
+| `velocity` | `velocity_proxy.py` | Velocity 3.5.1 (pinned build) + `neorunner-router` plugin |
+
+The **velocity** path:
+- Jar is pinned (`VEL_VERSION`/`VEL_BUILD`/sha256 in `velocity_proxy.py`),
+  fetched from the PaperMC Fill API into `.cache/velocity/`, and run from
+  `.cache/velocity/run/` in tmux session `VELOCITY`.
+- Routing lives in `velocity_plugin/NeorunnerRouter.java`: Forge/NeoForge
+  clients append `\0FML*\0` to the handshake address, exposed publicly as
+  `Player.getRawVirtualHost()` → marker ⇒ server `modded`, no marker ⇒ `lobby`.
+  Rebuild after edits with `neorunner_pkg/velocity_plugin/build.sh <velocity.jar>`.
+- Hardening baked into generated `velocity.toml`: edge Mojang auth
+  (`online-mode=true`), `rate-limit=true`, `force-key-authentication=true`,
+  query disabled. Backends must run `online-mode=false` while Velocity is the
+  entrance (the managers/loader installers flip this automatically); they stay
+  loopback-only so nothing unauthenticated reaches them.
+- Player-info forwarding is OFF until NeoForge's native modern-forwarding
+  support is verified on this install; until then backends see loopback
+  addresses / offline UUIDs.
+- Switch entrances by setting `entrance_backend` and restarting
+  `neorunner.service` (backends need one restart too when auth mode changes).
+
+### Nightly entrance watchdog
+
+`scripts/proxy_selftest.py` replays the routing matrix against the live port
+(vanilla status, FML status, wrong-version login, correct-proto modded login)
+and writes `[PROXY_SELFTEST] ... PASS/FAIL` lines into `live.log`. Runs daily
+04:17 via `neorunner-proxy-selftest.timer`; non-zero exit marks the timer unit
+failed so misses are visible.
+
 ### Protocol learning
 
 The proxy never hard-codes protocol numbers: it status-pings both backends

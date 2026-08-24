@@ -3232,36 +3232,37 @@ def api_room_stop():
 def api_proxy_status():
     """Entrance-proxy status: routing decisions + learned backend protocols."""
     from .config import ensure_config
-    from .connection_proxy import get_connection_proxy
+    from .entrance import get_entrance
 
     try:
-        proxy = get_connection_proxy(ensure_config(load_cfg()))
-        return jsonify(proxy.status())
+        entrance = get_entrance(ensure_config(load_cfg()))
+        return jsonify(entrance.status())
     except Exception as e:
         return jsonify({"error": str(e), "running": False}), 500
 
 
 @app.route("/api/proxy/start", methods=["POST"])
 def api_proxy_start():
-    """Start the entrance proxy."""
+    """Start the configured entrance (python proxy or velocity)."""
     from .config import ensure_config
-    from .connection_proxy import get_connection_proxy
+    from .entrance import get_entrance
 
     try:
-        proxy = get_connection_proxy(ensure_config(load_cfg()))
-        ok = proxy.start()
-        return jsonify({"ok": ok, **proxy.status()}), (200 if ok else 500)
+        entrance = get_entrance(ensure_config(load_cfg()))
+        ok = entrance.start()
+        return jsonify({"ok": ok, **entrance.status()}), (200 if ok else 500)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/proxy/stop", methods=["POST"])
 def api_proxy_stop():
-    """Stop the entrance proxy (clients will no longer reach any server)."""
-    from .connection_proxy import get_connection_proxy
+    """Stop the configured entrance (clients will no longer reach any server)."""
+    from .config import ensure_config
+    from .entrance import get_entrance
 
     try:
-        get_connection_proxy().stop()
+        get_entrance(ensure_config(load_cfg())).stop()
         return jsonify({"ok": True, "running": False})
     except Exception as e:
         return jsonify({"error": str(e)}), 500

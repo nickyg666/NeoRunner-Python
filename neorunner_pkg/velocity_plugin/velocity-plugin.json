@@ -1,0 +1,10 @@
+{
+  "id": "neorunner-router",
+  "name": "NeoRunner Router",
+  "version": "1.0.0",
+  "description": "Send Forge/NeoForge clients to the modded server, everyone else to the lobby",
+  "url": "https://w8.mom",
+  "authors": ["nickyg666"],
+  "dependencies": [],
+  "main": "mom.w8.neorunner.NeorunnerRouter"
+}

@@ -81,7 +81,13 @@ class FabricLoader(LoaderBase):
                 else ""
             ),
             "motd": _get_cfg_value(self.cfg, "server_description", "") or "NeoRunner - Fabric Server",
-            "online-mode": "true"
+            # Edge auth at the entrance: behind Velocity the backend runs
+            # offline mode so authenticated proxy sessions can join.
+            "online-mode": (
+                "false"
+                if _get_cfg_value(self.cfg, "entrance_backend", "python") == "velocity"
+                else "true"
+            )
         }
         
         if os.path.exists(props_file):

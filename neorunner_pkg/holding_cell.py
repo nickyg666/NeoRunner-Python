@@ -121,8 +121,11 @@ def room_properties(cfg: ServerConfig) -> str:
 
     return "\n".join([
         val("server-port", str(cfg.holding_cell_port)),
-        val("server-ip", "127.0.0.1"),  # loopback only: the entrance proxy (connection_proxy) is the public listener
-        val("online-mode", "true"),
+        val("server-ip", "127.0.0.1"),  # loopback only: the entrance proxy is the public listener
+        # Edge auth happens at the entrance; behind Velocity the backends run
+        # offline mode so the proxy's authenticated sessions can join.
+        val("online-mode",
+            "false" if str(getattr(cfg, "entrance_backend", "python")) == "velocity" else "true"),
         val("max-players", str(cfg.holding_cell_max_players)),
         val("motd", getattr(cfg, "holding_cell_description", "") or "NeoRunner Download Lobby - get the modpack link in chat!"),
         val("level-name", "holding_cell_world"),

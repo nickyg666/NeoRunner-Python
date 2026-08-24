@@ -1,0 +1,10 @@
+[Unit]
+Description=NeoRunner entrance self-test (routing matrix vs live MC port)
+After=network-online.target neorunner.service
+
+[Service]
+Type=oneshot
+User=host
+WorkingDirectory=/home/host/neorunner
+ExecStart=/usr/bin/python3 /home/host/neorunner/scripts/proxy_selftest.py --backend python
+# Results land in live.log as [PROXY_SELFTEST] lines; exit code drives the timer's failure state.

@@ -1,0 +1,9 @@
+[Unit]
+Description=Nightly NeoRunner entrance self-test
+
+[Timer]
+OnCalendar=*-*-* 04:17:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

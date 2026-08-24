@@ -103,7 +103,13 @@ class NeoForgeLoader(LoaderBase):
             "gamemode": "survival",
             "difficulty": "normal",
             "max-players": "20",
-            "online-mode": "true",
+            # Edge auth at the entrance: behind Velocity the backend runs
+            # offline mode so authenticated proxy sessions can join.
+            "online-mode": (
+                "false"
+                if _get_cfg_value(self.cfg, "entrance_backend", "python") == "velocity"
+                else "true"
+            ),
             "pvp": "true",
             "allow-flight": "true",
             "network-compression-threshold": "256",

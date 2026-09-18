@@ -2,15 +2,11 @@
 REM install-mods.bat - NeoRunner Client Mod Sync Script
 setlocal enabledelayedexpansion
 
-set "SERVER_HOST=192.168.0.150"
-set "SERVER_PORT=8000"
-
-if "%SERVER_HOST%"=="" set "SERVER_HOST=localhost"
-if "%SERVER_PORT%"=="" set "SERVER_PORT=8000"
+set "BASE_URL=https://w8.mom"
 
 echo ==========================================
 echo    NeoRunner Mod Sync
-echo    Server: %SERVER_HOST%:%SERVER_PORT%
+echo    Server: %BASE_URL%
 echo ==========================================
 echo.
 
@@ -22,7 +18,7 @@ if not exist "%MODS_DIR%" mkdir "%MODS_DIR%"
 if not exist "%OLD_DIR%" mkdir "%OLD_DIR%"
 
 echo [1/4] Fetching server manifest...
-curl.exe -s "http://%SERVER_HOST%:%SERVER_PORT%/download/manifest" -o "%TEMP%\neorunner_manifest.json"
+curl.exe -s "%BASE_URL%/download/manifest" -o "%TEMP%\neorunner_manifest.json"
 if errorlevel 1 (
     echo ERROR: Failed to fetch manifest
     pause
@@ -62,7 +58,7 @@ echo    Missing: %MISSING%
 
 if %MISSING% GTR 0 (
     echo    Downloading %MISSING% missing mods...
-    curl.exe -sL "http://%SERVER_HOST%:%SERVER_PORT%/download/all" -o "%TEMP%\neorunner_mods.zip"
+    curl.exe -sL "%BASE_URL%/download/all" -o "%TEMP%\neorunner_mods.zip"
     if errorlevel 1 (
         echo    ERROR: Failed to download mods
     ) else (

@@ -40,8 +40,13 @@ def _cfg(**overrides) -> ServerConfig:
 def test_room_properties_has_vanilla_settings():
     props = room_properties(_cfg())
     assert "level-type=minecraft:flat" in props
-    assert '"block":"minecraft:bedrock","height":1' in props
-    assert '"block":"minecraft:grass_block","height":1' in props
+    # 1.21.2+ must NOT carry the legacy 1.20-era flat ``generator-settings``
+    # {"biome","layers"} JSON: the new world-preset codec wants ``dimensions`` +
+    # ``seed`` keys, so the legacy shape decodes to MapLike[{}] and the room dies at
+    # boot with "Failed to load datapacks" / "No key dimensions in MapLike[{}]" --
+    # an infinite crash-restart loop (8,232 restarts observed) that takes the whole
+    # join flow down. level-type=minecraft:flat alone is correct.
+    assert "generator-settings" not in props
     assert "server-port=25565" in props
     assert "online-mode=true" in props
     # Secure-profile enforcement hides/restricts server chat + links (the client

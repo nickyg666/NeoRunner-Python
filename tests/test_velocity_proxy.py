@@ -132,8 +132,8 @@ def test_dispatcher_selects_velocity_when_configured(monkeypatch, tmp_path):
 
 
 def test_velocity_properties_follow_loader_policy(mgr, monkeypatch, tmp_path):
-    """auto policy: Fabric/Quilt packs route unmarked clients to the pack
-    server; Forge-family packs keep them in the lobby."""
+    """auto policy: protocol-matching clients go to the modded backend for
+    EVERY loader (marker-independent); explicit lobby is honored."""
     from neorunner_pkg import velocity_proxy as vp
 
     run_dir = tmp_path / ".cache" / "velocity" / "run"
@@ -147,6 +147,11 @@ def test_velocity_properties_follow_loader_policy(mgr, monkeypatch, tmp_path):
     assert props.startswith("modded=modded")
 
     mgr.cfg.loader = "neoforge"
+    mgr.ensure_plugin()
+    props = (run_dir / "plugins" / "neorunner-router.properties").read_text()
+    assert "unmarkedTarget=modded" in props
+
+    mgr.cfg.unmarked_client_target = "lobby"
     mgr.ensure_plugin()
     props = (run_dir / "plugins" / "neorunner-router.properties").read_text()
     assert "unmarkedTarget=lobby" in props

@@ -110,8 +110,17 @@ def test_route_wrong_version_modloader_gets_kicked():
     assert verdict == VERDICT_KICK
 
 
-def test_route_matching_vanilla_goes_to_room():
-    verdict, _ = route_login(_hs(777), modded_proto=9999, room_proto=777)
+def test_route_matching_vanilla_goes_to_modded_by_default():
+    # Marker-independent: modern NeoForge clients don't reliably send the FML
+    # marker, so a protocol match alone routes to the modded backend. The
+    # backend kicks true-vanilla clients with the patched kick-with-link.
+    verdict, _ = route_login(_hs(777), modded_proto=777, room_proto=777)
+    assert verdict == VERDICT_MODDED
+
+
+def test_route_matching_unmarked_goes_to_room_only_with_lobby_policy():
+    verdict, _ = route_login(_hs(777), modded_proto=777, room_proto=777,
+                             unmarked_target=VERDICT_ROOM)
     assert verdict == VERDICT_ROOM
 
 
@@ -120,21 +129,12 @@ def test_route_wrong_version_vanilla_gets_kicked():
     assert verdict == VERDICT_KICK
 
 
-def test_route_unknown_loader_without_marker_treated_as_vanilla():
-    # Fabric sends no marker: if its protocol happens to match the room it can
-    # at least reach the lobby.
-    verdict, _ = route_login(_hs(777), modded_proto=9999, room_proto=777)
-    assert verdict == VERDICT_ROOM
-
-
-# ---------------------------------------------------------------------------
-# loader-aware unmarked-client policy (Fabric packs route to the pack server)
-# ---------------------------------------------------------------------------
-
-def test_route_fabric_policy_sends_matching_unmarked_to_modded():
-    verdict, _ = route_login(_hs(775), modded_proto=775, room_proto=775,
-                             unmarked_target=VERDICT_MODDED)
+def test_route_markerless_matching_proto_is_the_neoforge_path():
+    # The exact case that was broken: real NeoForge client, no marker,
+    # correct protocol -> must reach the modded backend.
+    verdict, why = route_login(_hs(775), modded_proto=775, room_proto=775)
     assert verdict == VERDICT_MODDED
+    assert "matches modded" in why
 
 
 def test_route_fabric_policy_wrong_version_still_kicked():
@@ -143,23 +143,18 @@ def test_route_fabric_policy_wrong_version_still_kicked():
     assert verdict == VERDICT_KICK
 
 
-def test_route_forge_family_policy_keeps_unmarked_in_lobby():
-    verdict, _ = route_login(_hs(775), modded_proto=775, room_proto=775,
-                             unmarked_target=VERDICT_ROOM)
-    assert verdict == VERDICT_ROOM
+def test_proxy_auto_policy_targets_modded_for_every_loader():
+    for loader in ("neoforge", "forge", "fabric"):
+        cfg = ServerConfig(hostname="w8.mom", mc_port=25565,
+                           backend_modded_port=25570, holding_cell_port=1234,
+                           loader=loader)
+        assert ConnectionProxy(cfg)._unmarked_target() == "modded", loader
 
 
-def test_proxy_auto_policy_fabric_loader_targets_modded():
+def test_proxy_explicit_lobby_policy_respected():
     cfg = ServerConfig(hostname="w8.mom", mc_port=25565,
                        backend_modded_port=25570, holding_cell_port=1234,
-                       loader="fabric")
-    assert ConnectionProxy(cfg)._unmarked_target() == "modded"
-
-
-def test_proxy_auto_policy_neoforge_targets_lobby():
-    cfg = ServerConfig(hostname="w8.mom", mc_port=25565,
-                       backend_modded_port=25570, holding_cell_port=1234,
-                       loader="neoforge")
+                       loader="neoforge", unmarked_client_target="lobby")
     assert ConnectionProxy(cfg)._unmarked_target() == "room"
 
 
@@ -303,13 +298,27 @@ def test_integration_modded_client_routed_to_modded_backend(proxy_stack):
     assert proxy_stack["room"].received == []
 
 
-def test_integration_vanilla_client_routed_to_room_backend(proxy_stack):
+def test_integration_vanilla_client_routed_to_room_with_lobby_policy(proxy_stack):
+    # Explicit lobby policy: matching-proto vanilla client -> room.
+    proxy_stack["proxy"].cfg.unmarked_client_target = "lobby"
     pkt = _hs_packet(777)
     with socket.create_connection(("127.0.0.1", proxy_stack["listen"]), timeout=5) as s:
         s.sendall(pkt)
         got = _recv_all(s, want=b"BACKEND-REPLY")
     assert b"BACKEND-REPLY" in got
     assert proxy_stack["modded"].received == []
+
+
+def test_integration_markerless_matching_client_reaches_modded(proxy_stack):
+    # THE regression case: a real NeoForge client sends no FML marker but a
+    # matching protocol. Default policy must send it to the modded backend.
+    pkt = _hs_packet(9999)  # matches seeded modded proto, no marker
+    with socket.create_connection(("127.0.0.1", proxy_stack["listen"]), timeout=5) as s:
+        s.sendall(pkt + b"MODLOGIN")
+        got = _recv_all(s, want=b"BACKEND-REPLY")
+    assert b"BACKEND-REPLY" in got
+    assert b"MODLOGIN" in b"".join(proxy_stack["modded"].received)
+    assert proxy_stack["room"].received == []
 
 
 def test_integration_wrong_version_gets_clickable_kick(proxy_stack):

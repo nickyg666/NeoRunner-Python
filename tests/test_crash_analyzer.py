@@ -6,7 +6,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from neorunner.crash_analyzer import CrashAnalyzer, CrashAnalysis
+from neorunner_pkg.crash_analyzer import CrashAnalyzer, CrashAnalysis
 
 
 class TestCrashAnalyzer:

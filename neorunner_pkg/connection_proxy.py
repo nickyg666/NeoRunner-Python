@@ -10,10 +10,10 @@ Client                                    Routed to
 ========================================  ==============================
 Forge/NeoForge marker + matching proto    modded server (loopback)
 Vanilla-compatible, matching room proto   vanilla waiting room (loopback)
-Anything else                             synthetic kick w/ clickable
+Anything else                             holding cell w/ clickable
                                           download link (both old camelCase
                                           and new snake_case click-event
-                                          schemas included)
+                                          schemas included) + 60-sec timeout
 ========================================  ==============================
 
 Both real servers bind loopback ONLY (``server-ip=127.0.0.1``), so the proxy is
@@ -170,48 +170,55 @@ VERDICT_KICK = "kick"
 
 
 def route_login(hs: Handshake, modded_proto: int | None, room_proto: int | None,
-                unmarked_target: str = VERDICT_ROOM) -> tuple[str, str]:
+                unmarked_target: str = VERDICT_MODDED) -> tuple[str, str]:
     """Decide where a LOGIN handshake goes: ``(verdict, human_reason)``.
 
-    - Forge/NeoForge client speaking the modded server's protocol -> modded.
-    - Unmarked clients (vanilla / Fabric / Quilt -- indistinguishable at the
-      handshake layer): routed per ``unmarked_target``:
-        * VERDICT_ROOM  -> lobby if the protocol matches the room
-        * VERDICT_MODDED -> straight to the modded server when the protocol
-          matches it (Fabric packs usually want this; the server itself kicks
-          truly-vanilla clients with a patched, link-carrying message)
-    - Everything else -> clickable kick (wrong version / wrong loader / junk).
+    Marker-INDEPENDENT by design: modern NeoForge clients no longer reliably
+    append the ``\\0FML*`` marker to the handshake address, so the protocol
+    number is the trustworthy signal.
+
+    - Client speaking the modded server's protocol -> MODDED backend. The
+      backend itself accepts NeoForge clients and kicks truly-vanilla ones
+      with the (jar-patched, link-carrying) "requires NeoForge" message, so
+      onboarding still ends in a clickable download link.
+    - ``unmarked_target == VERDICT_ROOM`` (explicit lobby opt-in): matching-
+      protocol clients with no marker go to the waiting room instead.
+    - Anything else -> clickable kick (wrong version / unknown / junk).
     """
-    if hs.has_fml_marker:
-        if modded_proto is not None and hs.protocol == modded_proto:
+    if unmarked_target == VERDICT_ROOM:
+        # Explicit lobby mode: modloader clients still go to the pack server;
+        # markerless clients go to the room when their protocol matches it.
+        if hs.has_fml_marker and modded_proto is not None and hs.protocol == modded_proto:
             return VERDICT_MODDED, f"modloader client, protocol {hs.protocol} matches modded"
-        return VERDICT_KICK, (
-            f"modloader client but protocol {hs.protocol} != modded {modded_proto}"
-        )
-    if unmarked_target == VERDICT_MODDED:
-        if modded_proto is not None and hs.protocol == modded_proto:
-            return VERDICT_MODDED, f"unmarked client, protocol {hs.protocol} matches modded"
-        return VERDICT_KICK, f"unknown client, protocol {hs.protocol} != modded {modded_proto}"
-    if room_proto is not None and hs.protocol == room_proto:
-        return VERDICT_ROOM, f"vanilla-compatible client, protocol {hs.protocol}"
+        if room_proto is not None and hs.protocol == room_proto:
+            return VERDICT_ROOM, f"vanilla-compatible client, protocol {hs.protocol}"
+        return VERDICT_KICK, f"unknown client, protocol {hs.protocol}"
+    if modded_proto is not None and hs.protocol == modded_proto:
+        return VERDICT_MODDED, f"client, protocol {hs.protocol} matches modded"
     return VERDICT_KICK, f"unknown client, protocol {hs.protocol}"
 
 
 def build_kick_json(reason: str, link: str) -> str:
     """Disconnect-screen component with a REAL clickable download link.
 
-    Carries BOTH click-event schemas so the link is clickable on current
-    (snake_case ``click_event``) and older (camelCase ``clickEvent``) clients;
-    the URL is also plain visible text so even a non-clickable render shows it.
+    Minecraft JSON chat requires ``action: "open_url"`` with ``value: <url>``.
+    The ``url`` field is IGNORED by the vanilla client. SecurityCraft uses
+    ``value`` and it works. Also carry ``click_event`` snake_case for older clients.
     """
     return json.dumps({
         "text": reason + "\n",
         "color": "gold",
         "extra": [
             {"text": link, "color": "aqua", "underlined": True,
-             "click_event": {"action": "open_url", "url": link},
-             "clickEvent": {"action": "open_url", "value": link}},
-            {"text": "\n(click the link or paste it in your browser)", "color": "gray"},
+             # camelCase for 1.19.3+; snake_case for older Forge clients
+             "clickEvent": {"action": "open_url", "value": link},
+             "click_event": {"action": "open_url", "value": link},
+             "hoverEvent": {"action": "show_text", "contents": {"text": f"Open {link}"}}},
+            {"text": "\n", "color": "gold"},
+            {"text": "[Download Mods]", "color": "yellow", "bold": True,
+             "clickEvent": {"action": "open_url", "value": link},
+             "click_event": {"action": "open_url", "value": link},
+             "hoverEvent": {"action": "show_text", "contents": {"text": f"Download mods from {link}"}}},
         ],
     })
 
@@ -254,26 +261,28 @@ class ConnectionProxy:
         return int(self.cfg.holding_cell_port or 25565)
 
     def _download_link(self) -> str:
-        from .mod_hosting import public_download_base
-        return public_download_base(self.cfg)
+        from .mod_hosting import public_download_link
+        return public_download_link(self.cfg)
 
     def _loader_name(self) -> str:
         return {"neoforge": "NeoForge", "forge": "Forge",
                 "fabric": "Fabric"}.get(str(self.cfg.loader or "").lower(), "modded")
 
     def _unmarked_target(self) -> str:
-        """Where unmarked (vanilla/Fabric/Quilt) clients go.
+        """Where protocol-matching clients without an FML marker go.
 
-        ``auto`` policy: Forge-family packs bounce unmarked clients to the
-        lobby; Fabric/Quilt packs usually accept plain vanilla clients (or the
-        server kicks them with a patched, link-carrying message), so those go
-        straight to the modded backend.
+        Default (``auto``): the modded backend, for EVERY loader. Modern
+        NeoForge clients can't be trusted to append the marker, so the protocol
+        match is the real signal -- the modded server accepts its own clients
+        and kicks truly-vanilla ones with a patched, link-carrying message.
+        Set ``unmarked_client_target=lobby`` explicitly to keep the vanilla
+        waiting room as the fallback for unmarked clients instead.
         """
         pref = str(getattr(self.cfg, "unmarked_client_target", "auto") or "auto").lower()
+        if pref == "lobby":
+            pref = VERDICT_ROOM  # "lobby" and "room" are the same target
         if pref in (VERDICT_ROOM, VERDICT_MODDED):
             return pref
-        if str(self.cfg.loader or "").lower() in ("neoforge", "forge"):
-            return VERDICT_ROOM
         return VERDICT_MODDED
 
     # -- lifecycle ----------------------------------------------------------
@@ -467,12 +476,10 @@ class ConnectionProxy:
                 return
 
             kind = "status" if hs.next_state == 1 else "login"
-            unmarked = self._unmarked_target()
             if kind == "status":
-                if hs.has_fml_marker:
-                    target = self.modded_port
-                else:
-                    target = self.modded_port if unmarked == VERDICT_MODDED else self.room_port
+                # Status pings keep marker-based MOTD selection: modded clients
+                # see the modded MOTD, vanilla see the lobby MOTD.
+                target = self.modded_port if hs.has_fml_marker else self.room_port
                 self._record("status",
                              f"{peer}: proto={hs.protocol} modloader={hs.has_fml_marker} "
                              f"-> status via :{target}")
@@ -480,6 +487,7 @@ class ConnectionProxy:
                                   first_frame + rest)
                 return
 
+            unmarked = self._unmarked_target()
             verdict, why = route_login(hs, self.protocols.get("modded"),
                                        self.protocols.get("room"), unmarked)
             detail = (f"{peer}: addr={hs.address.split(chr(0))[0]!r} proto={hs.protocol} "

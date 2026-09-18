@@ -281,6 +281,10 @@ class SecureHTTPHandler(SimpleHTTPRequestHandler):
             return
         SecureHTTPHandler.last_request_time = current_time
         
+        # Handle /dl/ aliases (short link path used in kick messages)
+        if self.path.startswith("/dl/") or self.path == "/dl":
+            # Redirect to the /download path
+            self.path = self.path.replace("/dl", "/download", 1)
         # Handle /download/mods/{filename} for individual mod downloads
         if self.path.startswith("/download/mods/"):
             self._handle_mod_download(cfg)
@@ -731,12 +735,13 @@ def _loader_installer_path(cfg: ServerConfig) -> Path | None:
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     if loader == "neoforge":
-        # Resolve the installed NeoForge version (matching mc_version).
-        lib = CWD / "libraries" / "net" / "neoforged" / "neoforge"
-        versions = sorted((d.name for d in lib.iterdir() if d.is_dir()), reverse=True) if lib.exists() else []
-        if not versions:
+        # Use atomic config snapshot — never infer from filesystem.
+        # cfg.loader_version is the single source of truth.
+        ver = getattr(cfg, "loader_version", None)
+        if not ver:
+            log_event("LOADER_INSTALLER",
+                      "cfg.loader_version is not set; cannot resolve NeoForge installer")
             return None
-        ver = versions[0]
         jar_name = f"neoforge-{ver}-installer.jar"
         cached = cache_dir / jar_name
         if cached.exists() and cached.stat().st_size > 10_000:

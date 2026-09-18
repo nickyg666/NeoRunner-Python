@@ -126,12 +126,13 @@ class VelocityManager:
         plugins_dir.mkdir(exist_ok=True)
         if PLUGINS_SRC.exists():
             shutil.copy2(PLUGINS_SRC, plugins_dir / PLUGIN_JAR_NAME)
-        # Router policy: resolve the same auto rule the Python entrance uses.
+        # Router policy: modern NeoForge clients don't reliably send the FML
+        # marker, so protocol-matching clients default to the modded backend
+        # (vanilla clients get the backend's patched kick-with-link). Explicit
+        # "lobby" restores the waiting-room fallback for unmarked clients.
         pref = str(getattr(self.cfg, "unmarked_client_target", "auto") or "auto").lower()
         if pref in ("modded", "lobby"):
             target = pref
-        elif str(self.cfg.loader or "").lower() in ("neoforge", "forge"):
-            target = "lobby"
         else:
             target = "modded"
         props = (

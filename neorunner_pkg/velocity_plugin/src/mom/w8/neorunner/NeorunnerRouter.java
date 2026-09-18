@@ -42,11 +42,11 @@ public final class NeorunnerRouter {
     private final Logger logger = LoggerFactory.getLogger(NeorunnerRouter.class);
     private volatile String moddedName = "modded";
     private volatile String lobbyName = "lobby";
-    // Where UNMARKED clients go when their protocol does NOT match the lobby:
-    // "modded" lets Fabric/Quilt packs accept plain-vanilla-capable clients
-    // directly (the server kicks truly incompatible ones with its own message);
-    // "lobby" is the Forge-family default where vanilla users belong.
-    private volatile String unmarkedFallback = "lobby";
+    // Where UNMARKED clients go. Modern NeoForge clients don't reliably send
+    // the FML marker, so the default is the modded backend: it accepts its own
+    // clients and kicks truly-vanilla ones with a patched, link-carrying
+    // message. "lobby" explicitly restores the waiting-room fallback.
+    private volatile String unmarkedFallback = "modded";
 
     @Inject
     public NeorunnerRouter(ProxyServer proxy) {

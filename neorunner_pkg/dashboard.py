@@ -708,6 +708,7 @@ def api_config_update():
             "mc_port",
             "mc_version",
             "loader",
+            "loader_version",
             "mods_dir",
             "clientonly_dir",
             "quarantine_dir",

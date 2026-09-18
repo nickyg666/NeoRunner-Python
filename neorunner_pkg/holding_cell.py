@@ -129,12 +129,17 @@ def room_properties(cfg: ServerConfig) -> str:
         val("max-players", str(cfg.holding_cell_max_players)),
         val("motd", getattr(cfg, "holding_cell_description", "") or "NeoRunner Download Lobby - get the modpack link in chat!"),
         val("level-name", "holding_cell_world"),
+        # ``level-type=minecraft:flat`` alone is correct for 1.21.2+.
+        # DO NOT re-add the 1.20-era ``generator-settings`` {"biome","layers"} JSON:
+        # 1.21.2's world-preset codec requires ``dimensions`` + ``seed`` keys, so the
+        # legacy shape decodes to MapLike[{}] and the server dies at boot with
+        #   "Failed to load datapacks, can't proceed with server load"
+        #   java.lang.IllegalStateException: No key dimensions in MapLike[{}]; No key seed in MapLike[{}]
+        # which crash-loops the room (8,232 restarts / cell.log) and takes the whole
+        # join flow down with it. Verified fix 2026-09-18: boot reaches
+        # "Done (10.672s)!" with the setting absent. Poisons the saved level.dat too,
+        # so a room that already booted with it must have its world regenerated.
         val("level-type", "minecraft:flat"),
-        val("generator-settings",
-            '{"biome":"minecraft:plains","layers":['
-            '{"block":"minecraft:bedrock","height":1},'
-            '{"block":"minecraft:dirt","height":2},'
-            '{"block":"minecraft:grass_block","height":1}]}'),
         val("generate-structures", "false"),
         val("spawn-protection", "0"),
         val("view-distance", "6"),
@@ -285,7 +290,16 @@ def _room_lectern_commands(cfg: ServerConfig, inner_bottom: int, inner_top: int)
             if i < len(segments) - 1:
                 parts.append({"text": "\n\n"})
         raw = json.dumps(parts, ensure_ascii=False, separators=(",", ":"))
-        return '"' + raw.replace('"', '\\"') + '"'
+        # The JSON goes inside a QUOTED SNBT string (``pages:["..."]``), so the
+        # quotes must be escaped -- and so must the BACKSLASHES, first. Brigadier's
+        # string reader accepts only ``\"`` and ``\\``; a bare ``\n`` (which
+        # json.dumps emits for every newline in the page text) is rejected and takes
+        # the whole ``setblock`` down with it:
+        #   "Invalid escape sequence '\n' in quoted string"
+        # which is why the lectern (and the clickable download-link book on it) was
+        # never placed in the room. Verified 2026-09-18: with the backslash pass the
+        # same command answers "Changed the block at 0, 5, 0".
+        return '"' + raw.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
     pages_arg = ",".join([
         page(

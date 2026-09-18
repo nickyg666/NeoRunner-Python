@@ -234,11 +234,20 @@ class TestNeoForgeCrashDetection:
         )
         assert loader._get_neoforge_version() == "21.1.140"
 
-    def test_build_java_command_with_run_sh(self, tmp_path):
+    def test_build_java_command_with_run_sh(self, tmp_path, monkeypatch):
         """run.sh exists -> command uses it."""
         loader = _make_loader()
+        # Mock the version to return a known version
+        monkeypatch.setattr(loader, "_get_neoforge_version", lambda: "21.1.140")
         loader.cwd = tmp_path
-        (tmp_path / "run.sh").write_text("#!/bin/bash\njava @user_jvm_args.txt @loader_args.txt nogui\n")
+        # Create the run.sh with the expected string
+        run_sh = tmp_path / "run.sh"
+        run_sh.write_text(f"#!/bin/bash\\n# neoforge/21.1.140/unix_args.txt\\njava @user_jvm_args.txt @loader_args.txt nogui\\n")
+        # Create the expected unix_args.txt file
+        unix_args_dir = tmp_path / "libraries" / "net" / "neoforged" / "neoforge" / "21.1.140"
+        unix_args_dir.mkdir(parents=True)
+        (unix_args_dir / "unix_args.txt").write_text("")
+        # Now build the command
         cmd = loader.build_java_command()
         assert cmd == ["./run.sh", "nogui"]
 

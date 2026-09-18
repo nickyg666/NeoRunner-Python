@@ -248,7 +248,21 @@ class NeoForgeLoader(LoaderBase):
                 log_event("LOADER_NEOFORGE", f"Could not write run.sh: {e}")
     
     def _get_neoforge_version(self) -> str:
-        """Get NeoForge version - prefer local libraries, fallback to dynamic fetch."""
+        """Get NeoForge version - prefer pinned config, then local libraries, then dynamic fetch."""
+        # 1. Pinned loader_version from config (atomic, web UI settable)
+        pinned = _get_cfg_value(self.cfg, "loader_version", None)
+        if pinned:
+            # Normalise: strip any "-universal" suffix, keep just the version
+            pinned = str(pinned).strip()
+            if "-" in pinned:
+                pinned = pinned.split("-")[0]
+            # Verify the jar actually exists locally
+            lib_path = self.cwd / "libraries" / "net" / "neoforged" / "neoforge" if isinstance(self.cwd, Path) else os.path.join(self.cwd, "libraries/net/neoforged/neoforge")
+            jar_path = os.path.join(lib_path, pinned, f"neoforge-{pinned}-universal.jar")
+            if os.path.exists(jar_path):
+                return pinned
+            # Pinned version not on disk -- fall through to auto-detect
+
         lib_path = self.cwd / "libraries" / "net" / "neoforged" / "neoforge" if isinstance(self.cwd, Path) else os.path.join(self.cwd, "libraries/net/neoforged/neoforge")
         mc_ver = self.mc_version if hasattr(self, 'mc_version') else ""
         # Map MC version -> NeoForge prefix (1.21.x -> 21.x, 26.x -> 26.x)

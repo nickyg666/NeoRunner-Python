@@ -32,6 +32,7 @@ class ServerConfig:
     quarantine_dir: str = "quarantine"
     mc_version: str = field(default_factory=_get_default_version)
     loader: str = "neoforge"
+    loader_version: str | None = None  # Specific loader version to pin (e.g., "26.1.2" for NeoForge)
     max_download_mb: int = 600
     rate_limit_seconds: int = 2
     run_curator_on_startup: bool = True
@@ -51,7 +52,7 @@ class ServerConfig:
     proxy_enabled: bool = True  # Single public MC port with handshake-routing entrance (connection_proxy.py)
     entrance_backend: str = "python"  # Which entrance owns the public port: python|velocity
     backend_modded_port: int = 25570  # Loopback-only port of the real modded server behind the proxy
-    unmarked_client_target: str = "auto"  # Where non-Forge-marker clients go: auto|room|modded (fabric packs want modded)
+    unmarked_client_target: str = "auto"  # Where markerless protocol-matching clients go: auto|modded|room|lobby (auto=modded)
     proxy_rate_limit_per_min: int = 30  # Login attempts per IP per minute through the entrance proxy
     proxy_max_connections: int = 64  # Global concurrent connections through the entrance proxy
     broadcast_enabled: bool = True

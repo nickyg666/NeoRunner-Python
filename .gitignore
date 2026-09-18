@@ -58,3 +58,7 @@ banned-players.json
 ops.json
 usercache.json
 whitelist.json
+
+# Runtime artifacts (regenerable; do not track)
+.preflight_cache
+server.out

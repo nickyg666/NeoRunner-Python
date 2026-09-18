@@ -60,22 +60,9 @@ def build_installer_properties(cfg: ServerConfig, base_url: str | None = None, h
         from .mod_hosting import game_join_address
         server_address = game_join_address(cfg)
 
-    loader_version = ""
-    try:
-        if cfg.loader == "neoforge":
-            lib = CWD / "libraries" / "net" / "neoforged" / "neoforge"
-            if lib.exists():
-                versions = [d.name for d in lib.iterdir() if d.is_dir()]
-                if versions:
-                    loader_version = max(versions)
-        elif cfg.loader == "fabric":
-            lib = CWD / ".fabric" / "loader"
-            if lib.exists():
-                versions = [d.name for d in lib.iterdir() if d.is_dir()]
-                if versions:
-                    loader_version = max(versions)
-    except Exception:
-        pass
+    # Use atomic config snapshot — never infer from filesystem.
+    # cfg.loader_version is the single source of truth (set in web UI / config.json).
+    loader_version = getattr(cfg, "loader_version", None) or ""
 
     return "\n".join([
         f"baseUrl={base_url}",
